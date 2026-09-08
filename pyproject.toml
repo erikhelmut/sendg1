@@ -1,0 +1,44 @@
+[project]
+name = "sendg1"
+version = "0.1.0"
+description = "Do foot tactile sensors measurably improve Unitree G1 locomotion policies?"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  # Pinned EXACTLY. mjlab ships breaking changes between minor releases, and this
+  # study compares runs made months apart. Upgrading is a deliberate, versioned act
+  # that invalidates prior results: see docs in src/sendg1/_pin.py.
+  "mjlab==1.6.0",
+  # Pinned transitively by mjlab today, pinned again here so an mjlab bump cannot
+  # silently swap the PPO implementation underneath a running study.
+  "rsl-rl-lib==5.4.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+# Makes mjlab's own `train` / `play` / `list-envs` CLIs discover our tasks.
+# mjlab/__init__.py::_import_registered_packages loads this group at import time.
+[project.entry-points."mjlab.tasks"]
+sendg1 = "sendg1.tasks"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sendg1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# This machine has ROS 2 Jazzy on PYTHONPATH (/opt/ros/jazzy/.../python3.12),
+# whose pytest plugins get autoloaded into this Python 3.11 env and crash on
+# import. Disabling them by name keeps a bare `pytest` working. The root-cause
+# fix is `unset PYTHONPATH` before activating the env -- see scripts/test.sh.
+addopts = """
+  -p no:launch_ros -p no:launch_testing
+  -p no:ament_pep257 -p no:ament_lint -p no:ament_copyright
+  -p no:ament_xmllint -p no:ament_flake8
+"""
+
+[tool.ruff]
+line-length = 90
