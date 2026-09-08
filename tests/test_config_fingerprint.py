@@ -22,10 +22,10 @@ from sendg1.tasks._register import variants
 # Regenerate with: python scripts/show_fingerprints.py
 EXPECTED: dict[str, tuple[str, str]] = {
   # task_id: (env_fingerprint, rl_fingerprint)
-  "Sendg1-Velocity-Flat-G1-Blind": ("2d815075ab1442b5", "4eca2b5efbd3cacf"),
-  "Sendg1-Velocity-Flat-G1-ContactOracle": ("f7e44f4a2d60f5f1", "ef6cb7888e840c6e"),
-  "Sendg1-Velocity-Rough-G1-Blind": ("f303e4e45141fa68", "f9c4880fbb9131ba"),
-  "Sendg1-Velocity-Rough-G1-ContactOracle": ("428f63331a37ee0b", "bbe10c74e54dce3c"),
+  "Sendg1-Velocity-Flat-G1-Blind": ("4b16b31d3100856e", "4eca2b5efbd3cacf"),
+  "Sendg1-Velocity-Flat-G1-ContactOracle": ("793b9160cd3a52eb", "ef6cb7888e840c6e"),
+  "Sendg1-Velocity-Rough-G1-Blind": ("28cd0f839686f3be", "f9c4880fbb9131ba"),
+  "Sendg1-Velocity-Rough-G1-ContactOracle": ("6f6c6ccade734bbf", "bbe10c74e54dce3c"),
 }
 
 

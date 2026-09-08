@@ -3,15 +3,17 @@
 
     python scripts/tune_num_envs.py --task Sendg1-Velocity-Rough-G1-Blind
 
-Comparisons are baseline-vs-tactile *within* a task, and num_envs is fixed per
-task, so both conditions see the same command curriculum -- which is why a
-per-task value is safe even though mjlab's command curriculum keys off a global
-step counter rather than steps-per-env.
+mjlab's command curriculum advances on common_step_counter, which increments
+once per env.step() regardless of batch size, so its stages land at fixed
+iteration counts and do not shift with num_envs. Varying num_envs per task is
+therefore safe; it changes how much data the policy has seen by each stage, not
+when the stages fire.
 """
 
 from __future__ import annotations
 
 import argparse
+import time
 
 
 def main() -> None:
@@ -29,28 +31,50 @@ def main() -> None:
   args = ap.parse_args()
 
   best = None
+  results: list[tuple[int, float, float]] = []
   for n in sorted(args.candidates):
-    torch.cuda.empty_cache()
     try:
       cfg = load_env_cfg(args.task)
       cfg.scene.num_envs = n
       env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
       env.reset()
+      act = torch.zeros(n, env.action_manager.total_action_dim, device="cuda:0")
+      for _ in range(5):  # warm up kernels before timing
+        env.step(act)
+      torch.cuda.synchronize()
+      t0 = time.perf_counter()
       for _ in range(args.steps):
-        env.step(torch.zeros(n, env.action_manager.total_action_dim, device="cuda:0"))
-      peak = torch.cuda.max_memory_allocated() / 2**30
-      print(f"  num_envs={n:6d}  OK   peak={peak:.2f} GiB")
+        env.step(act)
+      torch.cuda.synchronize()
+      dt = time.perf_counter() - t0
+
+      # Whole-device usage. torch.cuda.max_memory_allocated only sees torch's
+      # caching allocator, and MuJoCo-Warp allocates outside it -- it reports
+      # ~0.1 GiB for a scene actually using several, which is useless here.
+      free, total = torch.cuda.mem_get_info()
+      used_gib = (total - free) / 2**30
+      sps = n * args.steps / dt
+
+      print(f"  num_envs={n:6d}  OK   device_mem={used_gib:5.2f} GiB  "
+            f"{sps:9,.0f} steps/s")
+      results.append((n, used_gib, sps))
       best = n
       env.close()
-      del env
-      torch.cuda.reset_peak_memory_stats()
+      del env, act
+      torch.cuda.empty_cache()
     except Exception as exc:  # noqa: BLE001
       print(f"  num_envs={n:6d}  FAILED  {type(exc).__name__}: {str(exc)[:120]}")
       break
 
-  print(f"\nlargest working num_envs for {args.task}: {best}")
-  print("Set it in DEFAULT_NUM_ENVS (src/sendg1/tasks/velocity/env_cfg.py) or pass "
-        "--env.scene.num-envs at train time.")
+  if results:
+    fastest = max(results, key=lambda r: r[2])
+    print(f"\nlargest that fits: {best}")
+    print(f"fastest:           {fastest[0]} at {fastest[2]:,.0f} steps/s "
+          f"({fastest[1]:.2f} GiB)")
+    print("More envs is not automatically better: throughput saturates once the "
+          "GPU is busy, while larger batches change PPO's effective batch size.")
+    print("Set DEFAULT_NUM_ENVS in src/sendg1/tasks/velocity/env_cfg.py, or pass "
+          "--env.scene.num-envs at train time.")
 
 
 if __name__ == "__main__":

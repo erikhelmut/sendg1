@@ -164,6 +164,8 @@ this 3.11 env. It injects 7 pytest plugins that crash on import.
   so the path is a per-geom `ContactSensorCfg` over the 7 collision capsules per
   foot (`G1_FOOT_GEOMS`).
 - Seeds: 1 for now (directional only). 5 before any reported claim.
-- `num_envs`: per-task, tune with `scripts/tune_num_envs.py`. Safe to vary across
-  tasks — comparisons are within-task, so both conditions see the same command
-  curriculum despite it keying off a global step counter.
+- `num_envs`: per-task, tune with `scripts/tune_num_envs.py`. On a 12 GB 5070,
+  throughput saturates around 8192 (~220k steps/s); larger fits but buys nothing.
+  Safe to vary across tasks: the command curriculum advances on a counter that
+  ticks once per `env.step()` regardless of batch size, so its stages land at
+  fixed iteration counts either way.

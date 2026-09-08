@@ -53,12 +53,18 @@ from sendg1.common.sensors import (
 Terrain = Literal["flat", "rough"]
 
 DEFAULT_NUM_ENVS: dict[Terrain, int] = {
-  # Starting points, not sacred. Pick the largest that fits per task; see
-  # scripts/tune_num_envs.py. Comparisons are baseline-vs-tactile *within* a
-  # task, so a per-task value is safe even though the command curriculum keys
-  # off a global step counter.
-  "flat": 4096,
-  "rough": 2048,
+  # Measured on an RTX 5070 (12 GB) with scripts/tune_num_envs.py. Throughput
+  # saturates at ~220k steps/s from 8192 upward -- 32768 fits but is no faster,
+  # costs 8.1 of 12 GiB, and quadruples the PPO minibatch. 8192 gives the same
+  # speed at 2.4 GiB, which also makes a long unattended run robust.
+  #
+  # Safe to differ per task: the command curriculum advances on
+  # common_step_counter, which increments once per env.step() regardless of how
+  # many envs are batched, so stages land at fixed ITERATION counts. num_envs
+  # changes how much data the policy has seen by each stage, not when stages
+  # fire -- and comparisons are baseline-vs-tactile within a single task anyway.
+  "flat": 8192,
+  "rough": 4096,
 }
 
 
