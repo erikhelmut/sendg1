@@ -1,0 +1,144 @@
+{
+  "task": "Sendg1-Velocity-Rough-G1-Blind",
+  "seed": 0,
+  "checkpoint": "runs/velocity_rough__blind/2026-09-09_13-46-53_seed0/model_29999.pt",
+  "protocol": {
+    "version": "v1",
+    "num_envs": 512,
+    "episode_length_s": 20.0,
+    "num_episodes": 4,
+    "seed": 12345,
+    "command_grid": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.5,
+        0.0,
+        0.0
+      ],
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        -0.5,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.5,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.5
+      ],
+      [
+        0.5,
+        0.0,
+        0.5
+      ],
+      [
+        1.0,
+        0.5,
+        -0.5
+      ]
+    ],
+    "keep_corruption": true,
+    "keep_pushes": true,
+    "terrain_seed": 7777,
+    "uniform_terrain_weights": true
+  },
+  "mjlab_version": "1.6.0",
+  "mjlab_commit": "0fb8a681136be94ffc636a3dd423cabb97d91f10",
+  "metrics": {
+    "lin_vel_error": 0.5678929634243249,
+    "ang_vel_error": 0.22416369814425707,
+    "fall_rate": 0.07049734427812651,
+    "episode_length_s": 19.370777384230966,
+    "n_steps": 2048000.0,
+    "n_episodes": 2071.0,
+    "strayed_frac": 0.0
+  },
+  "raw": {
+    "lin_vel_error_sum": 1163044.7890930176,
+    "ang_vel_error_sum": 459087.2537994385,
+    "step_count": 2048000,
+    "falls": 146,
+    "episodes": 2071,
+    "episode_length_sum_s": 40116.87996274233,
+    "per_command": {}
+  },
+  "per_terrain": {
+    "flat": {
+      "role": "control",
+      "lin_vel_error": 0.5567358163148165,
+      "ang_vel_error": 0.20849561470374464,
+      "fall_rate": 0.0,
+      "mean_terrain_level": 4.90625,
+      "n_episodes": 256.0
+    },
+    "random_rough": {
+      "role": "control",
+      "lin_vel_error": 0.6061236741393805,
+      "ang_vel_error": 0.27910722138732674,
+      "fall_rate": 0.058365758754863814,
+      "mean_terrain_level": 4.7587548638132295,
+      "n_episodes": 257.0
+    },
+    "tilted_grid": {
+      "role": "discriminator",
+      "lin_vel_error": 0.5705048972666263,
+      "ang_vel_error": 0.2286542730089277,
+      "fall_rate": 0.16981132075471697,
+      "mean_terrain_level": 5.1169811320754715,
+      "n_episodes": 265.0
+    },
+    "box_random_grid": {
+      "role": "discriminator",
+      "lin_vel_error": 0.5664187721014022,
+      "ang_vel_error": 0.2245860581845045,
+      "fall_rate": 0.17624521072796934,
+      "mean_terrain_level": 4.639846743295019,
+      "n_episodes": 261.0
+    },
+    "random_stairs": {
+      "role": "discriminator",
+      "lin_vel_error": 0.5609859878048301,
+      "ang_vel_error": 0.21189924604073168,
+      "fall_rate": 0.0,
+      "mean_terrain_level": 4.546875,
+      "n_episodes": 256.0
+    },
+    "pyramid_stairs": {
+      "role": "discriminator",
+      "lin_vel_error": 0.558772843979299,
+      "ang_vel_error": 0.21278983947634697,
+      "fall_rate": 0.027237354085603113,
+      "mean_terrain_level": 4.326848249027237,
+      "n_episodes": 257.0
+    },
+    "pyramid_stairs_inv": {
+      "role": "discriminator",
+      "lin_vel_error": 0.5605009786635637,
+      "ang_vel_error": 0.2107973907403648,
+      "fall_rate": 0.06177606177606178,
+      "mean_terrain_level": 4.231660231660232,
+      "n_episodes": 259.0
+    },
+    "random_spread_boxes": {
+      "role": "discriminator",
+      "lin_vel_error": 0.5631007339656353,
+      "ang_vel_error": 0.21697994146868588,
+      "fall_rate": 0.06538461538461539,
+      "mean_terrain_level": 4.430769230769231,
+      "n_episodes": 260.0
+    }
+  }
+}
