@@ -54,6 +54,15 @@ class EvalProtocol:
   """Keep the interval push disturbances. Recovery from perturbation is where
   contact information is most plausibly useful."""
 
+  terrain_seed: int = 7777
+  """Terrain layout seed for evaluation. Deliberately different from
+  TRAIN_TERRAIN_SEED so policies are scored on terrain instances they never saw,
+  and pinned so every condition is scored on the *same* instances."""
+
+  uniform_terrain_weights: bool = True
+  """On generated terrain, give every sub-terrain the same number of
+  environments regardless of its training spawn weight."""
+
   @property
   def total_episodes(self) -> int:
     return self.num_envs * self.num_episodes
@@ -69,6 +78,29 @@ def build_eval_env_cfg(
   cfg.scene.num_envs = protocol.num_envs
   cfg.episode_length_s = protocol.episode_length_s
   cfg.seed = protocol.seed
+
+  # On generated terrain, evaluate across the FULL difficulty range rather than
+  # the training spawn cap. max_init_terrain_level=None makes the terrain assign
+  # levels uniformly over all rows, so the score covers easy through hardest
+  # instead of whichever band training happened to reach.
+  if cfg.scene.terrain is not None and cfg.scene.terrain.terrain_type == "generator":
+    cfg.scene.terrain.max_init_terrain_level = None
+
+    # Equal statistical power per terrain, not the training spawn weights.
+    # Environments are split across columns in proportion to each sub-terrain's
+    # ``proportion``, which is right for training (spend capacity where the
+    # interesting terrain is) and wrong for measurement: at 512 envs the
+    # 0.05-weighted ``flat`` control would get ~26 envs spread over 10 difficulty
+    # rows, so the controls -- where a trustworthy null matters most -- would
+    # carry the weakest statistics. Flattening to uniform gives every column
+    # ~1/N of the envs while keeping each env pinned to one terrain type, so
+    # per-terrain attribution stays clean.
+    gen = cfg.scene.terrain.terrain_generator
+    if gen is not None:
+      gen.seed = protocol.terrain_seed
+      if protocol.uniform_terrain_weights:
+        for sub in gen.sub_terrains.values():
+          sub.proportion = 1.0
 
   # Curricula are training machinery and would make the measurement depend on
   # how long the policy trained. Freeze them out.

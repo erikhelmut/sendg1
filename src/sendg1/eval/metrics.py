@@ -25,7 +25,40 @@ LOWER_IS_BETTER = {
   "foot_slip": True,
   "touchdown_impulse": True,
   "episode_length_s": False,
+  "mean_terrain_level": False,
 }
+
+
+@dataclass
+class TerrainStats:
+  """Per-terrain-type accumulators.
+
+  Reporting one aggregate over a mixed curriculum would average the negative
+  controls (flat, random_rough) into the discriminators and hide the effect the
+  study is looking for. Terrain type index maps to a name by column order --
+  curriculum mode gives each sub-terrain exactly one column.
+  """
+
+  name: str
+  role: str
+  lin_vel_error_sum: float = 0.0
+  ang_vel_error_sum: float = 0.0
+  step_count: int = 0
+  falls: int = 0
+  episodes: int = 0
+  level_sum: float = 0.0
+  level_n: int = 0
+
+  def summary(self) -> dict[str, float]:
+    steps = max(self.step_count, 1)
+    eps = max(self.episodes, 1)
+    return {
+      "lin_vel_error": self.lin_vel_error_sum / steps,
+      "ang_vel_error": self.ang_vel_error_sum / steps,
+      "fall_rate": self.falls / eps,
+      "mean_terrain_level": self.level_sum / max(self.level_n, 1),
+      "n_episodes": float(self.episodes),
+    }
 
 
 @dataclass

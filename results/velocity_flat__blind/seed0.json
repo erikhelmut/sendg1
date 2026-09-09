@@ -1,0 +1,75 @@
+{
+  "task": "Sendg1-Velocity-Flat-G1-Blind",
+  "seed": 0,
+  "checkpoint": "/home/erik/sendg1/runs/velocity_flat__blind/2026-09-08_18-22-37_seed0/model_29999.pt",
+  "protocol": {
+    "version": "v1",
+    "num_envs": 512,
+    "episode_length_s": 20.0,
+    "num_episodes": 4,
+    "seed": 12345,
+    "command_grid": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.5,
+        0.0,
+        0.0
+      ],
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        -0.5,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.5,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.5
+      ],
+      [
+        0.5,
+        0.0,
+        0.5
+      ],
+      [
+        1.0,
+        0.5,
+        -0.5
+      ]
+    ],
+    "keep_corruption": true,
+    "keep_pushes": true
+  },
+  "mjlab_version": "1.6.0",
+  "mjlab_commit": "0fb8a681136be94ffc636a3dd423cabb97d91f10",
+  "metrics": {
+    "lin_vel_error": 0.13674432361871003,
+    "ang_vel_error": 0.18854330890625715,
+    "fall_rate": 0.0,
+    "episode_length_s": 20.0,
+    "n_steps": 2048000.0,
+    "n_episodes": 2048.0
+  },
+  "raw": {
+    "lin_vel_error_sum": 280052.37477111816,
+    "ang_vel_error_sum": 386136.69664001465,
+    "step_count": 2048000,
+    "falls": 0,
+    "episodes": 2048,
+    "episode_length_sum_s": 40960.0,
+    "per_command": {}
+  }
+}

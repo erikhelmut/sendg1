@@ -19,7 +19,6 @@ both and flat->rough transfer is a legitimate experiment later.
 from __future__ import annotations
 
 import math
-from dataclasses import replace
 from typing import Literal
 
 from mjlab.envs import ManagerBasedRlEnvCfg
@@ -31,7 +30,6 @@ from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
-from mjlab.terrains.config import ROUGH_TERRAINS_CFG
 
 from sendg1.common.events import build_events
 from sendg1.common.obs.groups import build_groups
@@ -43,6 +41,7 @@ from sendg1.common.robots.g1 import (
   get_g1_cfg,
   resolve_action_scale,
 )
+from sendg1.common.terrains import make_rough_terrain_cfg
 from sendg1.common.sensors import (
   feet_ground_contact_sensor,
   foot_height_sensor,
@@ -64,7 +63,14 @@ DEFAULT_NUM_ENVS: dict[Terrain, int] = {
   # changes how much data the policy has seen by each stage, not when stages
   # fire -- and comparisons are baseline-vs-tactile within a single task anyway.
   "flat": 8192,
-  "rough": 4096,
+  # Rough is memory-bound, not throughput-bound. The curriculum terrain compiles
+  # to ~3,100 static geoms and MuJoCo-Warp's broadphase cost scales with
+  # geoms x envs, so 2,048 envs needs ~11 of the 12 GiB on this card and 4,096
+  # cannot be built at all. 1,024 sits at 6.5 GiB with real headroom, which
+  # matters for an unattended multi-hour run sharing the GPU with a desktop.
+  # Measured: 31.9k steps/s, 0.77 s/iter. Retune with scripts/tune_num_envs.py
+  # on different hardware.
+  "rough": 1024,
 }
 
 
@@ -97,7 +103,11 @@ def make_g1_velocity_env_cfg(
     cfg.scene.terrain.terrain_generator = None
   else:
     cfg.scene.terrain.terrain_type = "generator"
-    cfg.scene.terrain.terrain_generator = replace(ROUGH_TERRAINS_CFG, curriculum=True)
+    # Our own curriculum mix, not mjlab's ROUGH_TERRAINS_CFG: that default
+    # spends ~40% of its columns on smooth terrain (slopes, waves) where foot
+    # tactile can add nothing by construction, which would dilute the ablation.
+    # See sendg1/common/terrains.py for the selection argument.
+    cfg.scene.terrain.terrain_generator = make_rough_terrain_cfg()
     cfg.scene.terrain.max_init_terrain_level = 5
 
   # -- solver budgets ------------------------------------------------------

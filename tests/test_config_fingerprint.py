@@ -24,8 +24,8 @@ EXPECTED: dict[str, tuple[str, str]] = {
   # task_id: (env_fingerprint, rl_fingerprint)
   "Sendg1-Velocity-Flat-G1-Blind": ("4b16b31d3100856e", "4eca2b5efbd3cacf"),
   "Sendg1-Velocity-Flat-G1-ContactOracle": ("793b9160cd3a52eb", "ef6cb7888e840c6e"),
-  "Sendg1-Velocity-Rough-G1-Blind": ("28cd0f839686f3be", "f9c4880fbb9131ba"),
-  "Sendg1-Velocity-Rough-G1-ContactOracle": ("6f6c6ccade734bbf", "bbe10c74e54dce3c"),
+  "Sendg1-Velocity-Rough-G1-Blind": ("abb89a02f83b898c", "f9c4880fbb9131ba"),
+  "Sendg1-Velocity-Rough-G1-ContactOracle": ("130c4a42148b67be", "bbe10c74e54dce3c"),
 }
 
 
@@ -93,3 +93,36 @@ def test_network_architecture_is_identical_across_obs_sets() -> None:
     assert len(set(per_set.values())) == 1, (
       f"{base_id}: network architecture differs across obs sets: {per_set}"
     )
+
+
+def test_fingerprint_is_stable_across_processes() -> None:
+  """The recorded hashes are worthless if they move between interpreters.
+
+  Within-process stability is not enough: a hash that varied per process would
+  fail on every CI run, and a tripwire that always fires gets ignored. This
+  catches the classic causes -- a ``repr`` carrying a memory address, an
+  unordered set, or dict iteration order leaking into the digest.
+  """
+  import subprocess
+  import sys
+
+  code = (
+    "import sendg1.tasks;"
+    "from mjlab.tasks.registry import load_env_cfg, load_rl_cfg;"
+    "from sendg1.fingerprint import fingerprint;"
+    "from sendg1.tasks._register import variants;"
+    "print(' '.join(f'{t}:{fingerprint(load_env_cfg(t))}:"
+    "{fingerprint(load_rl_cfg(t))}' for t in sorted(variants())))"
+  )
+  runs = []
+  for _ in range(2):
+    proc = subprocess.run(
+      [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    runs.append(proc.stdout.strip().split()[-len(variants()) :])
+
+  assert runs[0] == runs[1], (
+    "fingerprints differ between processes:\n"
+    f"  run 1: {runs[0]}\n  run 2: {runs[1]}"
+  )
