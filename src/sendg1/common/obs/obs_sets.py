@@ -65,10 +65,17 @@ OBS_SETS: dict[str, ObsSet] = {
       "explicitly; never included in a default sweep."
     ),
   ),
-  # Phase 2, once the 26-taxel normal+shear sensor spec is known:
-  #   "tactile": ObsSet(actor=("proprio", "tactile"), critic=_CRITIC, ...)
-  # Adding it is one entry here plus one branch in groups.build_groups. The
-  # allowlist test will police it automatically.
+  "tactile_array": ObsSet(
+    actor=("proprio", "tactile_array"),
+    critic=_CRITIC,
+    diagnostic=True,
+    description=(
+      "Adds per-taxel normal and shear force on both soles to the actor. "
+      "Diagnostic while the sensor model is idealised (placeholder layout, no "
+      "noise, latency or calibration error): it measures what spatially "
+      "resolved sole contact could add over contact_oracle's net force."
+    ),
+  ),
 }
 
 DEFAULT_OBS_SET = "blind"
@@ -81,3 +88,9 @@ def research_obs_sets() -> tuple[str, ...]:
 
 def diagnostic_obs_sets() -> tuple[str, ...]:
   return tuple(name for name, s in OBS_SETS.items() if s.diagnostic)
+
+
+def uses_tactile_array(obs_set: str) -> bool:
+  """Whether the scene needs the tactile sensors for this set. Other sets skip
+  them, which keeps their scenes -- and recorded fingerprints -- unchanged."""
+  return "tactile_array" in OBS_SETS[obs_set].group_names

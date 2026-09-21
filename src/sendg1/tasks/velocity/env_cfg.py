@@ -33,6 +33,7 @@ from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 from sendg1.common.events import build_events
 from sendg1.common.obs.groups import build_groups
+from sendg1.common.obs.obs_sets import uses_tactile_array
 from sendg1.common.rewards import build_rewards
 from sendg1.common.robots.g1 import (
   DofSet,
@@ -48,6 +49,7 @@ from sendg1.common.sensors import (
   self_collision_sensor,
   terrain_scan_sensor,
 )
+from sendg1.common.tactile.sensing import tactile_scene_sensors
 
 Terrain = Literal["flat", "rough"]
 
@@ -94,6 +96,8 @@ def make_g1_velocity_env_cfg(
   sensors = [foot_height_sensor(), feet_ground_contact_sensor(), self_collision_sensor()]
   if has_terrain_scan:
     sensors.insert(0, terrain_scan_sensor())
+  if uses_tactile_array(obs_set):
+    sensors.extend(tactile_scene_sensors())
   cfg.scene.sensors = tuple(sensors)
 
   # -- terrain -------------------------------------------------------------

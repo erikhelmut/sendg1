@@ -45,11 +45,11 @@ G1_FOOT_GEOMS: tuple[str, ...] = tuple(
 )
 """The 7 collision capsules per foot, laid out fore-aft across the sole.
 
-Relevant beyond friction randomisation: this is a ready-made discretisation of
-the sole surface. When the 26-taxel tactile array is modelled, a per-geom
-``ContactSensorCfg`` over these names is the natural starting point -- MuJoCo's
-``mjSENS_TOUCH`` is NOT exposed by mjlab's ``BuiltinSensorCfg`` in 1.6.0, so
-contact sensors are the available path.
+They overlap (1 cm radius, 0.8-1 cm apart), so together they form one rounded
+slab. On flat ground MuJoCo contacts only their two end caps, which is why the
+tactile model (sendg1.common.tactile.model) takes the net wrench from the
+contacts rather than binning contact points onto taxels. Draw them with
+``scripts/show_sole.py``.
 """
 
 G1_ACTION_SCALE: dict[str, float] = dict(_MJLAB_G1_ACTION_SCALE)

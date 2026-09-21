@@ -28,6 +28,7 @@ from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
 from sendg1.common.beam import mdp as beam_mdp
+from sendg1.common.tactile.sensing import TactileParams, tactile_array_obs
 
 Availability = Literal["onboard", "oracle", "privileged"]
 
@@ -114,6 +115,19 @@ def _foot_contact_forces_ideal() -> ObservationTermCfg:
   return ObservationTermCfg(
     func=vel_mdp.foot_contact_forces,
     params={"sensor_name": FOOT_CONTACT_SENSOR},
+  )
+
+
+def _tactile_array() -> ObservationTermCfg:
+  # Explicit params, so a change to the sensor model moves the fingerprint.
+  p = TactileParams()
+  return ObservationTermCfg(
+    func=tactile_array_obs,
+    params={
+      "layout": p.layout,
+      "rays_per_axis": p.rays_per_axis,
+      "compliance_depth": p.compliance_depth,
+    },
   )
 
 
@@ -216,6 +230,14 @@ TERMS: dict[str, TermSpec] = {
     "Net 3D contact force per foot (reduce='netforce'), noiseless. Note this is "
     "a load cell, not a tactile array: no spatial distribution over the sole, "
     "so no centre of pressure and no heel-vs-toe discrimination.",
+  ),
+  "tactile_array": TermSpec(
+    _tactile_array,
+    "oracle",
+    "Per-taxel normal and 2D shear force on both soles, from the simulated "
+    "contacts via sendg1.common.tactile.model. Oracle until the sensor model "
+    "carries the real array's noise, latency, calibration error and "
+    "saturation; for now it is what a perfect array would read.",
   ),
   # -- privileged ------------------------------------------------------------
   "base_lin_vel": TermSpec(

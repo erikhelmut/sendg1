@@ -13,7 +13,7 @@ Group vocabulary
                   information is deliberately the stable idealised version so
                   that improving tactile fidelity later never perturbs it.
 ``contact_ideal`` Oracle foot contact for the diagnostic set. Actor only.
-``tactile``       (Phase 2) The modelled 26-taxel array. Actor only.
+``tactile_array`` The modelled taxel array on both soles. Actor only.
 """
 
 from __future__ import annotations
@@ -45,6 +45,8 @@ CONTACT_IDEAL_TERMS: tuple[str, ...] = (
   "foot_contact_ideal",
   "foot_contact_forces_ideal",
 )
+
+TACTILE_ARRAY_TERMS: tuple[str, ...] = ("tactile_array",)
 
 BEAM_PRIVILEGED_TERMS: tuple[str, ...] = (
   "beam_progress",
@@ -103,6 +105,11 @@ def build_groups(
     ),
     "contact_ideal": lambda: ObservationGroupCfg(
       terms=_terms(CONTACT_IDEAL_TERMS),
+      concatenate_terms=True,
+      enable_corruption=False,
+    ),
+    "tactile_array": lambda: ObservationGroupCfg(
+      terms=_terms(TACTILE_ARRAY_TERMS),
       concatenate_terms=True,
       enable_corruption=False,
     ),

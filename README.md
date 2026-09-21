@@ -12,9 +12,12 @@ Built on [mjlab](https://github.com/mujocolab/mjlab), pinned to **1.6.0**
 
 ## Status
 
-Phase 1: velocity tracking on flat and rough terrain, **blind** policies, no
-tactile modelling yet. The 26-taxel normal+shear sensor is not modelled; the
-plumbing for it exists and is enforced by tests.
+Phase 1: velocity tracking on flat and rough terrain, **blind** policies.
+
+Phase 2 has started: the tactile sole is modelled (`tactile_array`, see
+[Tactile sole](#tactile-sole)) on a **placeholder** taxel layout until the
+slipper's real geometry arrives. The model is still idealised -- no noise,
+latency or calibration error -- so the set is diagnostic for now.
 
 ## Quick start
 
@@ -41,6 +44,8 @@ python scripts/aggregate.py
 | `Sendg1-Velocity-Rough-G1-ContactOracle` | + idealised foot contact | 104 |
 | `Sendg1-Beam-G1-Blind` | proprioception, no command | 93 |
 | `Sendg1-Beam-G1-ContactOracle` | + idealised foot contact | 101 |
+| `Sendg1-Velocity-{Flat,Rough}-G1-TactileArray` | + per-taxel normal & shear | 240 |
+| `Sendg1-Beam-G1-TactileArray` | + per-taxel normal & shear | 237 |
 
 Because the height scan is gone, flat and rough share a 96-dim actor input
 space: one architecture serves both, and flat->rough transfer stays a
@@ -120,11 +125,45 @@ Defined in `sendg1/common/obs/obs_sets.py` as mappings from rsl_rl observation
 - `privileged` — critic only, permanently. Holds `base_lin_vel`, `height_scan`,
   unbiased joint positions, and the *idealised* foot contact terms.
 - `contact_ideal` — oracle contact, diagnostic only.
-- `tactile` — Phase 2, not yet declared.
+- `tactile_array` — per-taxel normal and shear force on both soles, actor only.
+  Diagnostic while the sensor model is idealised.
 
 The critic's contact information is deliberately the stable idealised version.
-When `tactile` gains a real sensor model, the critic is untouched, so Phase 1
-baselines stay comparable.
+When `tactile_array` gains a realistic sensor model, the critic is untouched, so
+Phase 1 baselines stay comparable. The tactile sensors are added to a scene only
+for sets that use the group, so every other variant's scene -- and recorded
+fingerprint -- is unchanged.
+
+## Tactile sole
+
+```bash
+python scripts/show_sole.py          # the sole as simulated: mesh, capsules, taxels
+python scripts/tactile_viewer.py     # MP4 of the robot walking + live taxel readings
+python scripts/sweep.py --tasks flat --obs-sets tactile_array --seeds 0
+```
+
+- **Layout** (`common/tactile/layout.py`): taxel patches in the sole frame
+  (`*_ankle_roll_link`, sole plane at z = -0.035 m), right foot mirrored.
+  Currently `placeholder_8x3`: 24 patches of 20 mm. Swap in the real layout
+  here -- nothing downstream assumes a grid.
+- **Why not bin contact points**: the sim foot is 7 rigid capsules, and on flat
+  ground MuJoCo only contacts their end caps -- a line under the heel and one
+  under the toe. Binning would leave the mid-foot taxels at zero while the foot
+  is flat.
+- **Model** (`common/tactile/model.py`, pure torch): the net force and centre of
+  pressure come from the per-contact data (`sole_contacts` sensor); which
+  patches have ground beneath them comes from 4 rays per taxel
+  (`tactile_rays_{left,right}`), with 4 mm of compliance; the normal force is
+  split over the supported taxels as a plane of pressure (a rigid sole on a
+  thin elastic layer) that reproduces the force and CoP exactly, dropping any
+  taxel it puts in tension. Shear is shared in proportion to normal load.
+- **Observation**: per foot `[normal(24), shear_x(24), shear_y(24)]` in N,
+  sole frame, `sign(x)·log1p(|x|)` -- 144 dims.
+- **Cost**: ~15% of training throughput on flat ground (147k vs 173k steps/s
+  at 8192 envs).
+- **Not modelled yet**: sensor noise, latency, per-taxel gain/offset,
+  saturation, crosstalk, dead taxels; the slipper's thickness and friction;
+  torsional shear about the CoP.
 
 ### `contact_oracle` is diagnostic, and off by default
 
@@ -190,10 +229,8 @@ this 3.11 env. It injects 7 pytest plugins that crash on import.
 
 ## Open
 
-- The 26-taxel sensor spec (layout, rate, latency, noise) — arriving in 1-2 weeks.
-  MuJoCo's `mjSENS_TOUCH` is **not** exposed by mjlab 1.6.0's `BuiltinSensorCfg`,
-  so the path is a per-geom `ContactSensorCfg` over the 7 collision capsules per
-  foot (`G1_FOOT_GEOMS`).
+- The real taxel layout (from the slipper CAD) and the sensor's rate, latency,
+  noise and units. Until then `tactile_array` runs on `placeholder_8x3`.
 - Seeds: 1 for now (directional only). 5 before any reported claim.
 - `num_envs`: per-task, tune with `scripts/tune_num_envs.py`. On a 12 GB 5070,
   throughput saturates around 8192 (~220k steps/s); larger fits but buys nothing.

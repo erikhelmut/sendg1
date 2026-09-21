@@ -22,7 +22,12 @@ BASE_ACTOR_DIM = {
   # No command: the beam task tells the actor nothing about where to go.
   "Sendg1-Beam-G1": 93,
 }
-EXTRA_ACTOR_DIM = {"blind": 0, "contact_oracle": 8}
+EXTRA_ACTOR_DIM = {
+  "blind": 0,
+  "contact_oracle": 8,
+  # 2 feet x 24 placeholder taxels x (normal, shear_x, shear_y).
+  "tactile_array": 144,
+}
 
 
 def _expected_actor_dim(task_id: str) -> int:
@@ -35,7 +40,7 @@ def test_expected_variants_registered() -> None:
   expected = {
     f"{base_id}-{slug}"
     for base_id in BASE_ACTOR_DIM
-    for slug in ("Blind", "ContactOracle")
+    for slug in ("Blind", "ContactOracle", "TactileArray")
   }
   assert registered == expected
 

@@ -31,6 +31,7 @@ from sendg1.common.beam import mdp as beam_mdp
 from sendg1.common.beam.terrain import make_beam_terrain_cfg
 from sendg1.common.events import build_events
 from sendg1.common.obs.groups import build_groups
+from sendg1.common.obs.obs_sets import uses_tactile_array
 from sendg1.common.rewards import POSE_STD_WALKING, build_rewards
 from sendg1.common.robots.g1 import (
   DofSet,
@@ -46,6 +47,7 @@ from sendg1.common.sensors import (
   self_collision_sensor,
   terrain_scan_sensor,
 )
+from sendg1.common.tactile.sensing import tactile_scene_sensors
 
 DEFAULT_NUM_ENVS = 2048
 """Measured on an RTX 5070 (12 GB): 2,048 envs use 2.8 GiB at 86k steps/s;
@@ -234,6 +236,8 @@ def make_g1_beam_env_cfg(
     feet_ground_contact_sensor(),
     self_collision_sensor(),
   )
+  if uses_tactile_array(obs_set):
+    cfg.scene.sensors += tactile_scene_sensors()
 
   # -- terrain -------------------------------------------------------------
   assert cfg.scene.terrain is not None

@@ -1,12 +1,17 @@
 """Scene sensors for the G1 locomotion tasks.
 
-All of these are simulation sensors. None of them feed the actor: the height
-scans and contact sensors exist to serve the critic and the reward terms. The
-policies in this study are blind.
+The height scans and ground-contact sensors serve the critic and the reward
+terms; the policies in this study are blind. The tactile sensors at the bottom
+feed only the ``tactile_array`` observation group, and are added to a scene only
+when its observation set uses that group.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+import mujoco
+import torch
 from mjlab.sensor import (
   ContactMatch,
   ContactSensorCfg,
@@ -18,6 +23,7 @@ from mjlab.sensor import (
 )
 
 from sendg1.common.robots.g1 import G1_FOOT_SITES, G1_PELVIS_BODY
+from sendg1.common.tactile.layout import SIDES, SOLE_Z, TaxelLayout
 
 TERRAIN_SCAN_MAX_DISTANCE = 5.0
 
@@ -62,10 +68,9 @@ def feet_ground_contact_sensor() -> ContactSensorCfg:
   ``reduce="netforce"`` collapses all simultaneous contacts on a foot into one
   3D net force, i.e. an idealised load cell -- there is no spatial distribution
   over the sole. That distinction is the whole point of the tactile array, so
-  when the 26-taxel sensor is modelled it will be a SEPARATE sensor over the
-  per-foot collision geoms (see G1_FOOT_GEOMS), not a reconfiguration of this
-  one. This sensor stays exactly as-is so the critic and the reward terms never
-  move underneath the study.
+  the array reads a SEPARATE sensor (``sole_contacts`` below), not a
+  reconfiguration of this one. This sensor stays exactly as-is so the critic
+  and the reward terms never move underneath the study.
   """
   return ContactSensorCfg(
     name="feet_ground_contact",
@@ -92,4 +97,88 @@ def self_collision_sensor() -> ContactSensorCfg:
     reduce="none",
     num_slots=1,
     history_length=4,
+  )
+
+
+# ---------------------------------------------------------------------------
+# Tactile array (see sendg1.common.tactile)
+# ---------------------------------------------------------------------------
+
+SOLE_CONTACT_SENSOR = "sole_contacts"
+SOLE_CONTACT_SLOTS = 16
+"""Contacts kept per foot. Flat ground makes at most 14 (2 per capsule); the
+strongest are kept if an uneven surface makes more."""
+
+TAXEL_RAY_LIFT = 0.02
+"""Taxel rays start this far above the sole plane, so a sole that has sunk
+slightly into the ground still sees it."""
+
+
+def taxel_ray_sensor_name(side: str) -> str:
+  return f"tactile_rays_{side}"
+
+
+@dataclass
+class TaxelRayPatternCfg:
+  """Parallel rays straight down the sole normal, from explicit sole points."""
+
+  points: tuple[tuple[float, float], ...]
+  z: float
+
+  def generate_rays(
+    self, mj_model: mujoco.MjModel | None, device: str
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    del mj_model
+    offsets = torch.tensor(
+      [(x, y, self.z) for x, y in self.points], device=device, dtype=torch.float32
+    )
+    directions = torch.zeros_like(offsets)
+    directions[:, 2] = -1.0
+    return offsets, directions
+
+
+def sole_contact_sensor() -> ContactSensorCfg:
+  """Every individual contact between each foot and the terrain.
+
+  Unlike ``feet_ground_contact`` this keeps contacts separate (position and
+  force of each), which the tactile model needs to recover the centre of
+  pressure. Forces are rotated to the world frame.
+  """
+  return ContactSensorCfg(
+    name=SOLE_CONTACT_SENSOR,
+    primary=ContactMatch(
+      mode="body",
+      pattern=tuple(f"{side}_ankle_roll_link" for side in SIDES),
+      entity="robot",
+    ),
+    secondary=ContactMatch(mode="body", pattern="terrain"),
+    fields=("found", "force", "pos", "normal", "tangent"),
+    reduce="maxforce",
+    num_slots=SOLE_CONTACT_SLOTS,
+    global_frame=True,
+  )
+
+
+def taxel_ray_sensor(side: str, layout: TaxelLayout, per_axis: int) -> RayCastSensorCfg:
+  """Rays down from ``per_axis``^2 points on every taxel of one sole, to find
+  which patches have ground beneath them."""
+  return RayCastSensorCfg(
+    name=taxel_ray_sensor_name(side),
+    frame=ObjRef(type="body", name=f"{side}_ankle_roll_link", entity="robot"),
+    pattern=TaxelRayPatternCfg(
+      points=layout.sample_points(side, per_axis),  # type: ignore[arg-type]
+      z=SOLE_Z + TAXEL_RAY_LIFT,
+    ),
+    ray_alignment="base",
+    max_distance=TAXEL_RAY_LIFT + 0.05,
+    exclude_parent_body=True,
+    include_geom_groups=(0,),
+  )
+
+
+def tactile_sensors(layout: TaxelLayout, per_axis: int) -> tuple:
+  """All scene sensors the tactile model reads."""
+  return (
+    sole_contact_sensor(),
+    *(taxel_ray_sensor(side, layout, per_axis) for side in SIDES),
   )

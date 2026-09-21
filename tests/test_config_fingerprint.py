@@ -24,10 +24,13 @@ EXPECTED: dict[str, tuple[str, str]] = {
   # task_id: (env_fingerprint, rl_fingerprint)
   "Sendg1-Beam-G1-Blind": ("75e0eb08d6580e25", "0c2b4d917e7cad8a"),
   "Sendg1-Beam-G1-ContactOracle": ("f45a6debc2e8e90b", "8b480392886bedce"),
+  "Sendg1-Beam-G1-TactileArray": ("b053128c398936bf", "6e81b2cd00f2f549"),
   "Sendg1-Velocity-Flat-G1-Blind": ("4b16b31d3100856e", "4eca2b5efbd3cacf"),
   "Sendg1-Velocity-Flat-G1-ContactOracle": ("793b9160cd3a52eb", "ef6cb7888e840c6e"),
+  "Sendg1-Velocity-Flat-G1-TactileArray": ("3f794f8fa0b5c595", "894b9801885aa05e"),
   "Sendg1-Velocity-Rough-G1-Blind": ("abb89a02f83b898c", "f9c4880fbb9131ba"),
   "Sendg1-Velocity-Rough-G1-ContactOracle": ("130c4a42148b67be", "bbe10c74e54dce3c"),
+  "Sendg1-Velocity-Rough-G1-TactileArray": ("de869837de3e4a5b", "462f06834bdebc26"),
 }
 
 

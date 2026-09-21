@@ -142,6 +142,9 @@ def test_diagnostic_sets_are_flagged_and_not_default() -> None:
   assert "contact_oracle" in OBS_SETS
   assert OBS_SETS["contact_oracle"].diagnostic
   assert "contact_oracle" not in research_obs_sets()
+  # Diagnostic until the sensor model carries the real array's imperfections.
+  assert OBS_SETS["tactile_array"].diagnostic
+  assert "tactile_array" not in research_obs_sets()
 
 
 # ---------------------------------------------------------------------------
