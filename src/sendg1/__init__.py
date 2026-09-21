@@ -8,7 +8,19 @@ policy on the same task, the same seeds and the same eval protocol. The repo is
 organised so that (task x observation-set x seed) is the unit of work.
 """
 
-from sendg1._pin import MJLAB_COMMIT, MJLAB_VERSION, check_mjlab_version
+import os
+
+# Recurrent PPO (the beam task) splits every rollout into episode fragments, so
+# tensor shapes change on every update. Under PyTorch's default CUDA caching
+# allocator that fragments the cache: measured on the beam task, reserved memory
+# grew from 2.1 to 9.3 GiB in 30 iterations while peak allocation stayed near
+# 1.5 GiB, until MuJoCo-Warp could not allocate and training died. With
+# expandable segments, reserved memory stayed within ~1.2x of the peak. The
+# allocator reads this on first CUDA use, so it must be set before any tensor
+# reaches the GPU; setdefault leaves an explicit user setting alone.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+from sendg1._pin import MJLAB_COMMIT, MJLAB_VERSION, check_mjlab_version  # noqa: E402
 
 check_mjlab_version()
 

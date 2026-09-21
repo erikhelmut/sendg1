@@ -26,14 +26,22 @@ from sendg1.tasks._register import variants
 
 ALL_VARIANTS = sorted(variants())
 
-# The exact set the research question permits an actor to see.
+# The exact set the research question permits an actor to see, per task.
+_VELOCITY_ACTOR = frozenset(
+  {
+    "base_ang_vel",
+    "projected_gravity",
+    "joint_pos",
+    "joint_vel",
+    "actions",
+    "command",
+  }
+)
 EXPECTED_DEPLOYABLE = {
-  "base_ang_vel",
-  "projected_gravity",
-  "joint_pos",
-  "joint_vel",
-  "actions",
-  "command",
+  "Sendg1-Velocity-Flat-G1": _VELOCITY_ACTOR,
+  "Sendg1-Velocity-Rough-G1": _VELOCITY_ACTOR,
+  # Beam walking gives the robot no command at all.
+  "Sendg1-Beam-G1": _VELOCITY_ACTOR - {"command"},
 }
 
 
@@ -87,13 +95,13 @@ def test_every_observation_term_anywhere_is_declared(task_id: str) -> None:
 
 def test_blind_actor_is_exactly_the_deployable_set() -> None:
   """Pin the baseline actor's contents, not just their availability class."""
-  for task_id, (_, obs_set) in variants().items():
+  for task_id, (base_id, obs_set) in variants().items():
     if obs_set != "blind":
       continue
     terms = {t for group in _actor_terms(task_id).values() for t in group}
-    assert terms == EXPECTED_DEPLOYABLE, (
+    assert terms == EXPECTED_DEPLOYABLE[base_id], (
       f"{task_id}: blind actor observes {sorted(terms)}, expected "
-      f"{sorted(EXPECTED_DEPLOYABLE)}"
+      f"{sorted(EXPECTED_DEPLOYABLE[base_id])}"
     )
 
 

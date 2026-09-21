@@ -24,6 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 TASK_BASES = {
   "flat": "Sendg1-Velocity-Flat-G1",
   "rough": "Sendg1-Velocity-Rough-G1",
+  "beam": "Sendg1-Beam-G1",
 }
 
 

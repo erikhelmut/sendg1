@@ -115,22 +115,27 @@ def build_eval_env_cfg(
   # Pin the command distribution: no heading control, no standing/forward
   # subsampling. Commands are assigned from the grid by env index in
   # scripts/evaluate.py, so every condition sees the same command on the same
-  # env index with the same terrain and the same DR draw.
-  twist = cfg.commands["twist"]
-  assert isinstance(twist, UniformVelocityCommandCfg)
-  twist.heading_command = False
-  twist.rel_standing_envs = 0.0
-  twist.rel_heading_envs = 0.0
-  twist.rel_forward_envs = 0.0
-  twist.resampling_time_range = (protocol.episode_length_s, protocol.episode_length_s)
-  twist.ranges = UniformVelocityCommandCfg.Ranges(
-    lin_vel_x=(-1.0, 1.0),
-    lin_vel_y=(-1.0, 1.0),
-    ang_vel_z=(-0.5, 0.5),
-    # Must be None: mjlab rejects a heading range with heading_command=False.
-    # Commands are assigned from the protocol grid anyway, so the sampled
-    # ranges only matter as a well-formedness constraint.
-    heading=None,
-  )
+  # env index with the same terrain and the same DR draw. Tasks without a
+  # command (beam walking) have nothing to pin.
+  twist = cfg.commands.get("twist")
+  if twist is not None:
+    assert isinstance(twist, UniformVelocityCommandCfg)
+    twist.heading_command = False
+    twist.rel_standing_envs = 0.0
+    twist.rel_heading_envs = 0.0
+    twist.rel_forward_envs = 0.0
+    twist.resampling_time_range = (
+      protocol.episode_length_s,
+      protocol.episode_length_s,
+    )
+    twist.ranges = UniformVelocityCommandCfg.Ranges(
+      lin_vel_x=(-1.0, 1.0),
+      lin_vel_y=(-1.0, 1.0),
+      ang_vel_z=(-0.5, 0.5),
+      # Must be None: mjlab rejects a heading range with heading_command=False.
+      # Commands are assigned from the protocol grid anyway, so the sampled
+      # ranges only matter as a well-formedness constraint.
+      heading=None,
+    )
 
   return cfg

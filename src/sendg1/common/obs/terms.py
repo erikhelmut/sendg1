@@ -27,6 +27,8 @@ from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
+from sendg1.common.beam import mdp as beam_mdp
+
 Availability = Literal["onboard", "oracle", "privileged"]
 
 TERRAIN_SCAN_SENSOR = "terrain_scan"
@@ -152,6 +154,22 @@ def _foot_air_time() -> ObservationTermCfg:
   )
 
 
+def _beam_progress() -> ObservationTermCfg:
+  return ObservationTermCfg(func=beam_mdp.beam_progress_obs)
+
+
+def _beam_lateral_offset() -> ObservationTermCfg:
+  return ObservationTermCfg(func=beam_mdp.beam_lateral_offset)
+
+
+def _beam_heading_error() -> ObservationTermCfg:
+  return ObservationTermCfg(func=beam_mdp.beam_heading_error)
+
+
+def _beam_width() -> ObservationTermCfg:
+  return ObservationTermCfg(func=beam_mdp.beam_width_obs)
+
+
 TERMS: dict[str, TermSpec] = {
   # -- onboard ---------------------------------------------------------------
   "base_ang_vel": TermSpec(
@@ -227,6 +245,30 @@ TERMS: dict[str, TermSpec] = {
     _foot_air_time,
     "privileged",
     "Accumulated swing time from the sim contact sensor.",
+  ),
+  "beam_progress": TermSpec(
+    _beam_progress,
+    "privileged",
+    "Fraction of the beam covered, from the ground-truth base position projected "
+    "onto the beam centreline. The robot is given no map of the beam.",
+  ),
+  "beam_lateral_offset": TermSpec(
+    _beam_lateral_offset,
+    "privileged",
+    "Signed distance of the base from the beam centreline. Would need a map of "
+    "the beam plus localisation against it.",
+  ),
+  "beam_heading_error": TermSpec(
+    _beam_heading_error,
+    "privileged",
+    "Base heading relative to the local beam direction, as (sin, cos). Same "
+    "requirement as beam_lateral_offset.",
+  ),
+  "beam_width": TermSpec(
+    _beam_width,
+    "privileged",
+    "Beam width at the env's curriculum level: a property of the world, not a "
+    "measurement.",
   ),
 }
 

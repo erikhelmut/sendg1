@@ -15,14 +15,26 @@ from sendg1.common.obs.obs_sets import OBS_SETS
 from sendg1.tasks._register import variants
 
 ALL_VARIANTS = sorted(variants())
-EXPECTED_ACTOR_DIM = {"blind": 96, "contact_oracle": 104}
+
+BASE_ACTOR_DIM = {
+  "Sendg1-Velocity-Flat-G1": 96,
+  "Sendg1-Velocity-Rough-G1": 96,
+  # No command: the beam task tells the actor nothing about where to go.
+  "Sendg1-Beam-G1": 93,
+}
+EXTRA_ACTOR_DIM = {"blind": 0, "contact_oracle": 8}
+
+
+def _expected_actor_dim(task_id: str) -> int:
+  base_id, obs_set = variants()[task_id]
+  return BASE_ACTOR_DIM[base_id] + EXTRA_ACTOR_DIM[obs_set]
 
 
 def test_expected_variants_registered() -> None:
   registered = {t for t in list_tasks() if t.startswith("Sendg1-")}
   expected = {
-    f"Sendg1-Velocity-{terrain}-G1-{slug}"
-    for terrain in ("Flat", "Rough")
+    f"{base_id}-{slug}"
+    for base_id in BASE_ACTOR_DIM
     for slug in ("Blind", "ContactOracle")
   }
   assert registered == expected
@@ -77,10 +89,8 @@ def test_env_builds_and_steps(task_id: str) -> None:
 
     dims = env.observation_manager.group_obs_dim
     actor_dim = sum(dims[g][0] for g in rl_cfg.obs_groups["actor"])
-    obs_set = variants()[task_id][1]
-    assert actor_dim == EXPECTED_ACTOR_DIM[obs_set], (
-      f"{task_id}: actor dim {actor_dim}, expected {EXPECTED_ACTOR_DIM[obs_set]}"
-    )
+    expected = _expected_actor_dim(task_id)
+    assert actor_dim == expected, f"{task_id}: actor dim {actor_dim}, expected {expected}"
   finally:
     env.close()
 

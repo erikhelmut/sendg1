@@ -39,10 +39,41 @@ python scripts/aggregate.py
 | `Sendg1-Velocity-Rough-G1-Blind` | proprioception only | 96 |
 | `Sendg1-Velocity-Flat-G1-ContactOracle` | + idealised foot contact | 104 |
 | `Sendg1-Velocity-Rough-G1-ContactOracle` | + idealised foot contact | 104 |
+| `Sendg1-Beam-G1-Blind` | proprioception, no command | 93 |
+| `Sendg1-Beam-G1-ContactOracle` | + idealised foot contact | 101 |
 
 Because the height scan is gone, flat and rough share a 96-dim actor input
 space: one architecture serves both, and flat->rough transfer stays a
 meaningful experiment.
+
+### Beam walking
+
+The robot starts on a 0.6 m platform facing a beam over a pit and gets as far
+along it as it can. There is **no command**: nothing tells the actor where the
+beam goes, so following a bend means sensing where the support is.
+
+- **Terrain** (`common/beam/terrain.py`): a 5 m beam with random joints.
+  Columns are bend types: `beam_straight` (control), `beam_bend` (joints up to
+  25°) and `beam_turn` (up to 60°), with three path instances per bent type.
+  Rows are width, log-spaced from 1.20 m down to 0.15 m.
+- **Curriculum**: per env. After covering ≥ 80% of the beam it moves one row
+  narrower; after covering < 30% it moves one row wider.
+- **Reward**:
+  - new furthest foothold on the beam, capped at 0.4 m/s (a foot must land on
+    the beam; ground covered while falling earns nothing)
+  - a success bonus at 95%
+  - weak centreline shaping
+  - `upright`, and `posture` with 3× the walking tolerances so it still shapes a
+    gait that strays far from the default pose
+  - a `base_height` penalty below 0.70 m above the beam, against deep crouching
+  - the velocity task's regularisers plus `base_height`, ramped in from 10% of
+    their weight in +10% steps every 300 iterations
+- **Safety**: a `nan_detection` termination resets an env whose physics goes
+  NaN instead of crashing the run.
+- **Actor**: GRU(256) → MLP(256, 128), 48-step rollouts, entropy bonus 0.005. The critic is the
+  usual MLP, fed privileged beam state and the height scan.
+- **Primary metric**: progress fraction, averaged per (bend type, width) cell.
+  Declared in `eval/metrics.py`.
 
 ## The three design rules
 

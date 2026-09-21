@@ -33,6 +33,13 @@ SCHEDULE = [
 ]
 
 
+SCHEDULE_SHORT = [
+  (3.0, 0.8, 0.0, 0.0, "forward"),
+  (2.5, 0.8, 0.0, 0.5, "forward + turn"),
+  (2.5, 0.6, 0.0, 0.0, "forward"),
+]
+
+
 def _overlay(frame, vx, vy, wz, label):
   """Burn the current command into the frame.
 
@@ -70,6 +77,16 @@ def main() -> None:
   ap.add_argument("--height", type=int, default=600)
   ap.add_argument("--fps", type=int, default=50)
   ap.add_argument("--distance", type=float, default=4.2)
+  ap.add_argument("--terrain", default=None,
+                  help="pin every env to this sub-terrain column (e.g. tilted_grid)")
+  ap.add_argument("--level", type=int, default=9,
+                  help="difficulty row to pin to when --terrain is given")
+  ap.add_argument("--qp", type=int, default=None,
+                  help="H.264 quantiser; higher = smaller file (try 30)")
+  ap.add_argument("--subsample", type=int, default=1,
+                  help="keep every Nth frame and divide fps to match")
+  ap.add_argument("--short", action="store_true",
+                  help="8 s clip instead of the full 18 s schedule")
   ap.add_argument("--no-overlay", action="store_true")
   args = ap.parse_args()
 
@@ -97,8 +114,26 @@ def main() -> None:
   )
   print(f"[video] checkpoint: {ckpt}")
 
-  env_cfg = load_env_cfg(args.task, play=True)
+  pin = args.terrain is not None
+  env_cfg = load_env_cfg(args.task, play=not pin)
   env_cfg.scene.num_envs = 1
+
+  if pin:
+    # Play mode rebuilds the generator as a 5x5 random grid, which destroys the
+    # one-column-per-terrain layout we need to pin to. So start from the
+    # TRAINING scene and apply the play-like bits by hand.
+    env_cfg.episode_length_s = 1e9
+    env_cfg.curriculum = {}
+    env_cfg.events.pop("push_robot", None)
+    for _g in env_cfg.observations.values():
+      _g.enable_corruption = False
+
+  # Turn off sensor debug overlays. The terrain height scan and the per-foot
+  # ray casts are CRITIC-only inputs; drawing them in a clip about a blind
+  # policy implies the actor can see them, which it cannot.
+  for sensor in env_cfg.scene.sensors or ():
+    if hasattr(sensor, "debug_vis"):
+      sensor.debug_vis = False
   env_cfg.viewer.width = args.width
   env_cfg.viewer.height = args.height
   # Default distance 3.0 with the torso as origin puts the head and the command
@@ -110,13 +145,29 @@ def main() -> None:
   # scale it is a few pixels and reads as a speck against the sky.
   from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 
-  twist_cfg = env_cfg.commands["twist"]
-  assert isinstance(twist_cfg, UniformVelocityCommandCfg)
-  twist_cfg.viz.scale = 1.4
-  twist_cfg.viz.z_offset = 0.55
+  twist_cfg = env_cfg.commands.get("twist")
+  if twist_cfg is not None:
+    assert isinstance(twist_cfg, UniformVelocityCommandCfg)
+    twist_cfg.viz.scale = 1.4
+    twist_cfg.viz.z_offset = 0.55
   env_cfg.observations["proprio"].enable_corruption = False
 
   env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode="rgb_array")
+
+  if pin:
+    terrain = env.scene.terrain
+    assert terrain is not None and terrain.terrain_origins is not None
+    names = list(env_cfg.scene.terrain.terrain_generator.sub_terrains)
+    if args.terrain not in names:
+      raise SystemExit(f"unknown terrain {args.terrain!r}; known: {names}")
+    col = names.index(args.terrain)
+    row = min(args.level, terrain.terrain_origins.shape[0] - 1)
+    terrain.terrain_types[:] = col
+    terrain.terrain_levels[:] = row
+    # env_origins must be set BEFORE reset: reset_base places the robot
+    # relative to them, and a fall mid-clip respawns on the same patch.
+    terrain.env_origins[:] = terrain.terrain_origins[row, col]
+    print(f"[video] pinned to {args.terrain} (col {col}) at level {row}")
   wrapped = RslRlVecEnvWrapper(env, clip_actions=rl_cfg.clip_actions)
 
   runner_cls = load_runner_cls(args.task) or MjlabOnPolicyRunner
@@ -124,20 +175,28 @@ def main() -> None:
   runner.load(str(ckpt), load_cfg={"actor": True}, strict=True, map_location=device)
   policy = runner.get_inference_policy(device=device)
 
-  cmd_term = env.command_manager.get_term("twist")
+  # Tasks without a command (beam walking) just run for the schedule's length.
+  cmd_term = env.command_manager.get_term("twist") if twist_cfg is not None else None
+  schedule = SCHEDULE_SHORT if args.short else SCHEDULE
+  if cmd_term is None:
+    schedule = [(sum(s[0] for s in schedule), 0.0, 0.0, 0.0, "")]
   frames = []
   obs, _ = wrapped.reset()
 
   with torch.inference_mode():
-    for secs, vx, vy, wz, label in SCHEDULE:
+    for secs, vx, vy, wz, label in schedule:
       cmd = torch.tensor([[vx, vy, wz]], device=device, dtype=torch.float32)
       for _ in range(int(secs / env.step_dt)):
-        cmd_term.vel_command_b[:] = cmd
-        obs, _, _, _ = wrapped.step(policy(obs))
-        cmd_term.vel_command_b[:] = cmd
+        if cmd_term is not None:
+          cmd_term.vel_command_b[:] = cmd
+        obs, _, dones, _ = wrapped.step(policy(obs))
+        # A recurrent actor must forget an episode that just ended.
+        policy.reset(dones.bool())
+        if cmd_term is not None:
+          cmd_term.vel_command_b[:] = cmd
         frame = env.render()
         if frame is not None:
-          if not args.no_overlay:
+          if cmd_term is not None and not args.no_overlay:
             frame = _overlay(frame, vx, vy, wz, label)
           frames.append(frame)
 
@@ -145,7 +204,14 @@ def main() -> None:
 
   out = Path(args.out or REPO / "media" / f"{rl_cfg.experiment_name}_seed{args.seed}.mp4")
   out.parent.mkdir(parents=True, exist_ok=True)
-  mediapy.write_video(str(out), frames, fps=args.fps)
+  fps = args.fps
+  if args.subsample > 1:
+    frames = frames[:: args.subsample]
+    fps = args.fps // args.subsample
+  kw = {"fps": fps}
+  if args.qp is not None:
+    kw["qp"] = args.qp
+  mediapy.write_video(str(out), frames, **kw)
   size_mb = out.stat().st_size / 1e6
   print(f"[video] wrote {out}  ({len(frames)} frames, {size_mb:.1f} MB)")
 

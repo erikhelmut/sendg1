@@ -12,6 +12,10 @@ string -- relevant later for a tactile encoder, and for the fact that blind
 locomotion usually benefits from memory. A cheaper first step than an RNN is
 per-term ``history_length`` on the proprio group (frame stacking), which is a
 config change rather than a new model.
+
+Recurrent variant (``recurrent=True``, used by the beam task): the actor becomes
+GRU(256) -> MLP (256, 128); the critic stays the same MLP, since it reads
+privileged state and has nothing to remember.
 """
 
 from __future__ import annotations
@@ -20,6 +24,11 @@ from mjlab.rl import RslRlModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
 
 HIDDEN_DIMS: tuple[int, ...] = (512, 256, 128)
 ACTIVATION = "elu"
+
+RNN_TYPE = "gru"
+RNN_HIDDEN_DIM = 256
+RNN_HEAD_DIMS: tuple[int, ...] = (256, 128)
+"""MLP head after the GRU in the recurrent actor."""
 
 SAVE_INTERVAL = 2000
 """Iterations between checkpoints."""
@@ -31,12 +40,25 @@ def build_ppo_cfg(
   *,
   seed: int = 0,
   max_iterations: int = 30_000,
+  recurrent: bool = False,
+  num_steps_per_env: int = 24,
+  entropy_coef: float = 0.01,
 ) -> RslRlOnPolicyRunnerCfg:
+  recurrent_kwargs = (
+    dict(
+      class_name="RNNModel",
+      rnn_type=RNN_TYPE,
+      rnn_hidden_dim=RNN_HIDDEN_DIM,
+      rnn_num_layers=1,
+    )
+    if recurrent
+    else {}
+  )
   return RslRlOnPolicyRunnerCfg(
     seed=seed,
     obs_groups=obs_groups,
     actor=RslRlModelCfg(
-      hidden_dims=HIDDEN_DIMS,
+      hidden_dims=RNN_HEAD_DIMS if recurrent else HIDDEN_DIMS,
       activation=ACTIVATION,
       obs_normalization=True,
       distribution_cfg={
@@ -44,6 +66,7 @@ def build_ppo_cfg(
         "init_std": 1.0,
         "std_type": "scalar",
       },
+      **recurrent_kwargs,
     ),
     critic=RslRlModelCfg(
       hidden_dims=HIDDEN_DIMS,
@@ -54,7 +77,7 @@ def build_ppo_cfg(
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
       clip_param=0.2,
-      entropy_coef=0.01,
+      entropy_coef=entropy_coef,
       num_learning_epochs=5,
       num_mini_batches=4,
       learning_rate=1.0e-3,
@@ -70,7 +93,7 @@ def build_ppo_cfg(
     # to sample learning progress, without filling the disk: each G1 checkpoint
     # is a few MB and this study will accumulate many runs.
     save_interval=SAVE_INTERVAL,
-    num_steps_per_env=24,
+    num_steps_per_env=num_steps_per_env,
     max_iterations=max_iterations,
     logger="wandb",
     wandb_project="sendg1",

@@ -2,6 +2,7 @@
 """Render the terrain curriculum: whole grid plus one tile per sub-terrain.
 
     python scripts/render_terrain.py
+    python scripts/render_terrain.py --terrain-set beam --prefix beam --row 0
 
 Writes media/terrain_grid.png and media/terrain_<name>.png. Offscreen via EGL,
 so it works headless.
@@ -37,6 +38,13 @@ def main() -> None:
   ap.add_argument("--rows", type=int, default=10)
   ap.add_argument("--width", type=int, default=1280)
   ap.add_argument("--height", type=int, default=900)
+  ap.add_argument("--row", type=int, default=-1,
+                  help="difficulty row for close-ups; -1 = hardest")
+  ap.add_argument("--seed", type=int, default=None,
+                  help="terrain seed; default = the training seed")
+  ap.add_argument("--prefix", default="terrain",
+                  help="output filename prefix")
+  ap.add_argument("--terrain-set", default="rough", choices=["rough", "beam"])
   args = ap.parse_args()
 
   import imageio.v3 as iio
@@ -52,7 +60,16 @@ def main() -> None:
   out.mkdir(parents=True, exist_ok=True)
   device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-  gen = make_rough_terrain_cfg(num_rows=args.rows)
+  if args.terrain_set == "beam":
+    from sendg1.common.beam.terrain import BEAM_ROLES, bend_type, make_beam_terrain_cfg
+
+    gen = make_beam_terrain_cfg(num_rows=args.rows)
+    roles = {nm: BEAM_ROLES[bend_type(nm)] for nm in gen.sub_terrains}
+  else:
+    gen = make_rough_terrain_cfg(num_rows=args.rows)
+    roles = TERRAIN_ROLES
+  if args.seed is not None:
+    gen.seed = args.seed
   names = list(gen.sub_terrains)
 
   entity = TerrainEntity(
@@ -76,14 +93,15 @@ def main() -> None:
   cam.distance = 1.15 * max(span_x, span_y)
   cam.azimuth = 90.0
   cam.elevation = -62.0
-  iio.imwrite(out / "terrain_grid.png", _render(model, data, cam, args.width, args.height))
-  print(f"[terrain] wrote {out / 'terrain_grid.png'}")
+  iio.imwrite(out / f"{args.prefix}_grid.png",
+              _render(model, data, cam, args.width, args.height))
+  print(f"[terrain] wrote {out}/{args.prefix}_grid.png")
 
   # One close-up per column, at ~70% difficulty, framed on that patch.
   origins = entity.terrain_origins
   assert origins is not None
   org = origins.cpu().numpy() if hasattr(origins, "cpu") else np.asarray(origins)
-  row = int(0.7 * (args.rows - 1))
+  row = (args.rows - 1) if args.row < 0 else min(args.row, args.rows - 1)
   for col, nm in enumerate(names):
     c = mujoco.MjvCamera()
     c.lookat[:] = org[row, col]
@@ -93,11 +111,16 @@ def main() -> None:
     c.distance = 0.85 * size_x
     c.azimuth = 90.0
     c.elevation = -46.0
-    iio.imwrite(out / f"terrain_{nm}.png", _render(model, data, c, 640, 440))
+    if args.terrain_set == "beam":
+      # The spawn origin is the platform at one end; frame the whole beam, and
+      # look down steeply enough that the bends read.
+      c.lookat[:] = entity.flat_patches["beam_path"][row, col].mean(dim=0).cpu().numpy()
+      c.elevation = -70.0
+    iio.imwrite(out / f"{args.prefix}_{nm}.png", _render(model, data, c, 640, 440))
   print(f"[terrain] wrote {len(names)} close-ups (row {row}/{args.rows - 1})")
 
   for nm in names:
-    print(f"  {nm:22s} {TERRAIN_ROLES[nm].role}")
+    print(f"  {nm:22s} {roles[nm].role}")
 
 
 if __name__ == "__main__":

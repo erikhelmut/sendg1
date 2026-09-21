@@ -6,7 +6,8 @@ step regardless of whether a network consumes it.
 
 Group vocabulary
 ----------------
-``proprio``       Deployable proprioception. Actor and critic. 96-dim.
+``proprio``       Deployable proprioception. Actor and critic. 96-dim; 93 on
+                  the beam task, which has no command.
 ``privileged``    Simulation state, critic only, permanently. Includes the
                   *idealised* foot contact terms: the critic's contact
                   information is deliberately the stable idealised version so
@@ -45,6 +46,13 @@ CONTACT_IDEAL_TERMS: tuple[str, ...] = (
   "foot_contact_forces_ideal",
 )
 
+BEAM_PRIVILEGED_TERMS: tuple[str, ...] = (
+  "beam_progress",
+  "beam_lateral_offset",
+  "beam_heading_error",
+  "beam_width",
+)
+
 
 def _terms(names: tuple[str, ...]) -> dict:
   return {name: TERMS[name].build() for name in names}
@@ -54,26 +62,37 @@ def build_groups(
   obs_set: str,
   *,
   has_terrain_scan: bool,
+  with_command: bool = True,
+  beam_privileged: bool = False,
 ) -> dict[str, ObservationGroupCfg]:
   """Build exactly the groups ``obs_set`` needs.
 
   Args:
     obs_set: key into :data:`OBS_SETS`.
     has_terrain_scan: whether the scene carries the ``terrain_scan`` raycast
-      sensor. Only the rough-terrain task does, and the height scan is critic
-      only -- the actor is blind on both terrains.
+      sensor. The rough and beam tasks do, and the height scan is critic only --
+      the actor is blind everywhere.
+    with_command: include the operator command in ``proprio``. False for tasks
+      that give the robot no command (beam walking).
+    beam_privileged: add the ground-truth beam terms to the critic.
   """
   if obs_set not in OBS_SETS:
     raise KeyError(f"unknown obs_set {obs_set!r}; known: {sorted(OBS_SETS)}")
   wanted = set(OBS_SETS[obs_set].group_names)
 
+  proprio = PROPRIO_TERMS
+  if not with_command:
+    proprio = tuple(t for t in proprio if t != "command")
+
   privileged = PRIVILEGED_TERMS_FLAT
   if has_terrain_scan:
     privileged = privileged + ("height_scan",)
+  if beam_privileged:
+    privileged = privileged + BEAM_PRIVILEGED_TERMS
 
   builders = {
     "proprio": lambda: ObservationGroupCfg(
-      terms=_terms(PROPRIO_TERMS),
+      terms=_terms(proprio),
       concatenate_terms=True,
       enable_corruption=True,
     ),
