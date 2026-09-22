@@ -17,10 +17,12 @@ below make every contact the study cares about take exactly one sampled value:
   foot  / patch   -> patch mu     (patch priority 2 > foot 1)
   box   / floor   -> box mu       (box priority 3 > floor 2)
   box   / patch   -> box mu       (box priority 3 > patch 2)
-  hand  / box     -> box mu       (box priority 3 > hand 0)   <- a coupling
+  ball  / box     -> ball mu 0.8  (ball-hand priority 4 > box 3)
 
-The last line is an assumption worth knowing about: the hands grip the box with
-the box-floor coefficient, so a slippery box is also slippery to push.
+With the stock rubber hands (``ball_hands=False``) the last line becomes
+hand / box -> box mu (box priority 3 > hand 0): the hands would grip with the
+box-floor coefficient, so a slippery box would also be slippery to push. The
+ball hands remove that coupling.
 """
 
 from __future__ import annotations

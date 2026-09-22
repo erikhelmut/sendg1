@@ -95,9 +95,15 @@ box 0.4-0.6 x 0.4-0.6 x 0.6-0.9 m. All ranges live in
 - **Friction model.** MuJoCo max-mixes friction for equal priorities, and the
   G1 foot capsules carry priority 1, so priorities are set so each contact takes
   exactly one sampled value: foot/floor -> floor mu, box/floor -> box mu,
-  **hand/box -> box mu** (a coupling). Verified per contact in the solver by
+  hand/box -> the ball hand's fixed 0.8. Verified per contact in the solver by
   `tests/test_box_push.py`. The shared foot-friction DR is removed here: it
   would be inert.
+- **Ball hands.** The G1 here has a 70 mm ball in place of each passive rubber
+  hand (`get_g1_ball_hands_cfg` in `common/robots/g1.py`): one contact per
+  hand, friction 0.8 (assumed TPU/rubber cover), same wrist mass. It models a
+  printed end-effector, not the stock robot. `ball_hands=False` in the factory
+  restores the rubber hands, whose grip on the box would then be the box's
+  floor mu.
 - **Actor** sees proprioception (no command) plus box position and yaw
   relative to the pelvis and the target relative to the box, with small
   uniform noise. These are `perceived` terms: an assumed perception stack, not a

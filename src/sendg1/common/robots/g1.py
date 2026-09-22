@@ -20,8 +20,12 @@ about the feet. It is NOT the Phase 1 default, for three reasons:
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from typing import Literal
 
+import mujoco
+from mjlab.asset_zoo.robots.unitree_g1.g1_constants import FULL_COLLISION
+from mjlab.asset_zoo.robots.unitree_g1.g1_constants import get_spec as _get_g1_spec
 from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
   G1_ACTION_SCALE as _MJLAB_G1_ACTION_SCALE,
 )
@@ -118,3 +122,101 @@ def resolve_action_scale(dof_set: DofSet) -> dict[str, float]:
 def get_g1_cfg() -> EntityCfg:
   """A fresh 29-DoF G1 entity config (knees-bent keyframe, full collisions)."""
   return get_g1_robot_cfg()
+
+
+# ---------------------------------------------------------------------------
+# Ball hands
+# ---------------------------------------------------------------------------
+#
+# The stock G1 ends each arm in Unitree's passive rubber hand: a fixed,
+# five-fingered, slightly curled hand (visual mesh ``*_rubber_hand.STL``), which
+# the MJCF collides as one capsule. The ball-hand variant replaces both with a
+# sphere -- the model of a printed ball end-effector mounted in the rubber
+# hand's place. A ball has one well-defined contact, cannot hook an edge, and
+# gets its own friction, so hand grip no longer depends on what it touches.
+#
+# Only the hand changes. The wrist_yaw_link keeps its explicit inertial
+# (0.255 kg with the rubber hand): the printed ball is ASSUMED to weigh about
+# the same. Forearm and wrist capsules are untouched.
+
+BALL_HAND_RADIUS = 0.035
+"""m (70 mm diameter): just over the rubber hand's 67 mm thickness, and the
+same radius as the stock hand's collision capsule."""
+BALL_HAND_MOUNT_X = 0.0415
+"""m: the wrist_yaw_link's front face, where the rubber hand bolts on. The
+wrist's own mesh ends here."""
+BALL_HAND_CENTER_X = BALL_HAND_MOUNT_X + BALL_HAND_RADIUS - 0.005
+"""m along the wrist_yaw_link x axis: the ball sits ON the mounting face,
+overlapping it by 5 mm so there is no gap. Its front reaches 0.112 m -- short
+of the rubber hand's fingertips (~0.17 m)."""
+BALL_HAND_FRICTION = 0.8
+"""Sliding friction of the ball's cover (TPU / rubber). An assumption to be
+measured on the printed part."""
+BALL_HAND_PRIORITY = 4
+"""Above the box-push box (3) and floor (2): every hand contact uses the ball's
+friction and contact dimension."""
+
+BALL_HAND_GEOMS: tuple[str, ...] = ("left_hand_collision", "right_hand_collision")
+
+
+def get_g1_ball_hands_spec() -> mujoco.MjSpec:
+  """The G1 MJCF with each rubber hand replaced by a ball.
+
+  The collision geom keeps its name (``*_hand_collision``) so every existing
+  collision rule and sensor pattern still finds it; only its shape changes. The
+  rubber-hand visual mesh is swapped for a matching visual sphere.
+  """
+  spec = _get_g1_spec()
+  for side in ("left", "right"):
+    body = spec.body(f"{side}_wrist_yaw_link")
+    for geom in list(body.geoms):
+      if geom.meshname == f"{side}_rubber_hand":
+        spec.delete(geom)
+    col = spec.geom(f"{side}_hand_collision")
+    col.type = mujoco.mjtGeom.mjGEOM_SPHERE
+    col.fromto = [float("nan")] * 6  # unset: position by pos, not fromto
+    col.pos = (BALL_HAND_CENTER_X, 0.0, 0.0)
+    col.size = (BALL_HAND_RADIUS, 0.0, 0.0)
+    body.add_geom(
+      name=f"{side}_hand_ball_visual",
+      type=mujoco.mjtGeom.mjGEOM_SPHERE,
+      pos=(BALL_HAND_CENTER_X, 0.0, 0.0),
+      size=(BALL_HAND_RADIUS, 0.0, 0.0),
+      rgba=(0.15, 0.15, 0.15, 1.0),
+      group=2,
+      contype=0,
+      conaffinity=0,
+      density=0.0,
+    )
+  return spec
+
+
+BALL_HANDS_COLLISION = replace(
+  FULL_COLLISION,
+  # Friction needs condim 3: the stock rule makes every non-foot geom
+  # frictionless (condim 1), and with the ball's top priority its condim is the
+  # one a hand contact uses.
+  condim={
+    r"^(left|right)_foot[1-7]_collision$": 3,
+    r"^(left|right)_hand_collision$": 3,
+    ".*_collision": 1,
+  },
+  priority={
+    r"^(left|right)_foot[1-7]_collision$": 1,
+    r"^(left|right)_hand_collision$": BALL_HAND_PRIORITY,
+    ".*": 0,
+  },
+  friction={
+    r"^(left|right)_foot[1-7]_collision$": (0.6,),
+    r"^(left|right)_hand_collision$": (BALL_HAND_FRICTION,),
+  },
+)
+"""mjlab's FULL_COLLISION, plus the ball hands' contact settings."""
+
+
+def get_g1_ball_hands_cfg() -> EntityCfg:
+  """A fresh 29-DoF G1 with ball hands (see :func:`get_g1_ball_hands_spec`)."""
+  cfg = get_g1_robot_cfg()
+  cfg.spec_fn = get_g1_ball_hands_spec
+  cfg.collisions = (BALL_HANDS_COLLISION,)
+  return cfg

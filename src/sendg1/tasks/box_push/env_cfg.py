@@ -45,6 +45,7 @@ from sendg1.common.robots.g1 import (
   DofSet,
   G1_TORSO_BODY,
   actuator_patterns,
+  get_g1_ball_hands_cfg,
   get_g1_cfg,
   resolve_action_scale,
 )
@@ -64,6 +65,9 @@ LOW_FRICTION_PATCHES = False
 """Default for the optional 1-3 low-friction floor patches on the path."""
 CURRICULUM = False
 """Default for the light-box / high-friction curriculum."""
+BALL_HANDS = True
+"""Ball end-effectors instead of the stock rubber hands (see
+``sendg1.common.robots.g1``): one contact per hand, with its own friction."""
 
 FALL_TILT = math.radians(70.0)
 """Torso tilt that ends the episode as a fall (the velocity task's value)."""
@@ -228,6 +232,7 @@ def make_g1_box_push_env_cfg(
   num_envs: int | None = None,
   low_friction_patches: bool = LOW_FRICTION_PATCHES,
   curriculum: bool = CURRICULUM,
+  ball_hands: bool = BALL_HANDS,
   ranges: BoxPushRanges = BoxPushRanges(),
 ) -> ManagerBasedRlEnvCfg:
   """Build a G1 box-pushing config for one observation set."""
@@ -236,7 +241,8 @@ def make_g1_box_push_env_cfg(
   curriculum_cfg = CurriculumCfg() if curriculum else None
 
   # -- scene ---------------------------------------------------------------
-  cfg.scene.entities = {"robot": get_g1_cfg(), **box_entities()}
+  robot = get_g1_ball_hands_cfg() if ball_hands else get_g1_cfg()
+  cfg.scene.entities = {"robot": robot, **box_entities()}
   cfg.scene.num_envs = num_envs or DEFAULT_NUM_ENVS
   # Worlds do not interact; the spacing only matters for the viewer.
   cfg.scene.env_spacing = 8.0

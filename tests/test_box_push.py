@@ -223,3 +223,64 @@ def test_reset_places_patches_on_the_path() -> None:
     assert torch.all((st.patch_rect[:, :, 2] > 0).sum(dim=1) >= 1)
   finally:
     env.close()
+
+
+def test_ball_hands_model() -> None:
+  from mjlab.entity import Entity
+
+  from sendg1.common.robots.g1 import (
+    BALL_HAND_FRICTION,
+    BALL_HAND_PRIORITY,
+    BALL_HAND_RADIUS,
+    get_g1_ball_hands_cfg,
+    get_g1_cfg,
+  )
+
+  stock = Entity(get_g1_cfg()).spec.compile()
+  ball = Entity(get_g1_ball_hands_cfg()).spec.compile()
+  for side in ("left", "right"):
+    g = ball.geom(f"{side}_hand_collision")
+    assert g.type[0] == mujoco.mjtGeom.mjGEOM_SPHERE
+    assert g.size[0] == pytest.approx(BALL_HAND_RADIUS)
+    assert g.priority[0] == BALL_HAND_PRIORITY
+    assert g.condim[0] == 3
+    assert g.friction[0] == pytest.approx(BALL_HAND_FRICTION)
+  meshes = lambda m: {  # noqa: E731
+    mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_MESH, int(m.geom_dataid[i]))
+    for i in range(m.ngeom)
+    if m.geom_type[i] == mujoco.mjtGeom.mjGEOM_MESH
+  }
+  assert not {n for n in meshes(ball) if "rubber_hand" in n}
+  # Only the hands changed: same mass, same number of collision geoms, and the
+  # stock model still has its rubber hands.
+  assert float(ball.body_mass.sum()) == pytest.approx(float(stock.body_mass.sum()))
+  assert {n for n in meshes(stock) if "rubber_hand" in n}
+  assert ball.nbody == stock.nbody
+
+
+@pytest.mark.slow
+def test_ball_hand_contact_uses_ball_friction() -> None:
+  from sendg1.common.box_push.mdp import BoxPushState
+  from sendg1.common.robots.g1 import BALL_HAND_FRICTION, BALL_HAND_RADIUS
+
+  env = _make_env(num_envs=2)
+  try:
+    st = BoxPushState.get(env)
+    robot, box = env.scene["robot"], env.scene["box"]
+    # Put the box's near face 5 mm into the left ball hand, then step once.
+    gid = int(robot.indexing.geom_ids[robot.geom_names.index("left_hand_collision")])
+    ball = env.sim.data.geom_xpos[:, gid]
+    root = torch.zeros(2, 13, device=env.device)
+    root[:, 0] = ball[:, 0] + BALL_HAND_RADIUS - 0.005 + st.box_half[:, 0]
+    root[:, 1] = ball[:, 1]
+    root[:, 2] = st.box_half[:, 2] + 0.002
+    root[:, 3] = 1.0
+    box.write_root_state_to_sim(root)
+    env.step(_zero(env))
+    hand = [
+      mu for (w, a, b), mu in _contact_friction(env).items()
+      if {a, b} == {"robot/left_hand_collision", "box/box_geom"}
+    ]
+    assert hand and all(mu == pytest.approx(BALL_HAND_FRICTION, abs=1e-5) for mu in hand)
+  finally:
+    env.close()
