@@ -21,6 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
+# scripts/export_foot_cad.py only.
+cad = ["ezdxf>=1.4"]
 
 # Makes mjlab's own `train` / `play` / `list-envs` CLIs discover our tasks.
 # mjlab/__init__.py::_import_registered_packages loads this group at import time.

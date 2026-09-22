@@ -3,10 +3,11 @@
 taxel layout on top.
 
     python scripts/show_sole.py                       # -> media/tactile_sole_layout.png
-    python scripts/show_sole.py --layout placeholder_8x3 --show
+    python scripts/show_sole.py --layout placeholder_8x3 --show   # any layout in LAYOUTS
 
-Plan views look down through the foot from above (x forward, y left), so the
-left and right feet are mirror images.
+Plan views look down through the foot from above (x forward, y left). The feet
+are mirror images; the slipper sensor is the same part on both, so a taxel
+number sits at the same (x, y) on each.
 """
 
 from __future__ import annotations
@@ -90,7 +91,8 @@ def main() -> None:
     Line2D([], [], color=viz.TAXEL_EDGE, marker=".", ls="none",
            label=f"support ray origins ({per_axis}×{per_axis} per taxel)"),
     Line2D([], [], color=viz.INK, marker="x", ls="none",
-           label="where MuJoCo puts contacts when the foot is flat"),
+           label="capsule end points: a capsule lying along a surface is stored "
+                 "as 2 contacts here"),
   ]
   fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False,
              fontsize=8.5, labelcolor=viz.INK_2)

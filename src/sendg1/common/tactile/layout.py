@@ -5,18 +5,23 @@ body frame: x forward, y left, z up. The sole plane is the bottom of the 7 foot
 collision capsules (and, to 0.4 mm, of the foot's visual mesh), at
 ``SOLE_Z = -0.035`` m.
 
-The layout is a placeholder until the real slipper geometry is exported from
-CAD: a regular 8 x 3 grid of 20 mm square patches covering the sole footprint.
-Only this module needs to change when the real layout arrives -- everything
+The model uses ``slipper_v1``: the real sensor on the slipper, 26 square
+patches of 12 mm, read from ``layouts/slipper_v1.csv`` (millimetres, exported
+from the slipper CAD). ``placeholder_8x3`` is the earlier stand-in grid, kept
+because the model's unit tests are written against a regular grid. Everything
 downstream reads ``TaxelLayout`` and never assumes a grid.
 
-Right-foot layouts are the mirror image (y -> -y) of the left, so taxel ``i`` is
-the same anatomical patch on both feet.
+Right foot: ``slipper_v1`` is the SAME part on both feet (1:1, not a mirrored
+version), so taxel ``i`` sits at the same (x, y) on both soles -- channel ``i`` is
+lateral on one foot and medial on the other. ``placeholder_8x3`` mirrors
+(y -> -y) instead. ``TaxelLayout.mirror_right`` selects which.
 """
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 Side = Literal["left", "right"]
@@ -43,6 +48,9 @@ class TaxelLayout:
   centers: tuple[tuple[float, float], ...]
   half_sizes: tuple[tuple[float, float], ...]
   """Half edge lengths of each (axis-aligned rectangular) patch."""
+  mirror_right: bool = True
+  """True: the right sole carries a mirrored sensor (y -> -y). False: the same
+  sensor part is used on both feet, at identical (x, y)."""
 
   @property
   def num_taxels(self) -> int:
@@ -52,8 +60,9 @@ class TaxelLayout:
     return tuple(4.0 * hx * hy for hx, hy in self.half_sizes)
 
   def for_side(self, side: Side) -> tuple[tuple[float, float], ...]:
-    """Taxel centres on ``side``'s sole; the right foot mirrors y."""
-    if side == "left":
+    """Taxel centres on ``side``'s sole; the right foot mirrors y only if
+    ``mirror_right``."""
+    if side == "left" or not self.mirror_right:
       return self.centers
     return tuple((x, -y) for x, y in self.centers)
 
@@ -98,10 +107,62 @@ def grid_layout(
   return TaxelLayout(name=name, centers=centers, half_sizes=(half,) * len(centers))
 
 
+LAYOUT_DIR = Path(__file__).parent / "layouts"
+
+
+def csv_layout(
+  name: str, path: Path | None = None, *, mirror_right: bool = False
+) -> TaxelLayout:
+  """Load ``layouts/<name>.csv``: columns ``id, cx, cy, width_x, length_y,
+  rotation_deg`` in millimetres, left foot, sole frame. Rows are ordered by
+  ``id``, which must run 0..N-1 -- taxel ``i`` in the model is sensor id ``i``.
+
+  Rejects patches that are rotated (not modelled yet), overlap, or stick out
+  past the foot: each of those is far more likely a typo than intent.
+  """
+  path = path or LAYOUT_DIR / f"{name}.csv"
+  with open(path, newline="") as f:
+    rows = sorted(csv.DictReader(f), key=lambda r: int(r["id"]))
+  ids = [int(r["id"]) for r in rows]
+  if ids != list(range(len(rows))):
+    raise ValueError(f"{path.name}: ids must be 0..{len(rows) - 1}, got {ids}")
+
+  (x0, x1), (y0, y1) = SOLE_EXTENT_X, SOLE_EXTENT_Y
+  centers, half_sizes = [], []
+  for r in rows:
+    if float(r["rotation_deg"]) != 0.0:
+      raise NotImplementedError(f"{path.name}: taxel {r['id']} is rotated")
+    cx, cy = float(r["cx"]) / 1000, float(r["cy"]) / 1000
+    hx, hy = float(r["width_x"]) / 2000, float(r["length_y"]) / 2000
+    if not (x0 <= cx - hx and cx + hx <= x1 and y0 <= cy - hy and cy + hy <= y1):
+      raise ValueError(
+        f"{path.name}: taxel {r['id']} at ({r['cx']}, {r['cy']}) mm extends past "
+        f"the foot (x {x0 * 1000:.0f}..{x1 * 1000:.0f}, "
+        f"y {y0 * 1000:.0f}..{y1 * 1000:.0f} mm)"
+      )
+    centers.append((cx, cy))
+    half_sizes.append((hx, hy))
+
+  for i in range(len(rows)):
+    for j in range(i):
+      (ax, ay), (ahx, ahy) = centers[i], half_sizes[i]
+      (bx, by), (bhx, bhy) = centers[j], half_sizes[j]
+      if abs(ax - bx) < ahx + bhx and abs(ay - by) < ahy + bhy:
+        raise ValueError(f"{path.name}: taxels {j} and {i} overlap")
+  return TaxelLayout(
+    name=name,
+    centers=tuple(centers),
+    half_sizes=tuple(half_sizes),
+    mirror_right=mirror_right,
+  )
+
+
 LAYOUTS: dict[str, TaxelLayout] = {
   "placeholder_8x3": grid_layout("placeholder_8x3", rows=8, cols=3, patch=0.020),
+  # One sensor part, used 1:1 on both feet.
+  "slipper_v1": csv_layout("slipper_v1", mirror_right=False),
 }
 """Named layouts. Observation terms reference a layout by name so configs stay
 plain data and fingerprint stably."""
 
-DEFAULT_LAYOUT = "placeholder_8x3"
+DEFAULT_LAYOUT = "slipper_v1"

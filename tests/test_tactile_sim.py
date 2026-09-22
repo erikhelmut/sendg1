@@ -64,7 +64,7 @@ def rollout():
 @pytest.mark.slow
 def test_observation_shape_and_finite(rollout) -> None:
   for step in rollout:
-    assert step["obs"].shape == (NUM_ENVS, 144)
+    assert step["obs"].shape == (NUM_ENVS, 156)
     assert torch.isfinite(step["obs"]).all()
 
 

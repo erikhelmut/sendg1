@@ -15,8 +15,8 @@ Built on [mjlab](https://github.com/mujocolab/mjlab), pinned to **1.6.0**
 Phase 1: velocity tracking on flat and rough terrain, **blind** policies.
 
 Phase 2 has started: the tactile sole is modelled (`tactile_array`, see
-[Tactile sole](#tactile-sole)) on a **placeholder** taxel layout until the
-slipper's real geometry arrives. The model is still idealised -- no noise,
+[Tactile sole](#tactile-sole)) on the slipper's real 26-taxel layout. The
+model is still idealised -- no noise,
 latency or calibration error -- so the set is diagnostic for now.
 
 ## Quick start
@@ -44,8 +44,8 @@ python scripts/aggregate.py
 | `Sendg1-Velocity-Rough-G1-ContactOracle` | + idealised foot contact | 104 |
 | `Sendg1-Beam-G1-Blind` | proprioception, no command | 93 |
 | `Sendg1-Beam-G1-ContactOracle` | + idealised foot contact | 101 |
-| `Sendg1-Velocity-{Flat,Rough}-G1-TactileArray` | + per-taxel normal & shear | 240 |
-| `Sendg1-Beam-G1-TactileArray` | + per-taxel normal & shear | 237 |
+| `Sendg1-Velocity-{Flat,Rough}-G1-TactileArray` | + per-taxel normal & shear | 252 |
+| `Sendg1-Beam-G1-TactileArray` | + per-taxel normal & shear | 249 |
 
 Because the height scan is gone, flat and rough share a 96-dim actor input
 space: one architecture serves both, and flat->rough transfer stays a
@@ -139,13 +139,20 @@ fingerprint -- is unchanged.
 ```bash
 python scripts/show_sole.py          # the sole as simulated: mesh, capsules, taxels
 python scripts/tactile_viewer.py     # MP4 of the robot walking + live taxel readings
+python scripts/export_foot_cad.py    # foot as DXF + STL in the sole frame, mm (needs .[cad])
 python scripts/sweep.py --tasks flat --obs-sets tactile_array --seeds 0
 ```
 
 - **Layout** (`common/tactile/layout.py`): taxel patches in the sole frame
-  (`*_ankle_roll_link`, sole plane at z = -0.035 m), right foot mirrored.
-  Currently `placeholder_8x3`: 24 patches of 20 mm. Swap in the real layout
-  here -- nothing downstream assumes a grid.
+  (`*_ankle_roll_link`, sole plane at z = -0.035 m). The slipper sensor is one
+  part used 1:1 on both feet, so taxel `i` sits at the same (x, y) on each
+  (`mirror_right=False`).
+  Currently `slipper_v1`: 26 patches of 12 mm, loaded from
+  `common/tactile/layouts/slipper_v1.csv` (mm, left foot, exported from the
+  slipper CAD in the frame of `scripts/export_foot_cad.py`). Taxel `i` is sensor
+  id `i`. The loader rejects ids that are not 0..N-1, rotated patches, overlaps,
+  and patches past the foot outline. A new layout is a new CSV plus one line in
+  `LAYOUTS`; nothing downstream assumes a grid.
 - **Why not bin contact points**: the sim foot is 7 rigid capsules, and on flat
   ground MuJoCo only contacts their end caps -- a line under the heel and one
   under the toe. Binning would leave the mid-foot taxels at zero while the foot
@@ -157,8 +164,8 @@ python scripts/sweep.py --tasks flat --obs-sets tactile_array --seeds 0
   split over the supported taxels as a plane of pressure (a rigid sole on a
   thin elastic layer) that reproduces the force and CoP exactly, dropping any
   taxel it puts in tension. Shear is shared in proportion to normal load.
-- **Observation**: per foot `[normal(24), shear_x(24), shear_y(24)]` in N,
-  sole frame, `sign(x)·log1p(|x|)` -- 144 dims.
+- **Observation**: per foot `[normal(26), shear_x(26), shear_y(26)]` in N,
+  sole frame, `sign(x)·log1p(|x|)` -- 156 dims.
 - **Cost**: ~15% of training throughput on flat ground (147k vs 173k steps/s
   at 8192 envs).
 - **Not modelled yet**: sensor noise, latency, per-taxel gain/offset,
@@ -229,8 +236,7 @@ this 3.11 env. It injects 7 pytest plugins that crash on import.
 
 ## Open
 
-- The real taxel layout (from the slipper CAD) and the sensor's rate, latency,
-  noise and units. Until then `tactile_array` runs on `placeholder_8x3`.
+- The sensor's rate, latency, noise and units. The layout is in (`slipper_v1`).
 - Seeds: 1 for now (directional only). 5 before any reported claim.
 - `num_envs`: per-task, tune with `scripts/tune_num_envs.py`. On a 12 GB 5070,
   throughput saturates around 8192 (~220k steps/s); larger fits but buys nothing.

@@ -78,8 +78,9 @@ def foot_mesh(side: Side):
 
 
 def flat_ground_contact_points(side: Side) -> np.ndarray:
-  """Where MuJoCo puts contacts when the foot is flat on a plane: under each
-  end of every capsule. [N, 2] in the sole frame."""
+  """Capsule end points: when a capsule lies along a surface, MuJoCo stores
+  that line contact as 2 contacts here, one per end. [N, 2] in the sole
+  frame."""
   pts = []
   for c in foot_capsules(side):
     pts += [c.p0[:2], c.p1[:2]]

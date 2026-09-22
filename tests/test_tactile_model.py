@@ -54,6 +54,54 @@ def test_overlapping_patches_are_rejected() -> None:
     grid_layout("bad", rows=8, cols=3, patch=0.03)
 
 
+def test_slipper_layout_is_the_default_and_matches_the_csv() -> None:
+  from sendg1.common.tactile.layout import DEFAULT_LAYOUT
+
+  assert DEFAULT_LAYOUT == "slipper_v1"
+  slipper = LAYOUTS["slipper_v1"]
+  assert slipper.num_taxels == 26
+  assert slipper.centers[0] == pytest.approx((-0.05661, 0.0))
+  assert slipper.centers[20] == pytest.approx((0.0931, -0.0257))
+  assert all(h == pytest.approx((0.006, 0.006)) for h in slipper.half_sizes)
+
+
+def test_slipper_sensor_is_the_same_part_on_both_feet() -> None:
+  """Not mirrored: channel i sits at the same (x, y) on both soles."""
+  slipper = LAYOUTS["slipper_v1"]
+  assert slipper.for_side("right") == slipper.for_side("left")
+  assert slipper.sample_points("right", 2) == slipper.sample_points("left", 2)
+
+
+def _write_csv(tmp_path, rows):
+  path = tmp_path / "layout.csv"
+  lines = ["id,cx,cy,width_x,length_y,rotation_deg"]
+  lines += [",".join(str(v) for v in r) for r in rows]
+  path.write_text("\n".join(lines) + "\n")
+  return path
+
+
+@pytest.mark.parametrize(
+  ("rows", "match"),
+  [
+    ([(0, -93.1, -25.7, 12, 12, 0)], "extends past the foot"),
+    ([(0, 0, 0, 12, 12, 0), (1, 5, 0, 12, 12, 0)], "overlap"),
+    ([(0, 0, 0, 12, 12, 0), (2, 20, 0, 12, 12, 0)], "ids must be"),
+  ],
+)
+def test_csv_layout_rejects_bad_rows(tmp_path, rows, match) -> None:
+  from sendg1.common.tactile.layout import csv_layout
+
+  with pytest.raises(ValueError, match=match):
+    csv_layout("bad", _write_csv(tmp_path, rows))
+
+
+def test_csv_layout_rejects_rotation(tmp_path) -> None:
+  from sendg1.common.tactile.layout import csv_layout
+
+  with pytest.raises(NotImplementedError):
+    csv_layout("bad", _write_csv(tmp_path, [(0, 0, 0, 12, 12, 15)]))
+
+
 def test_centred_load_on_full_support_is_uniform_and_conserved() -> None:
   mean = CENTERS.mean(0)
   normal, shear = _split([10.0, -4.0, 300.0], mean, torch.ones(T))

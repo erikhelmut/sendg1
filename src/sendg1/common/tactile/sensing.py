@@ -23,7 +23,7 @@ from sendg1.common.sensors import (
   taxel_ray_sensor_name,
 )
 from sendg1.common.tactile import model
-from sendg1.common.tactile.layout import LAYOUTS, SIDES, TaxelLayout
+from sendg1.common.tactile.layout import DEFAULT_LAYOUT, LAYOUTS, SIDES, TaxelLayout
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -34,7 +34,7 @@ class TactileParams:
   """Sensor-model settings. Kept separate from the layout: the layout is the
   hardware, these are modelling choices."""
 
-  layout: str = "placeholder_8x3"
+  layout: str = DEFAULT_LAYOUT
   rays_per_axis: int = 2
   """Support is sampled on a rays_per_axis^2 grid within each patch."""
   compliance_depth: float = 0.004

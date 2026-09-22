@@ -25,8 +25,8 @@ BASE_ACTOR_DIM = {
 EXTRA_ACTOR_DIM = {
   "blind": 0,
   "contact_oracle": 8,
-  # 2 feet x 24 placeholder taxels x (normal, shear_x, shear_y).
-  "tactile_array": 144,
+  # 2 feet x 26 taxels (slipper_v1) x (normal, shear_x, shear_y).
+  "tactile_array": 156,
 }
 
 

@@ -30,11 +30,16 @@ REPO = Path(__file__).resolve().parent.parent
 SCHEDULE = [
   (2.0, 0.0, 0.0, 0.0, "stand"),
   (3.0, 0.6, 0.0, 0.0, "forward"),
-  (2.5, 0.6, 0.0, 0.6, "forward + turn"),
+  (2.5, 0.6, 0.0, 0.6, "forward + turn left"),
+  (2.5, 0.6, 0.0, -0.6, "forward + turn right"),
   (2.5, 0.0, 0.4, 0.0, "strafe left"),
   (2.0, -0.4, 0.0, 0.0, "reverse"),
   (1.5, 0.0, 0.0, 0.0, "stand"),
 ]
+
+
+NET_SHEAR_M_PER_N = 0.001
+"""Whole-foot shear arrow length: 1 mm per newton (1 cm = 10 N)."""
 
 
 class SolePanel:
@@ -45,6 +50,7 @@ class SolePanel:
     import matplotlib
 
     matplotlib.use("Agg")
+    import matplotlib.patheffects as pe
     import matplotlib.pyplot as plt
     from matplotlib.collections import PatchCollection
     from matplotlib.colors import Normalize
@@ -62,6 +68,7 @@ class SolePanel:
     self.norm = Normalize(vmin=0.05, vmax=vmax)
     self.cmap = cmap
     self.patches, self.quivers, self.cops, self.titles = [], [], [], []
+    self.net_quivers = []
     for col, side in enumerate(("left", "right")):
       ax = self.fig.add_subplot(gs[0, col])
       viz.draw_mesh_plan(ax, side)
@@ -71,25 +78,45 @@ class SolePanel:
       ax.add_collection(pc)
       c = np.array(layout.for_side(side))
       q = ax.quiver(c[:, 0], c[:, 1], np.zeros(len(c)), np.zeros(len(c)),
-                    angles="xy", scale_units="xy", scale=1.0 / 0.002,
+                    angles="xy", scale_units="xy", scale=1.0 / 0.0005,
                     color=viz.INK, width=0.006, zorder=5)
       (cop,) = ax.plot([], [], "o", ms=7, mfc=viz.CAPSULE, mec=viz.SURFACE, mew=1.5,
                        zorder=6)
+      # Whole-foot shear, drawn from the CoP: per-taxel arrows are ~1/26 of it.
+      net_q = ax.quiver([0.0], [0.0], [0.0], [0.0], angles="xy", scale_units="xy",
+                        scale=1.0 / NET_SHEAR_M_PER_N, color=viz.CAPSULE, width=0.012,
+                        zorder=8, edgecolor=viz.SURFACE, linewidth=0.8)
+      self.net_quivers.append(net_q)
+      # Taxel ids, readable on any fill: the same number must sit at the same
+      # place on both feet (one sensor part, not mirrored).
+      for i, ((x, y), (hx, hy)) in enumerate(zip(layout.for_side(side), layout.half_sizes)):
+        ax.text(x - hx + 0.0006, y + hy - 0.0006, str(i), ha="left", va="top",
+                fontsize=5.5, color=viz.INK, zorder=7,
+                path_effects=[pe.withStroke(linewidth=1.6, foreground=viz.SURFACE)])
       viz.style_plan_axes(ax)
       ax.set_xlabel("")
       ax.set_ylabel("")
       ax.set_xticks([])
       ax.set_yticks([])
-      ax.text(0.99, 0.02, "toe →", transform=ax.transAxes, ha="right", va="bottom",
+      # Orientation: view from above, toe to the right, robot's left up.
+      outer_up = side == "left"
+      ax.text(0.99, 0.03, "toe →", transform=ax.transAxes, ha="right", va="bottom",
               fontsize=7, color=viz.INK_2)
+      ax.text(0.01, 0.03, "← heel", transform=ax.transAxes, ha="left", va="bottom",
+              fontsize=7, color=viz.INK_2)
+      ax.text(0.5, 0.97, ("outer" if outer_up else "inner") + " edge  ·  robot's left ↑",
+              transform=ax.transAxes, ha="center", va="top", fontsize=7, color=viz.INK_2)
+      ax.text(0.5, 0.03, ("inner" if outer_up else "outer") + " edge",
+              transform=ax.transAxes, ha="center", va="bottom", fontsize=7, color=viz.INK_2)
       self.titles.append(ax.set_title(side, loc="left", fontsize=10, color=viz.INK))
       self.patches.append(pc)
       self.quivers.append(q)
       self.cops.append(cop)
     cb = self.fig.colorbar(self.patches[1], ax=self.fig.axes[:2], orientation="horizontal",
                            fraction=0.05, pad=0.05, aspect=40, extend="min")
-    cb.set_label("normal force per taxel (N)  ·  arrow: shear, 1 cm = 5 N  ·  "
-                 "dot: centre of pressure", fontsize=8, color=viz.INK_2)
+    cb.set_label("normal force per taxel (N)  ·  dot: centre of pressure  ·  "
+                 f"orange arrow: foot's total shear, 1 cm = {0.01 / NET_SHEAR_M_PER_N:.0f} N",
+                 fontsize=8, color=viz.INK_2)
     cb.ax.tick_params(labelsize=7, colors=viz.INK_2)
     cb.outline.set_edgecolor(viz.MESH)
 
@@ -127,8 +154,12 @@ class SolePanel:
       self.quivers[f].set_UVC(shear[f, :, 0], shear[f, :, 1])
       if fn[f] > 1.0:
         self.cops[f].set_data([cop[f, 0]], [cop[f, 1]])
+        total = shear[f].sum(0)
+        self.net_quivers[f].set_offsets([cop[f]])
+        self.net_quivers[f].set_UVC([total[0]], [total[1]])
       else:
         self.cops[f].set_data([], [])
+        self.net_quivers[f].set_UVC([0.0], [0.0])
       side = ("left", "right")[f]
       self.titles[f].set_text(f"{side} foot  ·  {fn[f]:5.0f} N")
     self.hist = np.roll(self.hist, -1, axis=1)

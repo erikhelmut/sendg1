@@ -71,7 +71,7 @@ OBS_SETS: dict[str, ObsSet] = {
     diagnostic=True,
     description=(
       "Adds per-taxel normal and shear force on both soles to the actor. "
-      "Diagnostic while the sensor model is idealised (placeholder layout, no "
+      "Diagnostic while the sensor model is idealised (no "
       "noise, latency or calibration error): it measures what spatially "
       "resolved sole contact could add over contact_oracle's net force."
     ),
