@@ -587,6 +587,21 @@ def track_angular_velocity(env: ManagerBasedRlEnv, std: float = 0.7) -> torch.Te
   return torch.exp(-torch.square(cmd[:, 2] - actual) / std**2)
 
 
+def box_progress(env: ManagerBasedRlEnv, max_speed: float = 0.4) -> torch.Tensor:
+  """Decrease in box-to-target distance, as a speed normalised to [-1, 1].
+
+  The task term, and deliberately the largest one. Command tracking alone is
+  gameable: the pilot's command is a function of where the robot IS, so a
+  policy can circle the box forever, tracking an easy command and never taking
+  the load. A 5,000-iteration run did exactly that -- reward 33 and rising,
+  success 0%, the box untouched. Progress is measured on the BOX, which no
+  amount of repositioning can fake.
+  """
+  st = BoxPushState.get(env)
+  st.update()
+  return (st.delta / env.step_dt).clamp(-max_speed, max_speed) / max_speed
+
+
 def box_to_target(env: ManagerBasedRlEnv, std: float = 2.5) -> torch.Tensor:
   """VOFA's push reward: exp(-||goal - box||^2 / std^2). Pays every step the
   box is anywhere near the target, and more the closer it gets."""

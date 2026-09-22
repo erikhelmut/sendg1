@@ -40,7 +40,9 @@ from sendg1.common.box_push.scene import (
 from sendg1.common.events import build_events
 from sendg1.common.obs.groups import build_groups
 from sendg1.common.obs.obs_sets import uses_tactile_array
-from sendg1.common.rewards import build_rewards
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+
+from sendg1.common.rewards import POSE_STD_WALKING, build_rewards
 from sendg1.common.robots.g1 import (
   DofSet,
   G1_TORSO_BODY,
@@ -86,8 +88,11 @@ BOX_TIP_ANGLE = math.radians(45.0)
 #
 # | term              | weight | value                                       |
 # |-------------------|--------|---------------------------------------------|
-# | track_lin_vel     |  +2.0  | exp(-|v_cmd - v|^2 / 0.5^2), pilot command   |
-# | track_ang_vel     |  +2.0  | exp(-(wz_cmd - wz)^2 / 0.7^2)                |
+# | upright           |  +1.0  | the velocity task's term, unchanged          |
+# | posture           |  +1.0  | the velocity task's walking tolerances       |
+# | box_progress      |  +4.0  | box speed toward the target, /0.4 m/s        |
+# | track_lin_vel     |  +1.0  | exp(-|v_cmd - v|^2 / 0.5^2), pilot command   |
+# | track_ang_vel     |  +1.0  | exp(-(wz_cmd - wz)^2 / 0.7^2)                |
 # | box_to_target     |  +2.5  | exp(-d_box_target^2 / 2.5^2)                 |
 # | success           | +20.0  | once, box in the disc for 2 s                |
 # | hand_contact      |  +0.5  | 1 while a hand/forearm is on the push face   |
@@ -108,13 +113,29 @@ BOX_TIP_ANGLE = math.radians(45.0)
 # replace VOFA's reach and alignment terms, which the scripted pilot
 # (common/box_push/pilot.py) now handles geometrically.
 #
-# Weights are not tuned. Per second, roughly: perfect tracking pays 4, a box
+# upright and posture are the velocity task's positive terms, and they are what
+# make staying alive worth more than the -10 fall penalty REGARDLESS of how the
+# task is going. Without them the only per-step income was command tracking,
+# whose exp kernel pays ~0 while the error is large, so early in training a
+# policy that dove at the floor in 0.3 s beat one that kept walking: a run
+# without them collapsed to 99.97% falls-before-contact by iteration 1,000.
+#
+# Command tracking is SHAPING, not the objective, and is weighted below the
+# box terms on purpose: the pilot's command is a function of the robot's own
+# position, so tracking it is gameable -- a run with tracking at 2.0 and no
+# progress term circled the box forever (reward 33, success 0%, box untouched
+# at iteration 5,000). Progress is measured on the box and cannot be faked.
+#
+# Weights are not tuned. Per second, roughly: perfect tracking pays 2, a box
 # at the target 2.5, a foot sliding at 0.3 m/s costs 0.18, a 10-degree box tilt
 # 0.15.
 
 REWARD_WEIGHTS: dict[str, float] = {
-  "track_lin_vel": 2.0,
-  "track_ang_vel": 2.0,
+  "upright": 1.0,
+  "posture": 1.0,
+  "box_progress": 4.0,
+  "track_lin_vel": 1.0,
+  "track_ang_vel": 1.0,
   "box_to_target": 2.5,
   "success": 20.0,
   "hand_contact": 0.5,
@@ -131,6 +152,10 @@ TRACK_LIN_STD = 0.5
 """m/s. The velocity task uses sqrt(0.25); the same tolerance."""
 TRACK_ANG_STD = 0.7
 """rad/s. The velocity task uses sqrt(0.5)."""
+BOX_PROGRESS_MAX_SPEED = 0.4
+"""m/s of box motion toward the target above which box_progress pays no more.
+Below the pilot's 0.5 m/s push command: a heavy box does not move that fast,
+and rewarding speed the floor cannot deliver just asks the feet to slip."""
 BOX_TO_TARGET_STD = 2.5
 """m. VOFA uses 10 m for a 3 m task, i.e. an almost flat potential. 2.5 m over
 our 2-4 m keeps a usable gradient toward the target."""
@@ -147,7 +172,22 @@ def build_box_push_rewards() -> dict[str, RewardTermCfg]:
   shared = build_rewards()
   action_rate = shared["action_rate_l2"]
   assert action_rate.weight == w["action_rate_l2"]
+  assert shared["upright"].weight == w["upright"]
   return {
+    "upright": shared["upright"],
+    "posture": RewardTermCfg(
+      func=envs_mdp.posture,
+      weight=w["posture"],
+      params={
+        "std": POSE_STD_WALKING,
+        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+      },
+    ),
+    "box_progress": RewardTermCfg(
+      func=box_mdp.box_progress,
+      weight=w["box_progress"],
+      params={"max_speed": BOX_PROGRESS_MAX_SPEED},
+    ),
     "track_lin_vel": RewardTermCfg(
       func=box_mdp.track_linear_velocity,
       weight=w["track_lin_vel"],
