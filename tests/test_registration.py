@@ -21,6 +21,10 @@ BASE_ACTOR_DIM = {
   "Sendg1-Velocity-Rough-G1": 96,
   # No command: the beam task tells the actor nothing about where to go.
   "Sendg1-Beam-G1": 93,
+  # No command; + box position (3), box yaw (2), target relative to box (2).
+  "Sendg1-BoxPush-G1": 100,
+  "Sendg1-BoxPushCurriculum-G1": 100,
+  "Sendg1-BoxPushPatches-G1": 100,
 }
 EXTRA_ACTOR_DIM = {
   "blind": 0,

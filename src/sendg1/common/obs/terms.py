@@ -13,6 +13,12 @@ Availability
                 current implementation is idealised (noiseless, zero-latency,
                 perfectly calibrated). Legal in an actor group ONLY for obs sets
                 explicitly marked diagnostic.
+``perceived``   Not measured by the G1 itself, but ASSUMED provided by an
+                external perception stack as part of a task's specification
+                (the box-pushing task's box pose and target). Legal in an actor
+                group, in every obs set -- so it is a control variable, never
+                the treatment. The assumption is the task's, and is stated in
+                each term's rationale.
 ``privileged``  Simulation state with no hardware counterpart, or requiring a
                 perception/estimation stack we do not have. Critic only, always.
 """
@@ -28,9 +34,10 @@ from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
 from sendg1.common.beam import mdp as beam_mdp
+from sendg1.common.box_push import mdp as box_mdp
 from sendg1.common.tactile.sensing import TactileParams, tactile_array_obs
 
-Availability = Literal["onboard", "oracle", "privileged"]
+Availability = Literal["onboard", "oracle", "perceived", "privileged"]
 
 TERRAIN_SCAN_SENSOR = "terrain_scan"
 TERRAIN_SCAN_MAX_DISTANCE = 5.0
@@ -184,6 +191,34 @@ def _beam_width() -> ObservationTermCfg:
   return ObservationTermCfg(func=beam_mdp.beam_width_obs)
 
 
+# ---------------------------------------------------------------------------
+# Box pushing. Perceived terms (actor) carry small noise; privileged ones do not.
+# ---------------------------------------------------------------------------
+
+BOX_POS_NOISE = 0.02
+"""m, uniform +/-, on the perceived box position and target offset."""
+BOX_YAW_NOISE = 0.03
+"""On each of (sin, cos) of the perceived relative yaw (~ +/-1.7 deg)."""
+
+
+def _box_term(func, noise: float | None = None) -> Callable[[], ObservationTermCfg]:
+  def build() -> ObservationTermCfg:
+    return ObservationTermCfg(
+      func=func,
+      noise=None if noise is None else Unoise(n_min=-noise, n_max=noise),
+    )
+
+  return build
+
+
+_PERCEPTION_ASSUMPTION = (
+  "Box-pushing task assumption: an external perception stack (e.g. a head "
+  "camera with box and floor-marker tracking) reports this. Not a G1 sensor; "
+  "identical in every obs set, so it cannot account for a difference between "
+  "them. Noise is small and uniform, with no latency or dropout."
+)
+
+
 TERMS: dict[str, TermSpec] = {
   # -- onboard ---------------------------------------------------------------
   "base_ang_vel": TermSpec(
@@ -291,6 +326,87 @@ TERMS: dict[str, TermSpec] = {
     "privileged",
     "Beam width at the env's curriculum level: a property of the world, not a "
     "measurement.",
+  ),
+  # -- box pushing: perceived (actor) -----------------------------------------
+  "box_pos_b": TermSpec(
+    _box_term(box_mdp.box_pos_b, BOX_POS_NOISE),
+    "perceived",
+    "Box centre in the pelvis frame. " + _PERCEPTION_ASSUMPTION,
+  ),
+  "box_yaw_b": TermSpec(
+    _box_term(box_mdp.box_yaw_b, BOX_YAW_NOISE),
+    "perceived",
+    "Box yaw relative to the pelvis heading, (sin, cos). " + _PERCEPTION_ASSUMPTION,
+  ),
+  "target_rel_box": TermSpec(
+    _box_term(box_mdp.target_rel_box, BOX_POS_NOISE),
+    "perceived",
+    "Target centre minus box centre, xy in the pelvis yaw frame. "
+    + _PERCEPTION_ASSUMPTION,
+  ),
+  # -- box pushing: privileged (critic) ---------------------------------------
+  "box_pos_b_true": TermSpec(
+    _box_term(box_mdp.box_pos_b),
+    "privileged",
+    "Noise-free box_pos_b.",
+  ),
+  "box_yaw_b_true": TermSpec(
+    _box_term(box_mdp.box_yaw_b),
+    "privileged",
+    "Noise-free box_yaw_b.",
+  ),
+  "target_rel_box_true": TermSpec(
+    _box_term(box_mdp.target_rel_box),
+    "privileged",
+    "Noise-free target_rel_box.",
+  ),
+  "floor_mu_under_feet": TermSpec(
+    _box_term(box_mdp.floor_mu_under_feet),
+    "privileged",
+    "Friction coefficient of the floor under each foot (the episode's floor "
+    "mu, or a low-friction patch's). The quantity the policy must infer.",
+  ),
+  "box_mass": TermSpec(
+    _box_term(box_mdp.box_mass),
+    "privileged",
+    "Sampled box mass. A property of the world, not a measurement.",
+  ),
+  "box_mu": TermSpec(
+    _box_term(box_mdp.box_mu),
+    "privileged",
+    "Sampled box-floor friction coefficient.",
+  ),
+  "box_size": TermSpec(
+    _box_term(box_mdp.box_size),
+    "privileged",
+    "Sampled box extents (depth, width, height).",
+  ),
+  "box_lin_vel": TermSpec(
+    _box_term(box_mdp.box_lin_vel),
+    "privileged",
+    "Box linear velocity, pelvis yaw frame. Would need box tracking with "
+    "reliable differentiation.",
+  ),
+  "box_ang_vel": TermSpec(
+    _box_term(box_mdp.box_ang_vel),
+    "privileged",
+    "Box angular velocity, pelvis yaw frame.",
+  ),
+  "box_up": TermSpec(
+    _box_term(box_mdp.box_up),
+    "privileged",
+    "Box z axis in the world: how far it is tipping.",
+  ),
+  "foot_slip_vel": TermSpec(
+    _box_term(box_mdp.foot_slip_vel),
+    "privileged",
+    "Tangential sole velocity of each foot while in contact, pelvis yaw frame. "
+    "Exactly the slip the reward penalises; no hardware measures it directly.",
+  ),
+  "push_force": TermSpec(
+    _box_term(box_mdp.push_force),
+    "privileged",
+    "Net contact force of the robot on the box, from the simulator.",
   ),
 }
 

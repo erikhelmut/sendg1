@@ -46,6 +46,9 @@ python scripts/aggregate.py
 | `Sendg1-Beam-G1-ContactOracle` | + idealised foot contact | 101 |
 | `Sendg1-Velocity-{Flat,Rough}-G1-TactileArray` | + per-taxel normal & shear | 252 |
 | `Sendg1-Beam-G1-TactileArray` | + per-taxel normal & shear | 249 |
+| `Sendg1-BoxPush{,Curriculum,Patches}-G1-Blind` | proprioception, box pose, target | 100 |
+| `Sendg1-BoxPush{,Curriculum,Patches}-G1-ContactOracle` | + idealised foot contact | 108 |
+| `Sendg1-BoxPush{,Curriculum,Patches}-G1-TactileArray` | + per-taxel normal & shear | 256 |
 
 Because the height scan is gone, flat and rough share a 96-dim actor input
 space: one architecture serves both, and flat->rough transfer stays a
@@ -79,6 +82,57 @@ beam goes, so following a bend means sensing where the support is.
   usual MLP, fed privileged beam state and the height scan.
 - **Primary metric**: progress fraction, averaged per (bend type, width) cell.
   Declared in `eval/metrics.py`.
+
+### Box pushing under unknown floor friction
+
+The robot starts 0.6-1.0 m behind a box (gap to its near face) and must push it
+into a 0.5 m disc 2-4 m away, within +/-30 degrees of straight ahead. Per
+episode: floor mu U[0.2, 1.0], box mass U[10, 40] kg, box-floor mu U[0.2, 0.8],
+box 0.4-0.6 x 0.4-0.6 x 0.6-0.9 m. All ranges live in
+`common/box_push/params.py`; weights and terminations in
+`tasks/box_push/env_cfg.py` (one table).
+
+- **Friction model.** MuJoCo max-mixes friction for equal priorities, and the
+  G1 foot capsules carry priority 1, so priorities are set so each contact takes
+  exactly one sampled value: foot/floor -> floor mu, box/floor -> box mu,
+  **hand/box -> box mu** (a coupling). Verified per contact in the solver by
+  `tests/test_box_push.py`. The shared foot-friction DR is removed here: it
+  would be inert.
+- **Actor** sees proprioception (no command) plus box position and yaw
+  relative to the pelvis and the target relative to the box, with small
+  uniform noise. These are `perceived` terms: an assumed perception stack, not a
+  G1 sensor, identical in every obs set. **Critic** adds floor mu under each
+  foot, box mass/mu/size, box velocity and tilt, sole slip velocities, the
+  push force, and noise-free box/target terms.
+- **Terminations:** success, torso tilt > 70 deg or pelvis < 0.40 m (fall), box
+  tilt > 45 deg, 20 s timeout, NaN.
+- **Flags** are separate registered tasks: `Sendg1-BoxPushCurriculum-G1-*`
+  (global difficulty alpha: box mass, floor mu and box mu grow from the easy
+  corner 10 kg / 1.0 / 0.2 in 0.1 steps when >= 50% of a 512-episode window
+  succeeds, back when < 20%) and `Sendg1-BoxPushPatches-G1-*` (1-3 patches of
+  mu 0.1-0.3, 0.4-1.0 m square, on the start-to-target line).
+- **Per-episode log** (`Episode_Metrics/*` in training; one CSV row per episode
+  in evaluation): success, time to target, full-foot slip events (a foot in
+  contact whose heel and toe both slide > 0.1 m/s for >= 60 ms; counted once
+  per slide), falls, box
+  tipped, mean horizontal push force over contact steps, share of push impulse
+  applied in double support, floor mu, box mass, box mu.
+- **Throughput:** 4,096 envs, ~125k steps/s on the 5070 (8,192: 146k). The
+  box's derived inertia constants are written analytically per reset; mjlab's
+  generic `set_const` path recomputes every world on every step and was 2.4x
+  slower.
+
+```bash
+python scripts/box_push_feasibility.py                 # traction/tipping margins of the ranges
+python scripts/box_push_video.py --random --episodes 4 # scene check
+python scripts/sweep.py --tasks box_push --obs-sets blind contact_oracle tactile_array --seeds 0 1 2
+python scripts/evaluate_box_push.py --task Sendg1-BoxPush-G1-Blind --seed 0
+python scripts/plot_box_push_curves.py runs/box_push__blind/<run> --out curves.png
+```
+
+Evaluation (`eval/box_push.py`): floor mu {0.2..1.0} x mass {10..40} kg, 32
+episodes per cell. Every episode's world (box mu, size, gap, target) is drawn
+from the protocol seed and pinned, so every policy meets the same 640 episodes.
 
 ## The three design rules
 

@@ -37,11 +37,20 @@ _VELOCITY_ACTOR = frozenset(
     "command",
   }
 )
+# Box pushing: no command, plus the task's assumed box and target perception.
+_BOX_PUSH_ACTOR = (_VELOCITY_ACTOR - {"command"}) | {
+  "box_pos_b",
+  "box_yaw_b",
+  "target_rel_box",
+}
 EXPECTED_DEPLOYABLE = {
   "Sendg1-Velocity-Flat-G1": _VELOCITY_ACTOR,
   "Sendg1-Velocity-Rough-G1": _VELOCITY_ACTOR,
   # Beam walking gives the robot no command at all.
   "Sendg1-Beam-G1": _VELOCITY_ACTOR - {"command"},
+  "Sendg1-BoxPush-G1": _BOX_PUSH_ACTOR,
+  "Sendg1-BoxPushCurriculum-G1": _BOX_PUSH_ACTOR,
+  "Sendg1-BoxPushPatches-G1": _BOX_PUSH_ACTOR,
 }
 
 
@@ -103,6 +112,19 @@ def test_blind_actor_is_exactly_the_deployable_set() -> None:
       f"{task_id}: blind actor observes {sorted(terms)}, expected "
       f"{sorted(EXPECTED_DEPLOYABLE[base_id])}"
     )
+
+
+def test_perceived_terms_only_reach_box_push_actors() -> None:
+  """``perceived`` is a per-task assumption, not a licence: no other task's
+  actor may pick those terms up."""
+  from sendg1.common.obs.terms import term_names_with
+
+  perceived = term_names_with("perceived")
+  assert perceived == {"box_pos_b", "box_yaw_b", "target_rel_box"}
+  for task_id, (base_id, _) in variants().items():
+    terms = {t for group in _actor_terms(task_id).values() for t in group}
+    if not base_id.startswith("Sendg1-BoxPush"):
+      assert not terms & perceived, f"{task_id}: actor sees {sorted(terms & perceived)}"
 
 
 def test_no_actor_sees_height_scan_or_base_lin_vel() -> None:

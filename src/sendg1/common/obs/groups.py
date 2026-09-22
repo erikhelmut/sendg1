@@ -7,7 +7,10 @@ step regardless of whether a network consumes it.
 Group vocabulary
 ----------------
 ``proprio``       Deployable proprioception. Actor and critic. 96-dim; 93 on
-                  the beam task, which has no command.
+                  the beam task, which has no command. On the box-pushing task
+                  it also carries the task's ``perceived`` terms (box pose,
+                  target): 100-dim. The name is kept so every obs set maps the
+                  actor exactly as on the other tasks.
 ``privileged``    Simulation state, critic only, permanently. Includes the
                   *idealised* foot contact terms: the critic's contact
                   information is deliberately the stable idealised version so
@@ -56,6 +59,28 @@ BEAM_PRIVILEGED_TERMS: tuple[str, ...] = (
 )
 
 
+BOX_PUSH_PERCEIVED_TERMS: tuple[str, ...] = (
+  "box_pos_b",
+  "box_yaw_b",
+  "target_rel_box",
+)
+
+BOX_PUSH_PRIVILEGED_TERMS: tuple[str, ...] = (
+  "box_pos_b_true",
+  "box_yaw_b_true",
+  "target_rel_box_true",
+  "floor_mu_under_feet",
+  "box_mass",
+  "box_mu",
+  "box_size",
+  "box_lin_vel",
+  "box_ang_vel",
+  "box_up",
+  "foot_slip_vel",
+  "push_force",
+)
+
+
 def _terms(names: tuple[str, ...]) -> dict:
   return {name: TERMS[name].build() for name in names}
 
@@ -66,6 +91,7 @@ def build_groups(
   has_terrain_scan: bool,
   with_command: bool = True,
   beam_privileged: bool = False,
+  box_push: bool = False,
 ) -> dict[str, ObservationGroupCfg]:
   """Build exactly the groups ``obs_set`` needs.
 
@@ -77,6 +103,8 @@ def build_groups(
     with_command: include the operator command in ``proprio``. False for tasks
       that give the robot no command (beam walking).
     beam_privileged: add the ground-truth beam terms to the critic.
+    box_push: add the box-pushing task's perceived terms to ``proprio`` and its
+      privileged terms to the critic.
   """
   if obs_set not in OBS_SETS:
     raise KeyError(f"unknown obs_set {obs_set!r}; known: {sorted(OBS_SETS)}")
@@ -91,6 +119,9 @@ def build_groups(
     privileged = privileged + ("height_scan",)
   if beam_privileged:
     privileged = privileged + BEAM_PRIVILEGED_TERMS
+  if box_push:
+    proprio = proprio + BOX_PUSH_PERCEIVED_TERMS
+    privileged = privileged + BOX_PUSH_PRIVILEGED_TERMS
 
   builders = {
     "proprio": lambda: ObservationGroupCfg(

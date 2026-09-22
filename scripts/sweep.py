@@ -25,6 +25,9 @@ TASK_BASES = {
   "flat": "Sendg1-Velocity-Flat-G1",
   "rough": "Sendg1-Velocity-Rough-G1",
   "beam": "Sendg1-Beam-G1",
+  "box_push": "Sendg1-BoxPush-G1",
+  "box_push_curriculum": "Sendg1-BoxPushCurriculum-G1",
+  "box_push_patches": "Sendg1-BoxPushPatches-G1",
 }
 
 
