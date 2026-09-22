@@ -43,19 +43,46 @@ BOX_PRIORITY = 3
 
 @dataclass(frozen=True)
 class BoxPushRanges:
-  """Per-episode sampling ranges. Uniform unless stated otherwise."""
+  """Per-episode sampling ranges. Uniform unless stated otherwise.
 
-  floor_mu: tuple[float, float] = (0.2, 1.0)
-  """Floor friction, i.e. foot-floor friction (see the module docstring)."""
-  box_mass: tuple[float, float] = (10.0, 40.0)
-  """kg. Uniform density: inertia follows mass and size."""
-  box_mu: tuple[float, float] = (0.2, 0.8)
+  Mass is NOT sampled directly. The episode's difficulty is the traction
+  margin -- how much of the robot's foot traction is left over after sliding
+  the box -- and the mass follows from it:
+
+      m_box = (1 - margin) * mu_floor * m_robot / mu_box,  clipped to box_mass
+
+  Sampling the margin instead of the mass is what makes a chosen share of
+  episodes sit near the limit. With mass and floor mu drawn independently the
+  near-limit band is whatever falls out (11% for the first version's ranges,
+  against 23% infeasible); here it is a design parameter. Run
+  ``scripts/box_push_feasibility.py`` for the resulting distribution.
+  """
+
+  traction_margin: tuple[float, float] = (-0.05, 0.40)
+  """1 - required/available push force. Negative: the feet must slip to move
+  the box at all. The upper end keeps a comfortable share in the mix."""
+  floor_mu: tuple[float, float] = (0.25, 0.7)
+  """Floor friction, i.e. foot-floor friction (see the module docstring).
+
+  Capped at 0.7 deliberately. Near the traction limit the required push force
+  IS the available traction, mu_floor * m_robot * g, so training up to mu 1.0
+  would demand pushes of a full body weight -- far past the ~50% body weight
+  VOFA reports as its hardest real-world case. At 0.7 the median episode needs
+  125 N (38% of the robot's weight). Evaluation still scores mu above this, as
+  generalisation."""
+  box_mu: tuple[float, float] = (0.35, 0.7)
   """Box-floor friction, independent of the floor's."""
-  box_width: tuple[float, float] = (0.4, 0.6)
-  """m, along world y at spawn (across the push direction)."""
-  box_depth: tuple[float, float] = (0.4, 0.6)
-  """m, along world x at spawn (along the push direction)."""
-  box_height: tuple[float, float] = (0.6, 0.9)
+  box_mass: tuple[float, float] = (8.0, 50.0)
+  """kg. Clip on the mass the margin implies; ~10% of draws hit an end."""
+
+  box_width: tuple[float, float] = (0.7, 0.9)
+  """m, across the push direction."""
+  box_depth: tuple[float, float] = (0.7, 0.9)
+  """m, along the push direction. Wide and low on purpose: a box tips before
+  it slides when the push height exceeds depth / (2 mu_box), so the first
+  version's 0.4-0.6 m depth tipped 72% of boxes at a 0.7 m push. At 0.7-0.9 m
+  it is ~3% at the 0.55 m push height the G1 reaches."""
+  box_height: tuple[float, float] = (0.6, 0.8)
   """m. The top face is the box height: the box sits on the floor."""
 
   robot_gap: tuple[float, float] = (0.6, 1.0)
@@ -68,7 +95,23 @@ class BoxPushRanges:
   target_angle: tuple[float, float] = (-np.pi / 6, np.pi / 6)
   """rad, relative to straight ahead (+x, the robot's initial facing)."""
   target_radius: float = 0.5
-  """m. Success when the box centre is inside this disc (xy)."""
+  """m. The box centre must be inside this disc (xy) ..."""
+  success_dwell_s: float = 2.0
+  """... and stay there this long. A dwell time, as in VOFA (0.3 m for 2 s):
+  it does not reward a box that skids through the target."""
+
+  push_height_ref: float = 0.55
+  """m. Reference push height for the tipping report only; the G1's hands
+  reach roughly this high when leaning into a box."""
+
+
+def mass_from_margin(
+  margin: np.ndarray, floor_mu: np.ndarray, box_mu: np.ndarray,
+  mass_limits: tuple[float, float], robot_mass: float = G1_MASS_KG,
+) -> np.ndarray:
+  """Box mass that puts an episode at the requested traction margin."""
+  m = (1.0 - margin) * floor_mu * robot_mass / box_mu
+  return np.clip(m, *mass_limits)
 
 
 @dataclass(frozen=True)
@@ -112,15 +155,20 @@ class CurriculumCfg:
 
 
 def curriculum_ranges(r: BoxPushRanges, alpha: float) -> dict[str, tuple[float, float]]:
-  """The sampling ranges at difficulty ``alpha``: easy end first."""
+  """The sampling ranges at difficulty ``alpha``: easy end first.
+
+  Difficulty is the traction margin and the floor: at alpha = 0 every episode
+  has a comfortable margin on a grippy floor; at alpha = 1 the full ranges.
+  Box friction and geometry are always full-range.
+  """
   a = float(np.clip(alpha, 0.0, 1.0))
-  m0, m1 = r.box_mass
+  g0, g1 = r.traction_margin
   f0, f1 = r.floor_mu
-  b0, b1 = r.box_mu
   return {
-    "box_mass": (m0, m0 + a * (m1 - m0)),
+    # Easy = a large margin. The band's lower end walks down to g0.
+    "traction_margin": (g1 - a * (g1 - g0), g1),
     "floor_mu": (f0 + (1.0 - a) * (f1 - f0), f1),
-    "box_mu": (b0, b0 + a * (b1 - b0)),
+    "box_mu": r.box_mu,
   }
 
 

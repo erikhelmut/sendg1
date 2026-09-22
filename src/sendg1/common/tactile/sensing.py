@@ -108,6 +108,42 @@ def read_tactile(env: ManagerBasedRlEnv, params: TactileParams) -> model.Tactile
   )
 
 
+def cached_reading(env: ManagerBasedRlEnv, params: TactileParams) -> model.TactileReading:
+  """``read_tactile`` at most once per env step: the array observation and the
+  aggregate observation both read it."""
+  key = "_sendg1_tactile_reading"
+  stamp, cached = getattr(env, key, (-1, None))
+  if stamp != env.common_step_counter or cached is None:
+    cached = read_tactile(env, params)
+    setattr(env, key, (env.common_step_counter, cached))
+  return cached
+
+
+def tactile_aggregate_obs(
+  env: ManagerBasedRlEnv,
+  layout: str = TactileParams.layout,
+  rays_per_axis: int = TactileParams.rays_per_axis,
+  compliance_depth: float = TactileParams.compliance_depth,
+) -> torch.Tensor:
+  """Per-foot summary of the same sole reading, 12 dims:
+
+      [normal force, shear_x, shear_y, CoP_x, CoP_y, shear/normal] x 2 feet
+
+  All of it is already implied by the per-taxel array, but the last channel --
+  the ratio of tangential to normal force -- is how close the foot is to its
+  friction cone, i.e. its slip margin. Making it explicit saves the network
+  from having to learn a division. Forces are log-compressed as in the array;
+  CoP is in metres in the sole frame.
+  """
+  r = cached_reading(env, TactileParams(layout, rays_per_axis, compliance_depth))
+  fn = r.net_force[..., 2].clamp_min(0.0)  # [B, 2]
+  shear = r.net_force[..., :2]  # [B, 2, 2]
+  ratio = shear.norm(dim=-1) / fn.clamp_min(1.0)
+  forces = torch.stack([fn, shear[..., 0], shear[..., 1]], dim=-1)
+  forces = torch.sign(forces) * torch.log1p(forces.abs())
+  return torch.cat([forces, r.cop, ratio.unsqueeze(-1)], dim=-1).flatten(start_dim=1)
+
+
 def tactile_array_obs(
   env: ManagerBasedRlEnv,
   layout: str = TactileParams.layout,
@@ -117,7 +153,7 @@ def tactile_array_obs(
   """Observation: per foot, [normal(T), shear_x(T), shear_y(T)], each
   ``sign(x) * log1p(|x|)`` of newtons -- the same compression mjlab applies
   to its net contact-force observation. Shape [B, 2 * 3 * T]."""
-  reading = read_tactile(env, TactileParams(layout, rays_per_axis, compliance_depth))
+  reading = cached_reading(env, TactileParams(layout, rays_per_axis, compliance_depth))
   per_foot = torch.cat(
     [reading.normal, reading.shear[..., 0], reading.shear[..., 1]], dim=-1
   )  # [B, 2, 3T]

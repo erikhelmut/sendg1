@@ -21,10 +21,11 @@ BASE_ACTOR_DIM = {
   "Sendg1-Velocity-Rough-G1": 96,
   # No command: the beam task tells the actor nothing about where to go.
   "Sendg1-Beam-G1": 93,
-  # No command; + box position (3), box yaw (2), target relative to box (2).
-  "Sendg1-BoxPush-G1": 100,
-  "Sendg1-BoxPushCurriculum-G1": 100,
-  "Sendg1-BoxPushPatches-G1": 100,
+  # The velocity actor exactly: proprioception + a 3-dim walking command,
+  # here the scripted pilot's rather than the operator's.
+  "Sendg1-BoxPush-G1": 96,
+  "Sendg1-BoxPushCurriculum-G1": 96,
+  "Sendg1-BoxPushPatches-G1": 96,
 }
 EXTRA_ACTOR_DIM = {
   "blind": 0,
@@ -34,9 +35,17 @@ EXTRA_ACTOR_DIM = {
 }
 
 
+BOX_PUSH_TACTILE_EXTRA = 12
+"""The box-push tactile group also carries the per-foot aggregate channels
+(normal, shear x/y, CoP x/y, shear/normal ratio)."""
+
+
 def _expected_actor_dim(task_id: str) -> int:
   base_id, obs_set = variants()[task_id]
-  return BASE_ACTOR_DIM[base_id] + EXTRA_ACTOR_DIM[obs_set]
+  extra = EXTRA_ACTOR_DIM[obs_set]
+  if base_id.startswith("Sendg1-BoxPush") and obs_set == "tactile_array":
+    extra += BOX_PUSH_TACTILE_EXTRA
+  return BASE_ACTOR_DIM[base_id] + extra
 
 
 def test_expected_variants_registered() -> None:

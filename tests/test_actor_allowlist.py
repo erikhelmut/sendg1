@@ -37,12 +37,10 @@ _VELOCITY_ACTOR = frozenset(
     "command",
   }
 )
-# Box pushing: no command, plus the task's assumed box and target perception.
-_BOX_PUSH_ACTOR = (_VELOCITY_ACTOR - {"command"}) | {
-  "box_pos_b",
-  "box_yaw_b",
-  "target_rel_box",
-}
+# Box pushing: the velocity actor, with the scripted pilot's walking command in
+# place of the operator's. The box pose is the pilot's business, not the
+# policy's, so it never reaches an actor.
+_BOX_PUSH_ACTOR = (_VELOCITY_ACTOR - {"command"}) | {"pilot_command"}
 EXPECTED_DEPLOYABLE = {
   "Sendg1-Velocity-Flat-G1": _VELOCITY_ACTOR,
   "Sendg1-Velocity-Rough-G1": _VELOCITY_ACTOR,
@@ -120,7 +118,7 @@ def test_perceived_terms_only_reach_box_push_actors() -> None:
   from sendg1.common.obs.terms import term_names_with
 
   perceived = term_names_with("perceived")
-  assert perceived == {"box_pos_b", "box_yaw_b", "target_rel_box"}
+  assert perceived == {"pilot_command"}
   for task_id, (base_id, _) in variants().items():
     terms = {t for group in _actor_terms(task_id).values() for t in group}
     if not base_id.startswith("Sendg1-BoxPush"):

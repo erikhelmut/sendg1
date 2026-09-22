@@ -59,11 +59,9 @@ BEAM_PRIVILEGED_TERMS: tuple[str, ...] = (
 )
 
 
-BOX_PUSH_PERCEIVED_TERMS: tuple[str, ...] = (
-  "box_pos_b",
-  "box_yaw_b",
-  "target_rel_box",
-)
+BOX_PUSH_PERCEIVED_TERMS: tuple[str, ...] = ("pilot_command",)
+"""What the box-push actor gets beyond proprioception: the scripted pilot's
+walking command. Three dims, like the velocity tasks' operator command."""
 
 BOX_PUSH_PRIVILEGED_TERMS: tuple[str, ...] = (
   "box_pos_b_true",
@@ -110,6 +108,7 @@ def build_groups(
     raise KeyError(f"unknown obs_set {obs_set!r}; known: {sorted(OBS_SETS)}")
   wanted = set(OBS_SETS[obs_set].group_names)
 
+  tactile_terms = TACTILE_ARRAY_TERMS
   proprio = PROPRIO_TERMS
   if not with_command:
     proprio = tuple(t for t in proprio if t != "command")
@@ -122,6 +121,7 @@ def build_groups(
   if box_push:
     proprio = proprio + BOX_PUSH_PERCEIVED_TERMS
     privileged = privileged + BOX_PUSH_PRIVILEGED_TERMS
+    tactile_terms = tactile_terms + ("tactile_aggregate",)
 
   builders = {
     "proprio": lambda: ObservationGroupCfg(
@@ -140,7 +140,7 @@ def build_groups(
       enable_corruption=False,
     ),
     "tactile_array": lambda: ObservationGroupCfg(
-      terms=_terms(TACTILE_ARRAY_TERMS),
+      terms=_terms(tactile_terms),
       concatenate_terms=True,
       enable_corruption=False,
     ),

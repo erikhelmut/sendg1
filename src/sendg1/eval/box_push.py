@@ -29,14 +29,15 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class BoxPushProtocol:
   version: str = "box_push_v1"
-  floor_mu: tuple[float, ...] = (0.2, 0.4, 0.6, 0.8, 1.0)
+  floor_mu: tuple[float, ...] = (0.25, 0.35, 0.45, 0.55, 0.70)
+  """Spans the training range. 0.2 and below would be mostly infeasible."""
   box_mass: tuple[float, ...] = (10.0, 20.0, 30.0, 40.0)
   episodes_per_cell: int = 32
   seed: int = 12345
   """Seeds both the world draws and the env."""
   keep_corruption: bool = True
   """Observation noise stays on, as in training."""
-  video_floor_mu: tuple[float, ...] = (0.2, 1.0)
+  video_floor_mu: tuple[float, ...] = (0.25, 0.70)
   """Cells recorded on video: lowest and highest floor mu, every mass."""
   videos_per_cell: int = 2
 
@@ -51,6 +52,9 @@ class BoxPushProtocol:
 
 EPISODE_FIELDS: tuple[str, ...] = (
   "success",
+  "fell_before_contact",
+  "fell_after_contact",
+  "traction_margin",
   "time_to_target",
   "slip_events",
   "fell",
@@ -94,7 +98,9 @@ def draw_worlds(
     "target_distance": u(ranges.target_distance),
     "target_angle": u(ranges.target_angle),
   }
-  assert set(values) == set(PINNABLE)
+  # A grid pins mass and floor mu directly; the traction margin is then
+  # whatever they imply, so it is left unpinned.
+  assert set(values) <= set(PINNABLE)
   return EpisodeWorlds(cell=cell, values=values)
 
 

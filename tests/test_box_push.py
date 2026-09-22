@@ -44,11 +44,35 @@ def test_feasibility_helpers() -> None:
 
 
 def test_curriculum_ranges_span_easy_corner_to_full() -> None:
+  """alpha 0: a comfortable margin on the grippiest floor. alpha 1: everything."""
   r = BoxPushRanges()
   easy = curriculum_ranges(r, 0.0)
-  assert easy == {"box_mass": (10.0, 10.0), "floor_mu": (1.0, 1.0), "box_mu": (0.2, 0.2)}
+  assert easy["traction_margin"] == (r.traction_margin[1], r.traction_margin[1])
+  assert easy["floor_mu"] == (r.floor_mu[1], r.floor_mu[1])
   full = curriculum_ranges(r, 1.0)
-  assert full == {"box_mass": r.box_mass, "floor_mu": r.floor_mu, "box_mu": r.box_mu}
+  expected = {
+    "traction_margin": r.traction_margin,
+    "floor_mu": r.floor_mu,
+    "box_mu": r.box_mu,
+  }
+  assert full.keys() == expected.keys()
+  for key, (lo, hi) in expected.items():  # the arithmetic leaves float dust
+    assert full[key] == (pytest.approx(lo), pytest.approx(hi))
+
+
+def test_mass_follows_the_traction_margin() -> None:
+  """A zero-margin episode needs exactly the robot's available traction."""
+  import numpy as np
+
+  from sendg1.common.box_push.params import mass_from_margin
+
+  mu_f, mu_b = np.array(0.5), np.array(0.5)
+  m = mass_from_margin(np.array(0.0), mu_f, mu_b, (1.0, 1e6))
+  assert float(mu_b * m) == pytest.approx(float(mu_f * G1_MASS_KG), rel=1e-6)
+  assert traction_margin(mu_f, m, mu_b) == pytest.approx(0.0, abs=1e-9)
+  # Half the margin, half the box.
+  m2 = mass_from_margin(np.array(0.5), mu_f, mu_b, (1.0, 1e6))
+  assert float(m2) == pytest.approx(float(m) * 0.5, rel=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -56,13 +80,15 @@ def test_curriculum_ranges_span_easy_corner_to_full() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_env(num_envs: int = 4, **kwargs):
+def _make_env(num_envs: int = 4, pop_terminations: tuple[str, ...] = (), **kwargs):
   from mjlab.envs import ManagerBasedRlEnv
 
   import sendg1.tasks  # noqa: F401
   from sendg1.tasks.box_push.env_cfg import make_g1_box_push_env_cfg
 
   cfg = make_g1_box_push_env_cfg("blind", num_envs=num_envs, **kwargs)
+  for name in pop_terminations:
+    cfg.terminations.pop(name)
   cfg.seed = 0
   device = "cuda:0" if torch.cuda.is_available() else "cpu"
   env = ManagerBasedRlEnv(cfg=cfg, device=device)
@@ -282,5 +308,94 @@ def test_ball_hand_contact_uses_ball_friction() -> None:
       if {a, b} == {"robot/left_hand_collision", "box/box_geom"}
     ]
     assert hand and all(mu == pytest.approx(BALL_HAND_FRICTION, abs=1e-5) for mu in hand)
+  finally:
+    env.close()
+
+
+@pytest.mark.slow
+def test_pilot_pushes_when_behind_and_circles_when_not() -> None:
+  """The scripted high level's two phases, checked geometrically.
+
+  Env 0 stands behind the box (the spawn), env 1 is teleported past the box,
+  between it and the target -- the wrong side. Behind: drive forward. Wrong
+  side: do not drive at the box, move around it.
+  """
+  from sendg1.common.box_push.mdp import BoxPushState
+
+  env = _make_env(num_envs=2)
+  try:
+    st = BoxPushState.get(env)
+    st.pins["target_angle"][:] = 0.0
+    st.pins["target_distance"][:] = 3.0
+    env.reset()
+    robot = env.scene["robot"]
+    root = robot.data.root_link_pos_w.clone()
+    quat = robot.data.root_link_quat_w.clone()
+    # Env 1: 0.8 m beyond the box, on the far side, still facing +x.
+    root[1, 0] = st.box_pos[1, 0] + st.box_half[1, 0] + 0.8
+    state = torch.cat([root, quat, torch.zeros(2, 6, device=env.device)], dim=-1)
+    robot.write_root_state_to_sim(state)
+    env.step(_zero(env))
+
+    cmd = st.commanded()
+    yaw = robot.data.heading_w
+    # Command back into the world frame.
+    c, s = torch.cos(yaw), torch.sin(yaw)
+    vx_w = c * cmd[:, 0] - s * cmd[:, 1]
+    vy_w = s * cmd[:, 0] + c * cmd[:, 1]
+    vel_w = torch.stack([vx_w, vy_w], dim=-1)
+
+    # Behind the box: push toward the target (+x).
+    assert float(cmd[0, 0]) > 0.2, cmd[0]
+    assert float(vel_w[0, 0]) > 0.2
+
+    # Wrong side: circle the box rather than walk at it. The arc also closes
+    # distance, so some inward component is expected -- but the sideways
+    # component must dominate.
+    to_box = st.box_pos[1, :2] - robot.data.root_link_pos_w[1, :2]
+    to_box = to_box / to_box.norm()
+    direction = vel_w[1] / vel_w[1].norm()
+    inward = float(direction @ to_box)
+    sideways = float((direction - inward * to_box).norm())
+    assert inward < 0.75 and sideways > inward, (vel_w[1], inward, sideways)
+  finally:
+    env.close()
+
+
+@pytest.mark.slow
+def test_success_needs_the_dwell() -> None:
+  """A box inside the disc for one step is not yet a success."""
+  from sendg1.common.box_push.mdp import BoxPushState
+
+  # The robot falls over doing nothing, which would reset the episode and the
+  # dwell; this test is about the dwell alone.
+  env = _make_env(num_envs=2, pop_terminations=("fell_over", "base_too_low"))
+  try:
+    st = BoxPushState.get(env)
+    env.reset()
+    box = env.scene["box"]
+
+    def park_box_on_target() -> None:
+      root = torch.cat(
+        [box.data.root_link_pos_w, box.data.root_link_quat_w,
+         torch.zeros(2, 6, device=env.device)], dim=-1
+      )
+      root[:, :2] = st.target_xy
+      box.write_root_state_to_sim(root)
+
+    park_box_on_target()
+    env.step(_zero(env))
+    assert not bool(st.succeeded.any()), "one step inside the disc must not count"
+    dwell_steps = round(st.ranges.success_dwell_s / env.step_dt)
+    for _ in range(dwell_steps + 1):
+      park_box_on_target()
+      env.step(_zero(env))
+    # Completing the dwell fires the success termination, which resets the env
+    # and archives the episode -- so the record, not the live flag, is the proof.
+    assert bool(st.last_episode.success.all()), "should succeed once the dwell elapses"
+    expected_s = st.ranges.success_dwell_s
+    assert float(st.last_episode.time_to_target[0]) == pytest.approx(
+      expected_s, abs=2 * env.step_dt
+    )
   finally:
     env.close()

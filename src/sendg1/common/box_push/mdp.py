@@ -29,6 +29,7 @@ from mjlab.utils.lab_api.math import (
 )
 
 from sendg1.common.box_push.params import (
+  G1_MASS_KG,
   MAX_PATCHES,
   PATCH_LIFT,
   BoxPushRanges,
@@ -36,6 +37,7 @@ from sendg1.common.box_push.params import (
   PatchCfg,
   curriculum_ranges,
 )
+from sendg1.common.box_push.pilot import PilotCfg, pilot_command
 from sendg1.common.box_push.scene import (
   BOX_ENTITY,
   FEET_BOX_SENSOR,
@@ -76,8 +78,9 @@ not slips (measured on the first 2,000-iteration check policy)."""
 
 PINNABLE: tuple[str, ...] = (
   "floor_mu",
-  "box_mass",
   "box_mu",
+  "box_mass",
+  "traction_margin",
   "box_depth",
   "box_width",
   "box_height",
@@ -103,6 +106,9 @@ class EpisodeRecord:
   length_s: torch.Tensor
   slip_events: torch.Tensor
   fell: torch.Tensor
+  fell_before_contact: torch.Tensor
+  """VOFA's pre-contact failure: fell without ever touching the box."""
+  fell_after_contact: torch.Tensor
   box_tipped: torch.Tensor
   mean_push_force: torch.Tensor
   """N, mean horizontal robot-on-box force over steps with contact; NaN if none."""
@@ -112,6 +118,8 @@ class EpisodeRecord:
   floor_mu: torch.Tensor
   box_mass: torch.Tensor
   box_mu: torch.Tensor
+  traction_margin: torch.Tensor
+  """Quasi-static margin this episode actually had."""
   final_distance: torch.Tensor
   """m, box centre to target centre when the episode ended."""
 
@@ -181,7 +189,14 @@ class BoxPushState:
     self.succeeded = b()
     self.new_success = b()
     self.success_step = z()
+    self.dwell = z()
+    """Consecutive control steps the box centre has been inside the target."""
+    self.touched_box = b()
+    """The robot has touched the box at some point this episode."""
     self.steps = z()
+    self.command = torch.zeros(n, 3, device=dev)
+    """The scripted pilot's twist command (vx, vy, wz), robot yaw frame."""
+    self.pilot_cfg = PilotCfg()
     self.slip_run = torch.zeros(n, 2, device=dev)
     """Consecutive control steps each foot has been sliding."""
     self.slip_events = z()
@@ -276,13 +291,18 @@ class BoxPushState:
       return
     self._stamp = stamp
     dt = self._env.step_dt
+    self.command = pilot_command(self, self.pilot_cfg)
 
     self.steps += 1
     self.dist = self.target_dist()
     self.delta = self.prev_dist - self.dist
     self.prev_dist = self.dist.clone()
 
-    reached = self.dist <= self.ranges.target_radius
+    inside = self.dist <= self.ranges.target_radius
+    self.dwell = torch.where(inside, self.dwell + 1, torch.zeros_like(self.dwell))
+    # Success needs the box to STAY in the disc (VOFA's 0.3 m for 2 s), so a
+    # box skidded through the target does not count.
+    reached = self.dwell >= round(self.ranges.success_dwell_s / dt)
     self.new_success = reached & ~self.succeeded
     self.success_step = torch.where(self.new_success, self.steps, self.success_step)
     self.succeeded |= reached
@@ -294,6 +314,7 @@ class BoxPushState:
 
     force = self.horizontal_push_force()
     touching = force > 1e-3
+    self.touched_box |= touching
     self.push_force_sum += force
     self.push_steps += touching.float()
     self.impulse += force * dt
@@ -324,6 +345,9 @@ class BoxPushState:
     for name in FALL_TERMS:
       fell |= self._term(name, env_ids)
     rec.fell[env_ids] = fell.float()
+    touched = self.touched_box[env_ids]
+    rec.fell_before_contact[env_ids] = (fell & ~touched).float()
+    rec.fell_after_contact[env_ids] = (fell & touched).float()
     rec.box_tipped[env_ids] = self._term(BOX_TIPPED_TERM, env_ids).float()
     ps = self.push_steps[env_ids]
     rec.mean_push_force[env_ids] = torch.where(
@@ -333,19 +357,28 @@ class BoxPushState:
     rec.double_support_impulse_frac[env_ids] = torch.where(
       imp > 0, self.impulse_double_support[env_ids] / imp.clamp_min(1e-9), nan
     )
+    rec.traction_margin[env_ids] = 1.0 - (
+      self.box_mu[env_ids] * self.box_mass[env_ids]
+    ) / (self.floor_mu[env_ids] * G1_MASS_KG)
     rec.floor_mu[env_ids] = self.floor_mu[env_ids]
     rec.box_mass[env_ids] = self.box_mass[env_ids]
     rec.box_mu[env_ids] = self.box_mu[env_ids]
     rec.final_distance[env_ids] = self.dist[env_ids]
 
+  def commanded(self) -> torch.Tensor:
+    """The pilot's command for this step (recomputing it if nothing has yet)."""
+    self.update()
+    return self.command
+
   def clear(self, env_ids: torch.Tensor) -> None:
     for buf in (
-      self.delta, self.success_step, self.steps, self.slip_events,
+      self.delta, self.success_step, self.steps, self.slip_events, self.dwell,
       self.push_force_sum, self.push_steps, self.impulse, self.impulse_double_support,
     ):
       buf[env_ids] = 0.0
     self.succeeded[env_ids] = False
     self.new_success[env_ids] = False
+    self.touched_box[env_ids] = False
     self.slip_run[env_ids] = 0.0
 
 
@@ -402,8 +435,15 @@ def box_push_reset(
     return torch.where(pin.isnan(), _uniform(lo_hi, n, dev), pin)
 
   floor_mu = draw("floor_mu", cur["floor_mu"])
-  box_mass = draw("box_mass", cur["box_mass"])
   box_mu = draw("box_mu", cur["box_mu"])
+  margin = draw("traction_margin", cur["traction_margin"])
+  # Mass follows from the margin (params.mass_from_margin), unless pinned --
+  # an evaluation grid pins the mass and the margin is then whatever it implies.
+  mass_pin = st.pins["box_mass"][env_ids]
+  implied = (1.0 - margin) * floor_mu * G1_MASS_KG / box_mu.clamp_min(1e-3)
+  box_mass = torch.where(
+    mass_pin.isnan(), implied.clamp(*r.box_mass), mass_pin
+  )
   half = 0.5 * torch.stack(
     [
       draw("box_depth", r.box_depth),
@@ -525,20 +565,39 @@ def _place_patches(
 # ---------------------------------------------------------------------------
 
 
-def box_progress(env: ManagerBasedRlEnv, max_speed: float = 0.5) -> torch.Tensor:
-  """Decrease in box-to-target distance, as a speed normalised to [-1, 1].
+def track_linear_velocity(env: ManagerBasedRlEnv, std: float = 0.5) -> torch.Tensor:
+  """Follow the scripted pilot's linear command (exp kernel on the error).
 
-  Signed: pushing the box away from the target costs as much as pushing it
-  toward pays. The cap removes any incentive to shove or kick the box fast.
+  Dense and positive, like VOFA's push/reach rewards: a policy that walks as
+  told earns every step, so ending the episode early is never the cheap way
+  out. The first version of this task had only penalties per step, and both
+  check runs collapsed into ending episodes (tipping the box, then falling).
   """
   st = BoxPushState.get(env)
+  cmd = st.commanded()
+  actual = st.robot.data.root_link_lin_vel_b[:, :2]
+  return torch.exp(-torch.sum(torch.square(cmd[:, :2] - actual), dim=-1) / std**2)
+
+
+def track_angular_velocity(env: ManagerBasedRlEnv, std: float = 0.7) -> torch.Tensor:
+  """Follow the pilot's yaw-rate command."""
+  st = BoxPushState.get(env)
+  cmd = st.commanded()
+  actual = st.robot.data.root_link_ang_vel_b[:, 2]
+  return torch.exp(-torch.square(cmd[:, 2] - actual) / std**2)
+
+
+def box_to_target(env: ManagerBasedRlEnv, std: float = 2.5) -> torch.Tensor:
+  """VOFA's push reward: exp(-||goal - box||^2 / std^2). Pays every step the
+  box is anywhere near the target, and more the closer it gets."""
+  st = BoxPushState.get(env)
   st.update()
-  return (st.delta / env.step_dt).clamp(-max_speed, max_speed) / max_speed
+  return torch.exp(-torch.square(st.dist) / std**2)
 
 
 def box_success_bonus(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """One-off, on the step the box centre enters the target disc. Divided by
-  ``step_dt`` so the term's weight is the bonus itself."""
+  """One-off, on the step the box completes its dwell inside the target disc.
+  Divided by ``step_dt`` so the term's weight is the bonus itself."""
   st = BoxPushState.get(env)
   st.update()
   return st.new_success.float() / env.step_dt
@@ -679,6 +738,11 @@ def box_push_levels(
 # Actor ("perceived"): assumed to come from an external perception stack.
 
 
+def pilot_twist(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """The scripted high level's command [3]: the actor's only task input."""
+  return BoxPushState.get(env).commanded()
+
+
 def box_pos_b(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Box centre in the pelvis frame (m) [3]."""
   st = BoxPushState.get(env)
@@ -799,6 +863,28 @@ def metric_double_support_impulse_frac(env: ManagerBasedRlEnv) -> torch.Tensor:
   """0 when the robot never touched the box (the eval CSV records NaN)."""
   st = BoxPushState.get(env)
   return st.impulse_double_support / st.impulse.clamp_min(1e-9)
+
+
+def metric_fell_before_contact(env: ManagerBasedRlEnv) -> torch.Tensor:
+  st = BoxPushState.get(env)
+  return fell(env) * env.step_dt * (~st.touched_box).float()
+
+
+def metric_fell_after_contact(env: ManagerBasedRlEnv) -> torch.Tensor:
+  st = BoxPushState.get(env)
+  return fell(env) * env.step_dt * st.touched_box.float()
+
+
+def metric_command_error(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Linear command tracking error (m/s): how well the low level obeys."""
+  st = BoxPushState.get(env)
+  cmd = st.commanded()
+  return torch.norm(cmd[:, :2] - st.robot.data.root_link_lin_vel_b[:, :2], dim=-1)
+
+
+def metric_traction_margin(env: ManagerBasedRlEnv) -> torch.Tensor:
+  st = BoxPushState.get(env)
+  return 1.0 - (st.box_mu * st.box_mass) / (st.floor_mu * G1_MASS_KG)
 
 
 def metric_floor_mu(env: ManagerBasedRlEnv) -> torch.Tensor:
