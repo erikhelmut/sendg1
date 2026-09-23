@@ -126,6 +126,11 @@ def pin_worlds(env: ManagerBasedRlEnv, worlds: EpisodeWorlds, index: np.ndarray)
   st = BoxPushState.get(env)
   st.alpha = 1.0
   for name in PINNABLE:
+    if name not in worlds.values:
+      # Not drawn by the protocol: the grid pins mass and floor mu, so the
+      # traction margin is whatever they imply. Leave it free.
+      st.pins[name][:] = float("nan")
+      continue
     st.pins[name][:] = torch.as_tensor(
       worlds.values[name][index], device=env.device, dtype=torch.float32
     )

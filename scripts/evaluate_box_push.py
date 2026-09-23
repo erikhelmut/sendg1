@@ -94,7 +94,7 @@ def heatmaps(cells: list[dict], protocol, title: str, dest: Path) -> None:
         ax.text(j, i, text, ha="center", va="center", fontsize=10,
                 color=INK_ON_DARK if dark else INK)
     ax.set_xticks(range(len(masses)), [f"{m:.0f}" for m in masses])
-    ax.set_yticks(range(len(mus)), [f"{m:.1f}" for m in mus])
+    ax.set_yticks(range(len(mus)), [f"{m:.2f}" for m in mus])
     ax.set_xlabel("box mass (kg)", color=MUTED)
     ax.set_ylabel("floor friction μ", color=MUTED)
     ax.set_title(name, loc="left", fontsize=11, color=INK)
