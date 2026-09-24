@@ -19,6 +19,8 @@ ALL_VARIANTS = sorted(variants())
 BASE_ACTOR_DIM = {
   "Sendg1-Velocity-Flat-G1": 96,
   "Sendg1-Velocity-Rough-G1": 96,
+  # The FALCON-style low level: flat velocity plus a hand-force curriculum.
+  "Sendg1-VelocityPush-G1": 96,
   # No command: the beam task tells the actor nothing about where to go.
   "Sendg1-Beam-G1": 93,
   # The velocity actor exactly: proprioception + a 3-dim walking command,

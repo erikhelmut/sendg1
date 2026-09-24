@@ -32,6 +32,12 @@ from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 from sendg1.common.events import build_events
+from sendg1.common.hand_forces import (
+  HandForceCfg,
+  apply_hand_forces,
+  hand_force_curriculum,
+  reset_hand_forces,
+)
 from sendg1.common.obs.groups import build_groups
 from sendg1.common.obs.obs_sets import uses_tactile_array
 from sendg1.common.rewards import build_rewards
@@ -83,8 +89,15 @@ def make_g1_velocity_env_cfg(
   dof_set: DofSet = "full29",
   play: bool = False,
   num_envs: int | None = None,
+  hand_forces: HandForceCfg | None = None,
 ) -> ManagerBasedRlEnvCfg:
-  """Build a G1 velocity config for one (terrain, observation set)."""
+  """Build a G1 velocity config for one (terrain, observation set).
+
+  ``hand_forces`` adds VOFA's force curriculum at the end effectors
+  (``sendg1.common.hand_forces``) and changes NOTHING else: same rewards, same
+  command, same observations. The policy it produces is a drop-in low level for
+  any task with the same actor, which is the point.
+  """
   cfg = make_velocity_env_cfg()
 
   # -- robot ---------------------------------------------------------------
@@ -139,6 +152,13 @@ def make_g1_velocity_env_cfg(
   # -- rewards / events ----------------------------------------------------
   cfg.rewards = build_rewards()
   cfg.events = build_events()
+  if hand_forces is not None:
+    cfg.events["hand_forces_reset"] = EventTermCfg(
+      func=reset_hand_forces, mode="reset", params={"cfg": hand_forces}
+    )
+    cfg.events["hand_forces"] = EventTermCfg(
+      func=apply_hand_forces, mode="step", params={"cfg": hand_forces}
+    )
 
   # -- terminations --------------------------------------------------------
   cfg.terminations = {
@@ -172,6 +192,10 @@ def make_g1_velocity_env_cfg(
     cfg.curriculum["terrain_levels"] = CurriculumTermCfg(
       func=vel_mdp.terrain_levels_vel,
       params={"command_name": "twist"},
+    )
+  if hand_forces is not None:
+    cfg.curriculum["hand_forces"] = CurriculumTermCfg(
+      func=hand_force_curriculum, params={"cfg": hand_forces}
     )
 
   # -- viewer / command viz ------------------------------------------------

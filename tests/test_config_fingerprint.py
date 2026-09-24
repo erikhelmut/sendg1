@@ -40,6 +40,9 @@ EXPECTED: dict[str, tuple[str, str]] = {
   "Sendg1-Velocity-Rough-G1-Blind": ("abb89a02f83b898c", "f9c4880fbb9131ba"),
   "Sendg1-Velocity-Rough-G1-ContactOracle": ("130c4a42148b67be", "bbe10c74e54dce3c"),
   "Sendg1-Velocity-Rough-G1-TactileArray": ("f2cecf46fe0ecdd8", "462f06834bdebc26"),
+  "Sendg1-VelocityPush-G1-Blind": ("7618072cc774a0b8", "c10fe67780511509"),
+  "Sendg1-VelocityPush-G1-ContactOracle": ("1c8218270fe8a6bc", "e9076274d270ebd5"),
+  "Sendg1-VelocityPush-G1-TactileArray": ("d439db9e933d90cf", "b4435d44a575fa37"),
 }
 
 

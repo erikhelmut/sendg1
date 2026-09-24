@@ -399,3 +399,59 @@ def test_success_needs_the_dwell() -> None:
     )
   finally:
     env.close()
+
+
+@pytest.mark.slow
+def test_hand_force_curriculum_loads_the_hands_backward() -> None:
+  """The FALCON-style low level's only addition: a sustained backward load."""
+  from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.tasks.registry import load_env_cfg
+
+  import sendg1.tasks  # noqa: F401
+  from sendg1.common.hand_forces import HAND_BODIES, HandForceCfg, force_level
+
+  cfg = load_env_cfg("Sendg1-VelocityPush-G1-Blind")
+  cfg.scene.num_envs = 8
+  cfg.seed = 0
+  full = HandForceCfg(ramp_steps=0)  # skip the ramp for the test
+  for key in ("hand_forces", "hand_forces_reset"):
+    cfg.events[key].params["cfg"] = full
+  device = "cuda:0" if torch.cuda.is_available() else "cpu"
+  env = ManagerBasedRlEnv(cfg=cfg, device=device)
+  try:
+    env.reset()
+    robot = env.scene["robot"]
+    for _ in range(5):
+      env.step(torch.zeros(8, env.action_manager.total_action_dim, device=device))
+    ids, _ = robot.find_bodies(HAND_BODIES, preserve_order=True)
+    wrench = robot.data.body_external_wrench[:, ids]
+    total = wrench[..., :3].sum(dim=1)
+    assert torch.all(total.norm(dim=-1) <= full.max_force + 1e-3)
+    assert float(total.norm(dim=-1).max()) > 0.2 * full.max_force
+    # Both hands share the load equally.
+    torch.testing.assert_close(wrench[:, 0, :3], wrench[:, 1, :3])
+    # ... and it pushes against where the robot is facing.
+    heading = robot.data.heading_w
+    forward = torch.stack([heading.cos(), heading.sin()], dim=-1)
+    horiz = total[:, :2] / total[:, :2].norm(dim=-1, keepdim=True).clamp_min(1e-6)
+    assert torch.all((horiz * forward).sum(-1) <= -0.49), "load must oppose the heading"
+    # The ramp starts at zero, so the shipped config is gentle at iteration 0.
+    assert force_level(env, HandForceCfg()) == 0.0
+  finally:
+    env.close()
+
+
+def test_velocity_push_reuses_the_flat_reward_set() -> None:
+  """The force curriculum must be the ONLY difference from flat velocity."""
+  from mjlab.tasks.registry import load_env_cfg
+
+  import sendg1.tasks  # noqa: F401
+  from sendg1.fingerprint import fingerprint
+
+  flat = load_env_cfg("Sendg1-Velocity-Flat-G1-Blind")
+  push = load_env_cfg("Sendg1-VelocityPush-G1-Blind")
+  assert fingerprint(push.rewards) == fingerprint(flat.rewards)
+  assert fingerprint(push.observations) == fingerprint(flat.observations)
+  assert fingerprint(push.terminations) == fingerprint(flat.terminations)
+  assert set(push.events) - set(flat.events) == {"hand_forces", "hand_forces_reset"}
+  assert set(push.curriculum) - set(flat.curriculum) == {"hand_forces"}
