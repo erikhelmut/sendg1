@@ -32,6 +32,9 @@ def main() -> None:
   ap.add_argument("--env-seed", type=int, default=1)
   ap.add_argument("--floor-mu", type=float, default=None)
   ap.add_argument("--box-mass", type=float, default=None)
+  ap.add_argument("--box-depth", type=float, default=None, help="m, along the push")
+  ap.add_argument("--box-width", type=float, default=None)
+  ap.add_argument("--box-height", type=float, default=None)
   ap.add_argument("--patches", action="store_true", help="enable low-friction patches")
   ap.add_argument("--out", default=None)
   ap.add_argument("--width", type=int, default=960)
@@ -69,8 +72,10 @@ def main() -> None:
   st = BoxPushState.get(env)
   if args.floor_mu is not None:
     st.pins["floor_mu"][:] = args.floor_mu
-  if args.box_mass is not None:
-    st.pins["box_mass"][:] = args.box_mass
+  for name in ("box_mass", "box_depth", "box_width", "box_height"):
+    value = getattr(args, name)
+    if value is not None:
+      st.pins[name][:] = value
 
   reset_policy = None
   if args.random:

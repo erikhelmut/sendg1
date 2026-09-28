@@ -38,16 +38,30 @@ EXTRA_ACTOR_DIM = {
 
 
 BOX_PUSH_TACTILE_EXTRA = 12
-"""The box-push tactile group also carries the per-foot aggregate channels
-(normal, shear x/y, CoP x/y, shear/normal ratio)."""
+"""The per-foot aggregate channels (normal, shear x/y, CoP x/y, shear/normal
+ratio). Carried by box pushing and by the low level trained for it, so one
+policy fits both; not by flat/rough/beam, whose results predate them."""
+
+AGGREGATE_BASES = ("Sendg1-BoxPush", "Sendg1-VelocityPush")
 
 
 def _expected_actor_dim(task_id: str) -> int:
   base_id, obs_set = variants()[task_id]
   extra = EXTRA_ACTOR_DIM[obs_set]
-  if base_id.startswith("Sendg1-BoxPush") and obs_set == "tactile_array":
+  if base_id.startswith(AGGREGATE_BASES) and obs_set == "tactile_array":
     extra += BOX_PUSH_TACTILE_EXTRA
   return BASE_ACTOR_DIM[base_id] + extra
+
+
+def test_low_level_actor_matches_box_push_actor() -> None:
+  """The point of Sendg1-VelocityPush: a policy trained there drops straight
+  into box pushing, so the two actors must have identical dimensions."""
+  for obs_set in ("blind", "contact_oracle", "tactile_array"):
+    slug = {"blind": "Blind", "contact_oracle": "ContactOracle",
+            "tactile_array": "TactileArray"}[obs_set]
+    assert _expected_actor_dim(f"Sendg1-VelocityPush-G1-{slug}") == _expected_actor_dim(
+      f"Sendg1-BoxPush-G1-{slug}"
+    ), obs_set
 
 
 def test_expected_variants_registered() -> None:

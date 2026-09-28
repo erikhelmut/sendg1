@@ -137,7 +137,14 @@ def make_g1_velocity_env_cfg(
   # -- observations --------------------------------------------------------
   # The actor is blind and deployable-only; the critic is identical across
   # every observation set. Enforced by tests/test_actor_allowlist.py.
-  cfg.observations = build_groups(obs_set, has_terrain_scan=has_terrain_scan)
+  # A low level trained for box pushing must observe what the box-push policy
+  # observes, or it cannot be dropped into that task: same tactile channels,
+  # same 252-dim actor. Plain flat/rough keep their 240.
+  cfg.observations = build_groups(
+    obs_set,
+    has_terrain_scan=has_terrain_scan,
+    tactile_aggregates=hand_forces is not None,
+  )
 
   # -- actions -------------------------------------------------------------
   cfg.actions = {
