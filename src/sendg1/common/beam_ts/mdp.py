@@ -26,6 +26,12 @@ coupled to the level: the centreline reward's sigma tightens
 (``CENTRELINE_SIGMA``), pushes switch on from ``PUSH_FROM_LEVEL`` and grow,
 tactile faults grow (``tactile.noise_strength``), and the share of walking
 commands rises with the population's mean level.
+
+Replay: each env keeps its own curriculum ("home") level, but a share
+``REPLAY_SHARE`` of resets is placed on a uniformly drawn level at or below it.
+A replay episode does not move the home level. Without it the population drains
+out of the wide levels and the teacher forgets them (first full run: 100 %
+success at 0.05 m, 36 % at 0.40 m, with the width obs out of distribution).
 """
 
 from __future__ import annotations
@@ -66,6 +72,9 @@ WALK_MIN_DIST = 0.5
 
 CENTRELINE_SIGMA: tuple[float, ...] = (0.12, 0.10, 0.07, 0.05, 0.04, 0.03, 0.025)
 """Stance-foot centreline reward width per level (m)."""
+
+REPLAY_SHARE = 0.2
+"""Share of resets placed on a random easier level (does not move the home level)."""
 
 STANDING_SHARE = (0.6, 0.15)
 """Share of standing commands at mean level 0 and at the top level."""
@@ -649,6 +658,7 @@ def beam_levels(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,
   standing_share: tuple[float, float] = STANDING_SHARE,
+  replay_share: float = REPLAY_SHARE,
 ) -> dict[str, torch.Tensor]:
   """Per-env width curriculum plus the coupled command mix. See module doc."""
   terrain = env.scene.terrain
@@ -659,13 +669,19 @@ def beam_levels(
     env_ids = torch.arange(env.num_envs, device=env.device)
   out: dict[str, torch.Tensor] = {}
 
+  home = getattr(env, "_beam_home_level", None)
+  if home is None:
+    home = geo.levels.clone()
+    env._beam_home_level = home
+    env._beam_replay = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+  replay = env._beam_replay
+
   if env.common_step_counter > 0 and len(env_ids) > 0:
     st = ep.stats(env_ids)
     up = st.success.long()
     down = st.terminated.long()
-    lv = (geo.levels[env_ids] + up - down).clamp(0, geo.num_levels - 1)
-    terrain.terrain_levels[env_ids] = lv
-    terrain.env_origins[env_ids] = terrain.terrain_origins[lv, terrain.terrain_types[env_ids]]
+    moved = (home[env_ids] + up - down).clamp(0, geo.num_levels - 1)
+    home[env_ids] = torch.where(replay[env_ids], home[env_ids], moved)
 
     out["success"] = st.success.float().mean()
     out["terminated"] = st.terminated.float().mean()
@@ -677,7 +693,16 @@ def beam_levels(
       ratio = (st.progress[walking] / st.cmd_dist[walking]).clamp(0, 2)
       out["track_ratio_walking"] = ratio.mean()
 
-  levels = geo.levels.float()
+  if len(env_ids) > 0:
+    n = len(env_ids)
+    rep = (torch.rand(n, device=env.device) < replay_share) & (home[env_ids] > 0)
+    easier = (torch.rand(n, device=env.device) * (home[env_ids] + 1).float()).long()
+    lv = torch.where(rep, easier.clamp(max=geo.num_levels - 1), home[env_ids])
+    replay[env_ids] = rep & (lv < home[env_ids])
+    terrain.terrain_levels[env_ids] = lv
+    terrain.env_origins[env_ids] = terrain.terrain_origins[lv, terrain.terrain_types[env_ids]]
+
+  levels = home.float()
   frac = levels.mean() / max(geo.num_levels - 1, 1)
   share = standing_share[0] + (standing_share[1] - standing_share[0]) * frac
   cmd = env.command_manager.get_term("twist")
@@ -686,6 +711,18 @@ def beam_levels(
   out["max"] = levels.max()
   out["standing_share"] = torch.tensor(float(share))
   for i in range(geo.num_levels):
-    out[f"frac_L{i}"] = (geo.levels == i).float().mean()
+    out[f"frac_L{i}"] = (home == i).float().mean()
+  out["replay_share"] = replay.float().mean()
   return out
 
+
+
+def set_levels(env: ManagerBasedRlEnv, levels: torch.Tensor) -> None:
+  """Place every env on ``levels`` (home and current level), e.g. to start a
+  run from a level distribution. Takes effect at the next reset."""
+  terrain = env.scene.terrain
+  assert terrain is not None
+  terrain.terrain_levels[:] = levels
+  terrain.env_origins[:] = terrain.terrain_origins[levels, terrain.terrain_types]
+  env._beam_home_level = levels.clone()
+  env._beam_replay = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)

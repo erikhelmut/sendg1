@@ -42,6 +42,7 @@ def main() -> None:
   from mjlab.utils.torch import configure_torch_backends
 
   import sendg1.tasks  # noqa: F401
+  from sendg1.common.beam_ts.mdp import set_levels
   from sendg1.rl.dagger import DistillationRunner
   from sendg1.tasks.beam_ts import STUDENT_TASK
 
@@ -60,11 +61,13 @@ def main() -> None:
 
   env = ManagerBasedRlEnv(cfg=env_cfg, device=device)
   if args.init_max_level > 0:
-    t = env.scene.terrain
     lv = torch.randint(0, args.init_max_level + 1, (env.num_envs,), device=env.device)
-    t.terrain_levels[:] = lv
-    t.env_origins[:] = t.terrain_origins[lv, t.terrain_types]
+    set_levels(env, lv)
   wrapped = RslRlVecEnvWrapper(env, clip_actions=rl_cfg.clip_actions)
+
+  # Fresh episodes on the assigned levels, before a checkpoint restores the
+  # step counter (a reset with counter > 0 would score the empty episodes).
+  wrapped.reset()
 
   stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
   log_dir = Path(args.log_root) / rl_cfg.experiment_name / f"{stamp}_{rl_cfg.run_name}"
@@ -73,8 +76,6 @@ def main() -> None:
 
   runner = DistillationRunner(wrapped, asdict(rl_cfg), str(log_dir), device)
   runner.load_teacher(args.teacher, map_location=device)
-  # Fresh episodes after the level reassignment above.
-  wrapped.reset()
   runner.learn(rl_cfg.max_iterations)
   env.close()
 
