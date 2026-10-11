@@ -504,18 +504,31 @@ def passing_step(
   min_air_time: float = 0.1,
   command_threshold: float = 0.05,
 ) -> torch.Tensor:
-  """At each touchdown: clip(lead / scale, -1, 1), lead the landing foot's arc
-  minus the other foot's. A step-to shuffle (one foot always leading, the other
-  closing up behind it) scores +1 and -1 per cycle, i.e. nothing; an alternating
-  gait scores on every step. Only when walking is commanded. Divided by step_dt
-  so the weight is the reward per touchdown."""
+  """At each ALTERNATING touchdown (the other foot made the previous one):
+  clip(lead / scale, -1, 1), lead the landing foot's arc minus the other
+  foot's. A step-to shuffle (one foot always leading, the other closing up
+  behind it) scores +1 and -1 per cycle, i.e. nothing; an alternating gait
+  scores on every step. Re-planting the same foot scores nothing (without the
+  alternation gate the first fine-tune tapped the lead foot to farm +1). Only
+  when walking is commanded. Divided by step_dt so the weight is the reward per
+  touchdown."""
   data = env.scene[FOOT_CONTACT_SENSOR].data
   assert data.current_contact_time is not None and data.last_air_time is not None
   first = (data.current_contact_time > 0) & (data.current_contact_time <= env.step_dt + 1e-6)
   first &= data.last_air_time > min_air_time
+  last = getattr(env, "_beam_last_touchdown", None)
+  if last is None:
+    last = torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device)
+    env._beam_last_touchdown = last
+  last[env.episode_length_buf <= 1] = -1
+  foot = torch.arange(2, device=env.device)[None, :]
+  alternating = first & (last[:, None] != foot)
   arc = BeamEpisode.get(env).feet_proj().arc
   lead = torch.stack([arc[:, 0] - arc[:, 1], arc[:, 1] - arc[:, 0]], dim=-1)
-  r = (torch.clamp(lead / scale, -1.0, 1.0) * first.float()).sum(-1)
+  r = (torch.clamp(lead / scale, -1.0, 1.0) * alternating.float()).sum(-1)
+  # Latest touchdown wins; if both feet land on the same step, keep it unset.
+  both = first.all(-1)
+  last[:] = torch.where(both, -1, torch.where(first[:, 0], 0, torch.where(first[:, 1], 1, last)))
   cmd = env.command_manager.get_command("twist")[:, 0]
   return r * (cmd > command_threshold).float() / env.step_dt
 
