@@ -103,11 +103,13 @@ def main() -> None:
 
   chosen = None
   for attempt in range(args.tries):
-    obs, _ = wrapped.reset()
-    policy.reset(torch.ones(1, dtype=torch.bool, device=env.device))
     frames, outcome, reason = [], None, ""
     stand_after = None
+    # Reset inside inference mode too: buffers first written during a step
+    # are inference tensors and cannot be reset in-place outside it.
     with torch.inference_mode():
+      obs, _ = wrapped.reset()
+      policy.reset(torch.ones(1, dtype=torch.bool, device=env.device))
       for step in range(int(cfg.episode_length_s / env.step_dt)):
         act = policy(obs)
         obs, _, dones, _ = wrapped.step(act)
