@@ -500,7 +500,7 @@ def base_roll(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 def passing_step(
   env: ManagerBasedRlEnv,
-  scale: float = 0.25,
+  scale: float = 0.5,
   min_air_time: float = 0.1,
   command_threshold: float = 0.05,
 ) -> torch.Tensor:
@@ -511,7 +511,11 @@ def passing_step(
   scores on every step. Re-planting the same foot scores nothing (without the
   alternation gate the first fine-tune tapped the lead foot to farm +1). Only
   when walking is commanded. Divided by step_dt so the weight is the reward per
-  touchdown."""
+  touchdown.
+
+  ``scale`` must exceed the shuffle's foot gap (~0.3 m): at 0.25 m the trailing
+  foot's landing saturated at -1, so landing it further forward paid nothing
+  and the second run kept shuffling."""
   data = env.scene[FOOT_CONTACT_SENSOR].data
   assert data.current_contact_time is not None and data.last_air_time is not None
   first = (data.current_contact_time > 0) & (data.current_contact_time <= env.step_dt + 1e-6)

@@ -99,7 +99,7 @@ def build_rewards() -> dict[str, RewardTermCfg]:
     "base_lateral_vel": RewardTermCfg(func=mdp.base_lateral_velocity, weight=-1.0),
     "base_roll": RewardTermCfg(func=mdp.base_roll, weight=-2.0),
     # -- gait shape -------------------------------------------------------------
-    "passing_step": RewardTermCfg(func=mdp.passing_step, weight=1.0),
+    "passing_step": RewardTermCfg(func=mdp.passing_step, weight=2.0),
     "foot_flat": RewardTermCfg(func=mdp.stance_foot_flat, weight=1.0),
     # -- posture (from the walking reward) -------------------------------------
     "upright": RewardTermCfg(
