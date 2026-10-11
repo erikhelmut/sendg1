@@ -44,7 +44,14 @@ DEFAULT_NUM_ENVS = 4096
 EPISODE_S = 20.0
 MAX_FORWARD_SPEED = 0.4
 
-POSE_STD_BEAM: dict[str, float] = {k: 1.5 * v for k, v in POSE_STD_WALKING.items()}
+POSE_STD_BEAM: dict[str, float] = {
+  k: (v if any(j in k for j in ("hip_pitch", "knee", "ankle_pitch")) else 1.5 * v)
+  for k, v in POSE_STD_WALKING.items()
+}
+"""Walking tolerances, x1.5 for the lateral/yaw joints a tandem stance needs.
+Sagittal leg joints keep the walking tolerance: at x1.5 the teacher settled
+into a deep crouch."""
+ARM_JOINTS = (".*shoulder.*", ".*elbow.*", ".*wrist.*")
 """Walking tolerances x1.5, for standing and walking alike. A narrow beam needs
 hip adduction and a tandem stance at any speed, so mjlab's tight standing std
 (0.05 rad everywhere) would punish exactly the posture the task requires."""
@@ -91,6 +98,9 @@ def build_rewards() -> dict[str, RewardTermCfg]:
     ),
     "base_lateral_vel": RewardTermCfg(func=mdp.base_lateral_velocity, weight=-1.0),
     "base_roll": RewardTermCfg(func=mdp.base_roll, weight=-2.0),
+    # -- gait shape -------------------------------------------------------------
+    "passing_step": RewardTermCfg(func=mdp.passing_step, weight=1.0),
+    "foot_flat": RewardTermCfg(func=mdp.stance_foot_flat, weight=1.0),
     # -- posture (from the walking reward) -------------------------------------
     "upright": RewardTermCfg(
       func=vel_mdp.upright,
@@ -118,6 +128,11 @@ def build_rewards() -> dict[str, RewardTermCfg]:
     ),
     # -- regularisers (from the walking reward) ----------------------------------
     "action_rate_l2": RewardTermCfg(func=vel_mdp.action_rate_l2, weight=-0.05),
+    "arm_joint_vel": RewardTermCfg(
+      func=envs_mdp.joint_vel_l2,
+      weight=-0.02,
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=ARM_JOINTS)},
+    ),
     "joint_torques_l2": RewardTermCfg(func=envs_mdp.joint_torques_l2, weight=-1e-5),
     "dof_pos_limits": RewardTermCfg(func=vel_mdp.joint_pos_limits, weight=-1.0),
     "body_ang_vel": RewardTermCfg(

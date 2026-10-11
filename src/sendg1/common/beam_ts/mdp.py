@@ -498,6 +498,43 @@ def base_roll(env: ManagerBasedRlEnv) -> torch.Tensor:
   return torch.square(g[:, 1]) + 0.05 * torch.square(wx)
 
 
+def passing_step(
+  env: ManagerBasedRlEnv,
+  scale: float = 0.25,
+  min_air_time: float = 0.1,
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """At each touchdown: clip(lead / scale, -1, 1), lead the landing foot's arc
+  minus the other foot's. A step-to shuffle (one foot always leading, the other
+  closing up behind it) scores +1 and -1 per cycle, i.e. nothing; an alternating
+  gait scores on every step. Only when walking is commanded. Divided by step_dt
+  so the weight is the reward per touchdown."""
+  data = env.scene[FOOT_CONTACT_SENSOR].data
+  assert data.current_contact_time is not None and data.last_air_time is not None
+  first = (data.current_contact_time > 0) & (data.current_contact_time <= env.step_dt + 1e-6)
+  first &= data.last_air_time > min_air_time
+  arc = BeamEpisode.get(env).feet_proj().arc
+  lead = torch.stack([arc[:, 0] - arc[:, 1], arc[:, 1] - arc[:, 0]], dim=-1)
+  r = (torch.clamp(lead / scale, -1.0, 1.0) * first.float()).sum(-1)
+  cmd = env.command_manager.get_command("twist")[:, 0]
+  return r * (cmd > command_threshold).float() / env.step_dt
+
+
+def stance_foot_flat(env: ManagerBasedRlEnv, std: float = 0.15) -> torch.Tensor:
+  """Mean over feet in contact of exp(-tilt^2 / std^2), tilt ~ |xy of gravity
+  in the sole frame| (rad). A flat sole puts load on many taxels instead of one
+  edge, which is what the tactile features need to say anything."""
+  q = _robot(env).data.site_quat_w[:, BeamEpisode.get(env)._foot_sites]
+  w, x, y, z = q.unbind(-1)
+  # Rows 3 (z) of the rotation matrix = world z expressed in the sole frame.
+  gx = 2 * (x * z - w * y)
+  gy = 2 * (y * z + w * x)
+  tilt2 = gx * gx + gy * gy
+  contact = _feet_in_contact(env).float()
+  r = torch.exp(-tilt2 / std**2) * contact
+  return r.sum(-1) / contact.sum(-1).clamp(min=1.0)
+
+
 def reach_end_bonus(env: ManagerBasedRlEnv) -> torch.Tensor:
   """One-off, on the step the end platform is reached. Divided by step_dt so
   the weight is the bonus itself."""
