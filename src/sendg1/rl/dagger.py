@@ -1,0 +1,97 @@
+"""DAgger distillation of a privileged teacher into a deployable student.
+
+rsl_rl's ``Distillation`` already does the core of DAgger: the student acts,
+the frozen teacher labels every visited state, and the student regresses onto
+the labels (MSE) with truncated BPTT through its recurrent state. Two things
+are added here:
+
+1. **Teacher-to-student control fade.** At the start the student's actions are
+   garbage and it would only visit states the teacher never sees (falling off
+   the beam within a second). For the first ``fade_iterations`` updates each
+   env executes the teacher's action with probability ``beta``, which decays
+   linearly from ``beta_start`` to 0; after that the student drives alone.
+   Labels are always the teacher's, whoever drives.
+2. **Bookkeeping** for the report: ``beta`` and the share of steps the teacher
+   drove are logged with the losses.
+
+The runner subclasses mjlab's runner so checkpoints keep the env's step counter
+(curricula) and export to ONNX the same way as PPO runs.
+"""
+
+from __future__ import annotations
+
+import torch
+from rsl_rl.algorithms import Distillation
+from tensordict import TensorDict
+
+from mjlab.rl import MjlabOnPolicyRunner
+
+
+class DAggerDistillation(Distillation):
+  def __init__(
+    self,
+    *args,
+    beta_start: float = 1.0,
+    fade_iterations: int = 150,
+    **kwargs,
+  ) -> None:
+    super().__init__(*args, **kwargs)
+    self.beta_start = beta_start
+    self.fade_iterations = fade_iterations
+    self._teacher_steps = 0
+    self._total_steps = 0
+
+  @property
+  def beta(self) -> float:
+    if self.fade_iterations <= 0:
+      return 0.0
+    return max(0.0, self.beta_start * (1.0 - self.num_updates / self.fade_iterations))
+
+  def act(self, obs: TensorDict) -> torch.Tensor:
+    student = self.student(obs, stochastic_output=True).detach()
+    teacher = self.teacher(obs).detach()
+    self.transition.actions = student
+    self.transition.privileged_actions = teacher
+    self.transition.observations = obs
+    beta = self.beta
+    if beta <= 0.0:
+      return student
+    use_teacher = torch.rand(student.shape[0], 1, device=student.device) < beta
+    self._teacher_steps += int(use_teacher.sum())
+    self._total_steps += student.shape[0]
+    return torch.where(use_teacher, teacher, student)
+
+  def update(self) -> dict[str, float]:
+    beta = self.beta
+    share = self._teacher_steps / max(self._total_steps, 1)
+    self._teacher_steps = self._total_steps = 0
+    out = super().update()
+    out["beta"] = beta
+    out["teacher_drive_share"] = share
+    return out
+
+
+class DistillationRunner(MjlabOnPolicyRunner):
+  """mjlab's runner (checkpoint env state, ONNX export) around a distillation
+  algorithm. Refuses to train without a loaded teacher."""
+
+  def __init__(self, env, train_cfg: dict, log_dir: str | None = None, device: str = "cpu"):
+    # MjlabOnPolicyRunner strips None-valued options from actor/critic only.
+    for key in ("student", "teacher"):
+      if key in train_cfg:
+        for opt in ("cnn_cfg", "distribution_cfg"):
+          if train_cfg[key].get(opt) is None:
+            train_cfg[key].pop(opt, None)
+        if train_cfg[key].get("rnn_type") is None:
+          for opt in ("rnn_type", "rnn_hidden_dim", "rnn_num_layers"):
+            train_cfg[key].pop(opt, None)
+    super().__init__(env, train_cfg, log_dir, device)
+
+  def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False) -> None:
+    if not self.alg.teacher_loaded:
+      raise ValueError("load a teacher checkpoint before distilling")
+    super().learn(num_learning_iterations, init_at_random_ep_len)
+
+  def load_teacher(self, path: str, map_location: str | None = None) -> None:
+    loaded = torch.load(path, map_location=map_location, weights_only=False)
+    self.alg.load(loaded, {"teacher": True}, strict=True)

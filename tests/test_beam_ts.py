@@ -1,0 +1,110 @@
+"""Beam teacher-student task: no privileged leak into the student, geometry,
+tactile canonicalisation, and an env that builds and steps."""
+
+from __future__ import annotations
+
+import pytest
+import torch
+from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
+
+import sendg1.tasks  # noqa: F401
+from sendg1.common.beam_ts import tactile as tac
+from sendg1.common.beam_ts.geometry import project_points
+from sendg1.common.beam_ts.terms import STUDENT_LEGAL, TERMS
+from sendg1.common.tactile.layout import LAYOUTS
+from sendg1.tasks.beam_ts import STUDENT_TASK, TEACHER_TASK, assert_student_is_deployable
+
+STUDENT_EXPECTED = {
+  "base_ang_vel",
+  "projected_gravity",
+  "joint_pos",
+  "joint_vel",
+  "actions",
+  "command_vx",
+  "tactile",
+}
+
+
+def _student_terms() -> set[str]:
+  env_cfg = load_env_cfg(STUDENT_TASK)
+  rl_cfg = load_rl_cfg(STUDENT_TASK)
+  return {t for g in rl_cfg.obs_groups["student"] for t in env_cfg.observations[g].terms}
+
+
+def test_student_sees_exactly_the_real_robot_signals() -> None:
+  assert _student_terms() == STUDENT_EXPECTED
+
+
+def test_student_terms_are_all_deployable() -> None:
+  for term in _student_terms():
+    assert TERMS[term].availability in ("onboard", "sensor"), term
+
+
+def test_teacher_and_critic_see_privileged() -> None:
+  rl = load_rl_cfg(TEACHER_TASK)
+  assert "privileged" in rl.obs_groups["actor"]
+  assert "privileged" in rl.obs_groups["critic"]
+
+
+def test_leak_guard_fires() -> None:
+  env_cfg = load_env_cfg(STUDENT_TASK)
+  with pytest.raises(ValueError):
+    assert_student_is_deployable(env_cfg.observations, ("real", "privileged"))
+  env_cfg.observations["real"].terms["base_lin_vel"] = TERMS["base_lin_vel"].build()
+  with pytest.raises(ValueError):
+    assert_student_is_deployable(env_cfg.observations, ("real",))
+
+
+def test_privileged_terms_never_legal() -> None:
+  for name in ("base_lin_vel", "feet_beam_pose", "beam_params", "tactile_clean"):
+    assert name not in STUDENT_LEGAL
+
+
+def test_projection_on_straight_path() -> None:
+  path = torch.tensor([[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]]])
+  pts = torch.tensor([[[0.5, 0.1], [1.5, -0.2], [-1.0, 0.0]]])
+  p = project_points(path, pts)
+  assert torch.allclose(p.arc, torch.tensor([[0.5, 1.5, 0.0]]))
+  assert torch.allclose(p.lateral[:, :2], torch.tensor([[0.1, -0.2]]))
+  assert torch.allclose(p.tangent_yaw, torch.zeros(1, 3))
+
+
+def test_mirror_permutation_is_an_involution() -> None:
+  layout = LAYOUTS["slipper_v1"]
+  perm = tac.mirror_permutation(layout)
+  assert sorted(perm) == list(range(layout.num_taxels))
+  assert all(perm[perm[i]] == i for i in range(layout.num_taxels))
+
+
+def test_features_are_mirror_consistent() -> None:
+  """A load on the left foot's lateral edge and the same load on the right
+  foot's lateral edge give identical canonical features."""
+  layout = LAYOUTS["slipper_v1"]
+  t = layout.num_taxels
+  lateral_left = torch.tensor([float(y > 0.01) for _, y in layout.centers])
+  normal = torch.zeros(1, 2, t)
+  normal[0, 0] = 50.0 * lateral_left
+  # Canonical right foot uses the mirrored indexing already, so feed the same.
+  normal[0, 1] = 50.0 * lateral_left
+  f = tac.features_from_normals(normal, layout).view(2, -1)
+  assert torch.allclose(f[0], f[1])
+  edge_lat = f[0, t + 4]
+  assert edge_lat > 0.9
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_env_builds_steps_and_obs_are_finite() -> None:
+  from mjlab.envs import ManagerBasedRlEnv
+
+  cfg = load_env_cfg(TEACHER_TASK)
+  cfg.scene.num_envs = 4
+  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
+  try:
+    obs, _ = env.reset()
+    assert obs["real"].shape == (4, 160)
+    for _ in range(10):
+      obs, rew, *_ = env.step(torch.zeros(4, env.action_manager.total_action_dim, device=env.device))
+      assert torch.isfinite(rew).all()
+      assert all(torch.isfinite(v).all() for v in obs.values())
+  finally:
+    env.close()
