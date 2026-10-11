@@ -7,10 +7,13 @@ are added here:
 
 1. **Teacher-to-student control fade.** At the start the student's actions are
    garbage and it would only visit states the teacher never sees (falling off
-   the beam within a second). For the first ``fade_iterations`` updates each
-   env executes the teacher's action with probability ``beta``, which decays
-   linearly from ``beta_start`` to 0; after that the student drives alone.
-   Labels are always the teacher's, whoever drives.
+   the beam within a second). For the first ``fade_iterations`` updates the
+   teacher drives a share ``beta`` of the EPISODES, decaying linearly from
+   ``beta_start`` to 0; after that the student drives alone. The draw is per
+   env and per episode, not per step: mixing per step lets the untrained
+   student's actions into every trajectory, and a robot on a 0.1 m beam falls
+   off within a few such steps whoever drives the rest. Labels are always the
+   teacher's, whoever drives.
 2. **Bookkeeping** for the report: ``beta`` and the share of steps the teacher
    drove are logged with the losses.
 
@@ -40,6 +43,7 @@ class DAggerDistillation(Distillation):
     self.fade_iterations = fade_iterations
     self._teacher_steps = 0
     self._total_steps = 0
+    self._teacher_drives: torch.Tensor | None = None
 
   @property
   def beta(self) -> float:
@@ -53,13 +57,19 @@ class DAggerDistillation(Distillation):
     self.transition.actions = student
     self.transition.privileged_actions = teacher
     self.transition.observations = obs
-    beta = self.beta
-    if beta <= 0.0:
-      return student
-    use_teacher = torch.rand(student.shape[0], 1, device=student.device) < beta
+    if self._teacher_drives is None:
+      self._teacher_drives = torch.rand(student.shape[0], device=student.device) < self.beta
+    use_teacher = self._teacher_drives[:, None]
     self._teacher_steps += int(use_teacher.sum())
     self._total_steps += student.shape[0]
     return torch.where(use_teacher, teacher, student)
+
+  def process_env_step(self, obs, rewards, dones, extras) -> None:
+    super().process_env_step(obs, rewards, dones, extras)
+    if self._teacher_drives is not None:
+      done = dones.view(-1).bool()
+      redraw = torch.rand(done.shape[0], device=done.device) < self.beta
+      self._teacher_drives = torch.where(done, redraw, self._teacher_drives)
 
   def update(self) -> dict[str, float]:
     beta = self.beta
