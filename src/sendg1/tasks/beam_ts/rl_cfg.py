@@ -5,9 +5,13 @@ normalisation, and both read ``real`` + ``privileged``. No memory: everything a
 memory would have to infer is handed to it.
 
 Student: GRU(256) -> MLP (256, 128) over ``real`` only. The GRU is the history:
-truncated BPTT over ``gradient_length`` = 25 steps (0.5 s), rollouts of 50
-steps (1 s). Trained by DAgger (``sendg1.rl.dagger``): MSE onto the frozen
-teacher's actions, teacher control faded out over the first 150 updates.
+truncated BPTT over ``gradient_length`` = 10 steps (0.2 s; the hidden state
+still carries the whole episode), rollouts of 50 steps (1 s), 4 epochs: 20
+gradient steps per iteration. Trained by DAgger (``sendg1.rl.dagger``):
+scale-weighted MSE onto the frozen teacher's actions, teacher control faded
+out over the first 500 updates. The first student (1 epoch, 25-step windows:
+2 gradient steps per iteration, fade over 150) still had a loss above the
+zero-action baseline when the fade ended and never walked.
 """
 
 from __future__ import annotations
@@ -94,14 +98,14 @@ def teacher_ppo_cfg(
 @dataclass
 class DAggerAlgorithmCfg:
   class_name: str = "sendg1.rl.dagger:DAggerDistillation"
-  num_learning_epochs: int = 1
-  gradient_length: int = 25
+  num_learning_epochs: int = 4
+  gradient_length: int = 10
   learning_rate: float = 5e-4
   max_grad_norm: float = 1.0
   loss_type: str = "mse"
   optimizer: str = "adam"
   beta_start: float = 1.0
-  fade_iterations: int = 150
+  fade_iterations: int = 500
 
 
 @dataclass

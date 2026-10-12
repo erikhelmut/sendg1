@@ -14,7 +14,13 @@ are added here:
    student's actions into every trajectory, and a robot on a 0.1 m beam falls
    off within a few such steps whoever drives the rest. Labels are always the
    teacher's, whoever drives.
-2. **Bookkeeping** for the report: ``beta`` and the share of steps the teacher
+2. **Loss in joint-target space.** The action is a joint position offset
+   ``scale * a``, and the scales differ by 7x (wrist pitch/yaw 0.075, the rest
+   0.35-0.55). Plain MSE on ``a`` let the wrists dominate: the teacher holds
+   them at |a| ~ 4 (0.3 rad), so the first student's loss was mostly wrist
+   error. Each dimension is weighted by ``scale^2`` (normalised to mean 1),
+   i.e. MSE of the commanded joint targets.
+3. **Bookkeeping** for the report: ``beta`` and the share of steps the teacher
    drove are logged with the losses.
 
 The runner subclasses mjlab's runner so checkpoints keep the env's step counter
@@ -44,6 +50,16 @@ class DAggerDistillation(Distillation):
     self._teacher_steps = 0
     self._total_steps = 0
     self._teacher_drives: torch.Tensor | None = None
+
+  def set_action_weights(self, weights: torch.Tensor) -> None:
+    """Per action dimension loss weights (``DistillationRunner`` passes the
+    normalised squared action scales)."""
+    w = weights.to(self.device)
+
+    def weighted_mse(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+      return (w * (pred - target).square()).mean()
+
+    self.loss_fn = weighted_mse
 
   @property
   def beta(self) -> float:
@@ -96,6 +112,10 @@ class DistillationRunner(MjlabOnPolicyRunner):
           for opt in ("rnn_type", "rnn_hidden_dim", "rnn_num_layers"):
             train_cfg[key].pop(opt, None)
     super().__init__(env, train_cfg, log_dir, device)
+    scale = env.unwrapped.action_manager.get_term("joint_pos").scale
+    scale = scale[0] if isinstance(scale, torch.Tensor) else torch.full((env.num_actions,), scale)
+    w = scale.square()
+    self.alg.set_action_weights(w / w.mean())
 
   def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False) -> None:
     if not self.alg.teacher_loaded:
