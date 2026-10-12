@@ -502,6 +502,7 @@ def passing_step(
   env: ManagerBasedRlEnv,
   scale: float = 0.5,
   min_air_time: float = 0.1,
+  min_advance: float = 0.02,
   command_threshold: float = 0.05,
 ) -> torch.Tensor:
   """At each ALTERNATING touchdown (the other foot made the previous one):
@@ -515,7 +516,14 @@ def passing_step(
 
   ``scale`` must exceed the shuffle's foot gap (~0.3 m): at 0.25 m the trailing
   foot's landing saturated at -1, so landing it further forward paid nothing
-  and the second run kept shuffling."""
+  and the second run kept shuffling.
+
+  The positive part is capped by the new ground the step gains: min(lead,
+  arc - furthest touchdown of the episode so far). Without it the v3 run
+  learned to scissor its feet back and forth on the start platform and collect
+  the reward without moving. With it the positive total is bounded by the
+  distance walked / ``scale``; a shuffle's trailing-foot penalty cancels its
+  gains, an alternating gait keeps them."""
   data = env.scene[FOOT_CONTACT_SENSOR].data
   assert data.current_contact_time is not None and data.last_air_time is not None
   first = (data.current_contact_time > 0) & (data.current_contact_time <= env.step_dt + 1e-6)
@@ -528,8 +536,19 @@ def passing_step(
   foot = torch.arange(2, device=env.device)[None, :]
   alternating = first & (last[:, None] != foot)
   arc = BeamEpisode.get(env).feet_proj().arc
+  frontier = getattr(env, "_beam_step_frontier", None)
+  if frontier is None:
+    frontier = arc.max(-1).values.clone()
+    env._beam_step_frontier = frontier
+  fresh = env.episode_length_buf <= 1
+  frontier[fresh] = arc[fresh].max(-1).values
   lead = torch.stack([arc[:, 0] - arc[:, 1], arc[:, 1] - arc[:, 0]], dim=-1)
-  r = (torch.clamp(lead / scale, -1.0, 1.0) * alternating.float()).sum(-1)
+  gained = (arc - frontier[:, None]).clamp(min=0.0)
+  gained = torch.where(gained > min_advance, gained, torch.zeros_like(gained))
+  r = torch.where(lead > 0, torch.minimum(lead, gained), lead)
+  r = (torch.clamp(r / scale, -1.0, 1.0) * alternating.float()).sum(-1)
+  landed = torch.where(first, arc, torch.full_like(arc, -1e9)).max(-1).values
+  frontier[:] = torch.maximum(frontier, landed)
   # Latest touchdown wins; if both feet land on the same step, keep it unset.
   both = first.all(-1)
   last[:] = torch.where(both, -1, torch.where(first[:, 0], 0, torch.where(first[:, 1], 1, last)))
