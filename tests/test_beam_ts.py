@@ -108,3 +108,66 @@ def test_env_builds_steps_and_obs_are_finite() -> None:
       assert all(torch.isfinite(v).all() for v in obs.values())
   finally:
     env.close()
+
+
+def _swap_side(name: str) -> str:
+  if name.startswith("left_"):
+    return "right_" + name[len("left_") :]
+  if name.startswith("right_"):
+    return "left_" + name[len("right_") :]
+  return name
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_mirror_maps_match_g1_kinematics_and_are_involutions() -> None:
+  """Mirrored joint angles must give the mirror-image robot (every body at
+  (x, -y, z) of its counterpart), the default pose must be its own mirror,
+  and mirroring observations / actions twice must be the identity."""
+  from mjlab.envs import ManagerBasedRlEnv
+
+  from sendg1.common.beam_ts.symmetry import joint_mirror, mirror_obs_actions
+
+  cfg = load_env_cfg(TEACHER_TASK)
+  cfg.scene.num_envs = 2
+  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
+  try:
+    obs, _ = env.reset()
+    robot = env.scene["robot"]
+    names = list(robot.joint_names)
+    src = torch.tensor([s for s, _ in joint_mirror(names)], device=env.device)
+    sign = torch.tensor([g for _, g in joint_mirror(names)], device=env.device)
+
+    default = robot.data.default_joint_pos[0]
+    torch.testing.assert_close(default[src] * sign, default)
+
+    gen = torch.Generator(device=env.device).manual_seed(0)
+    q0 = default + (torch.rand(len(names), generator=gen, device=env.device) - 0.5) * 0.8
+    q = torch.stack([q0, q0[src] * sign])
+    robot.write_joint_state_to_sim(q, torch.zeros_like(q))
+    pose = torch.zeros(2, 7, device=env.device)
+    pose[:, :3] = env.scene.env_origins + torch.tensor([0.0, 0.0, 1.0], device=env.device)
+    pose[:, 3] = 1.0
+    robot.write_root_link_pose_to_sim(pose)
+    env.sim.forward()
+    rel = robot.data.body_link_pos_w - pose[:, None, :3]
+    bodies = list(robot.body_names)
+    mirrored = rel[0, [bodies.index(_swap_side(b)) for b in bodies]] * torch.tensor(
+      [1.0, -1.0, 1.0], device=env.device
+    )
+    torch.testing.assert_close(rel[1], mirrored, atol=1e-4, rtol=0)
+
+    class _Wrapped:
+      unwrapped = env
+
+    from tensordict import TensorDict
+
+    w = _Wrapped()
+    obs = TensorDict(dict(obs), batch_size=[2], device=env.device)
+    actions = torch.randn(2, env.action_manager.total_action_dim, device=env.device)
+    once, act_once = mirror_obs_actions(w, obs, actions)
+    twice, act_twice = mirror_obs_actions(w, once[2:], act_once[2:])
+    for k in obs.keys():
+      torch.testing.assert_close(twice[2:][k], obs[k])
+    torch.testing.assert_close(act_twice[2:], actions)
+  finally:
+    env.close()

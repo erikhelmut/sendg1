@@ -36,13 +36,28 @@ def _teacher_actor() -> RslRlModelCfg:
   )
 
 
+@dataclass
+class SymmetricPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
+  """PPO with rsl_rl's symmetry extension: mirrored copies of every mini-batch
+  plus a mirror loss on the actor (``sendg1.common.beam_ts.symmetry``)."""
+
+  symmetry_cfg: dict | None = field(
+    default_factory=lambda: {
+      "data_augmentation_func": "sendg1.common.beam_ts.symmetry:mirror_obs_actions",
+      "use_data_augmentation": True,
+      "use_mirror_loss": True,
+      "mirror_loss_coeff": 0.1,
+    }
+  )
+
+
 def teacher_ppo_cfg(seed: int = 0, max_iterations: int = 15_000) -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(
     seed=seed,
     obs_groups={"actor": TEACHER_OBS, "critic": TEACHER_OBS},
     actor=_teacher_actor(),
     critic=RslRlModelCfg(hidden_dims=HIDDEN, activation="elu", obs_normalization=True),
-    algorithm=RslRlPpoAlgorithmCfg(
+    algorithm=SymmetricPpoAlgorithmCfg(
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
       clip_param=0.2,

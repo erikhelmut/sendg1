@@ -52,6 +52,17 @@ POSE_STD_BEAM: dict[str, float] = {
 Sagittal leg joints keep the walking tolerance: at x1.5 the teacher settled
 into a deep crouch."""
 ARM_JOINTS = (".*shoulder.*", ".*elbow.*", ".*wrist.*")
+LEG_JOINTS = (".*hip.*", ".*knee.*", ".*ankle.*")
+ARM_POSE_STD: dict[str, float] = {
+  r".*shoulder_pitch.*": 0.3,
+  r".*shoulder_roll.*": 0.3,
+  r".*shoulder_yaw.*": 0.15,
+  r".*elbow.*": 0.3,
+  r".*wrist.*": 0.1,
+}
+"""Light pull toward the default arm pose: wrists held near neutral (the
+lopsided teacher bent them by ~60 deg for nothing), shoulder yaw moderately,
+shoulder roll / elbow left freer so the arms can still work as a balance pole."""
 """Walking tolerances x1.5, for standing and walking alike. A narrow beam needs
 hip adduction and a tandem stance at any speed, so mjlab's tight standing std
 (0.05 rad everywhere) would punish exactly the posture the task requires."""
@@ -101,6 +112,13 @@ def build_rewards() -> dict[str, RewardTermCfg]:
     # -- gait shape -------------------------------------------------------------
     "passing_step": RewardTermCfg(func=mdp.passing_step, weight=1.0),
     "foot_flat": RewardTermCfg(func=mdp.stance_foot_flat, weight=1.0),
+    "swing_foot_speed": RewardTermCfg(func=mdp.swing_foot_speed, weight=-1.0),
+    "touchdown_force_rate": RewardTermCfg(func=mdp.touchdown_force_rate, weight=-5.0),
+    "arm_posture": RewardTermCfg(
+      func=mdp.pose_l2,
+      weight=-0.02,
+      params={"std": ARM_POSE_STD, "asset_cfg": SceneEntityCfg("robot", joint_names=ARM_JOINTS)},
+    ),
     # -- posture (from the walking reward) -------------------------------------
     "upright": RewardTermCfg(
       func=vel_mdp.upright,
@@ -128,6 +146,11 @@ def build_rewards() -> dict[str, RewardTermCfg]:
     ),
     # -- regularisers (from the walking reward) ----------------------------------
     "action_rate_l2": RewardTermCfg(func=vel_mdp.action_rate_l2, weight=-0.05),
+    "leg_joint_acc": RewardTermCfg(
+      func=envs_mdp.joint_acc_l2,
+      weight=-1e-6,
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=LEG_JOINTS)},
+    ),
     "arm_joint_vel": RewardTermCfg(
       func=envs_mdp.joint_vel_l2,
       weight=-0.02,
@@ -193,7 +216,13 @@ def build_events() -> dict[str, EventTermCfg]:
   foot_geoms = SceneEntityCfg("robot", geom_names=G1_FOOT_GEOMS)
   return {
     # -- reset -----------------------------------------------------------------
-    "spawn": EventTermCfg(func=mdp.spawn_on_beam, mode="reset"),
+    # Platform starts off-centre by up to 15 cm and 10 deg: recoverable by
+    # feel once the first foot is on the beam, no vision needed.
+    "spawn": EventTermCfg(
+      func=mdp.spawn_on_beam,
+      mode="reset",
+      params={"platform_lateral_range": (-0.15, 0.15), "yaw_range": (-0.17, 0.17)},
+    ),
     "reset_joints": EventTermCfg(
       func=envs_mdp.reset_joints_by_offset,
       mode="reset",

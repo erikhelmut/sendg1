@@ -587,6 +587,59 @@ def stance_foot_flat(env: ManagerBasedRlEnv, std: float = 0.15) -> torch.Tensor:
   return r.sum(-1) / contact.sum(-1).clamp(min=1.0)
 
 
+def swing_foot_speed(env: ManagerBasedRlEnv, max_speed: float = 1.2) -> torch.Tensor:
+  """Sum over feet in the air of relu(|v_foot| - max_speed)^2. At 0.3 m/s a
+  human swing foot peaks near 1 m/s; the lopsided teacher whipped its right
+  foot through at ~4 m/s right after each left touchdown."""
+  robot = _robot(env)
+  ids = getattr(env, "_beam_foot_body_ids", None)
+  if ids is None:
+    ids, _ = robot.find_bodies(("left_ankle_roll_link", "right_ankle_roll_link"), preserve_order=True)
+    env._beam_foot_body_ids = ids
+  speed = robot.data.body_link_lin_vel_w[:, ids].norm(dim=-1)
+  air = ~_feet_in_contact(env)
+  return (torch.relu(speed - max_speed).square() * air.float()).sum(-1)
+
+
+def touchdown_force_rate(env: ManagerBasedRlEnv, body_weight_n: float = 343.0) -> torch.Tensor:
+  """Sum over feet of (relu(rise of the vertical contact force in one step) /
+  body weight)^2. Penalises slamming a foot down, i.e. favours a light first
+  touch with weight shifted on gradually -- the physical shape of probing, and
+  cleaner tactile readings without impact spikes."""
+  force = env.scene[FOOT_CONTACT_SENSOR].data.force
+  assert force is not None
+  fz = force.view(env.num_envs, 2, 3)[..., 2].abs()
+  prev = getattr(env, "_beam_prev_fz", None)
+  if prev is None:
+    prev = fz.clone()
+    env._beam_prev_fz = prev
+  prev[env.episode_length_buf <= 1] = 0.0
+  rise = torch.relu(fz - prev) / body_weight_n
+  prev.copy_(fz)
+  return rise.square().sum(-1)
+
+
+class pose_l2:
+  """Mean over the selected joints of ((q - q_default) / std)^2: a quadratic
+  pull toward the default pose. Unlike mjlab's exp-kernel ``posture`` it does
+  not flatten out far from the target (the lopsided teacher's wrists sat ~1 rad
+  off, where the exp kernel gave no gradient at all)."""
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv):
+    from mjlab.utils.lab_api.string import resolve_matching_names_values
+
+    asset = env.scene[cfg.params["asset_cfg"].name]
+    _, names = asset.find_joints(cfg.params["asset_cfg"].joint_names)
+    _, _, std = resolve_matching_names_values(data=cfg.params["std"], list_of_strings=names)
+    self.std = torch.tensor(std, device=env.device, dtype=torch.float32)
+
+  def __call__(self, env: ManagerBasedRlEnv, std, asset_cfg) -> torch.Tensor:
+    del std
+    asset = env.scene[asset_cfg.name]
+    err = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    return torch.mean(torch.square(err / self.std), dim=1)
+
+
 def reach_end_bonus(env: ManagerBasedRlEnv) -> torch.Tensor:
   """One-off, on the step the end platform is reached. Divided by step_dt so
   the weight is the bonus itself."""
