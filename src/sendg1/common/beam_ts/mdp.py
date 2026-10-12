@@ -503,6 +503,8 @@ def passing_step(
   scale: float = 0.5,
   min_air_time: float = 0.1,
   min_advance: float = 0.02,
+  speed_std: float = 0.15,
+  speed_ema: float = 0.04,
   command_threshold: float = 0.05,
 ) -> torch.Tensor:
   """At each ALTERNATING touchdown (the other foot made the previous one):
@@ -523,7 +525,9 @@ def passing_step(
   learned to scissor its feet back and forth on the start platform and collect
   the reward without moving. With it the positive total is bounded by the
   distance walked / ``scale``; a shuffle's trailing-foot penalty cancels its
-  gains, an alternating gait keeps them."""
+  gains, an alternating gait keeps them. The positive part is also scaled by
+  how well the (smoothed) speed matches the command, else paying per metre
+  teaches rushing."""
   data = env.scene[FOOT_CONTACT_SENSOR].data
   assert data.current_contact_time is not None and data.last_air_time is not None
   first = (data.current_contact_time > 0) & (data.current_contact_time <= env.step_dt + 1e-6)
@@ -546,7 +550,19 @@ def passing_step(
   gained = (arc - frontier[:, None]).clamp(min=0.0)
   gained = torch.where(gained > min_advance, gained, torch.zeros_like(gained))
   r = torch.where(lead > 0, torch.minimum(lead, gained), lead)
-  r = (torch.clamp(r / scale, -1.0, 1.0) * alternating.float()).sum(-1)
+  r = torch.clamp(r / scale, -1.0, 1.0)
+  # Gate the positive part on the speed matching the command, smoothed over
+  # ~0.5 s: paying per metre otherwise teaches rushing (1.3 m/s at 0.3 m/s).
+  ema = getattr(env, "_beam_speed_ema", None)
+  if ema is None:
+    ema = torch.zeros(env.num_envs, device=env.device)
+    env._beam_speed_ema = ema
+  ema[fresh] = 0.0
+  v_along, _ = BeamEpisode.get(env).along_velocity()
+  ema.mul_(1.0 - speed_ema).add_(speed_ema * v_along)
+  match = torch.exp(-torch.square(_forward_cmd(env) - ema) / speed_std**2)
+  r = torch.where(r > 0, r * match[:, None], r)
+  r = (r * alternating.float()).sum(-1)
   landed = torch.where(first, arc, torch.full_like(arc, -1e9)).max(-1).values
   frontier[:] = torch.maximum(frontier, landed)
   # Latest touchdown wins; if both feet land on the same step, keep it unset.
