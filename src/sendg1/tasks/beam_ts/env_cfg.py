@@ -27,7 +27,13 @@ from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 from sendg1.common.beam_ts import mdp
-from sendg1.common.beam_ts.terms import PRIVILEGED_TERMS, REAL_TERMS, TERMS
+from sendg1.common.beam_ts.terms import (
+  BLIND_TERMS,
+  PRIVILEGED_TERMS,
+  PROBE_PRIVILEGED_TERMS,
+  REAL_TERMS,
+  TERMS,
+)
 from sendg1.common.beam_ts.terrain import make_beam_ts_terrain_cfg
 from sendg1.common.rewards import POSE_STD_WALKING
 from sendg1.common.robots.g1 import (
@@ -292,8 +298,8 @@ def build_events() -> dict[str, EventTermCfg]:
 # ---------------------------------------------------------------------------
 
 
-def build_observations() -> dict[str, ObservationGroupCfg]:
-  return {
+def build_observations(probe: bool = False) -> dict[str, ObservationGroupCfg]:
+  groups = {
     "real": ObservationGroupCfg(
       terms={n: TERMS[n].build() for n in REAL_TERMS},
       concatenate_terms=True,
@@ -305,9 +311,25 @@ def build_observations() -> dict[str, ObservationGroupCfg]:
       enable_corruption=False,
     ),
   }
+  if probe:
+    groups["privileged_touch"] = ObservationGroupCfg(
+      terms={n: TERMS[n].build() for n in PROBE_PRIVILEGED_TERMS},
+      concatenate_terms=True,
+      enable_corruption=False,
+    )
+    groups["real_blind"] = ObservationGroupCfg(
+      terms={n: TERMS[n].build() for n in BLIND_TERMS},
+      concatenate_terms=True,
+      enable_corruption=True,
+    )
+  return groups
 
 
-def make_beam_ts_env_cfg(*, play: bool = False, num_envs: int | None = None) -> ManagerBasedRlEnvCfg:
+def make_beam_ts_env_cfg(
+  *, play: bool = False, num_envs: int | None = None, probe: bool = False
+) -> ManagerBasedRlEnvCfg:
+  """``probe``: also build the touch-revealed teacher group and the blind
+  student group (``terms.py``)."""
   cfg = make_velocity_env_cfg()
   cfg.episode_length_s = EPISODE_S
 
@@ -329,7 +351,7 @@ def make_beam_ts_env_cfg(*, play: bool = False, num_envs: int | None = None) -> 
   cfg.sim.contact_sensor_maxmatch = 128
   cfg.sim.nconmax = 70
 
-  cfg.observations = build_observations()
+  cfg.observations = build_observations(probe)
 
   cfg.actions = {
     "joint_pos": mdp.DelayedJointPositionActionCfg(

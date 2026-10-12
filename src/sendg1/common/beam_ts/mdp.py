@@ -426,6 +426,61 @@ def action_lag_obs(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 
 # ---------------------------------------------------------------------------
+# Touch-revealed beam observations (probing teacher)
+# ---------------------------------------------------------------------------
+#
+# The plain teacher sees where the beam is from the first step on, so it never
+# needs to look for it, and DAgger can only copy what the teacher does. The
+# probing teacher's actor gets the beam geometry only once touch could have
+# told it: from the first step on which a loaded foot has a beam edge under its
+# taxels (the tactile pattern then shows the edge). From then on the beam stays
+# revealed for the episode -- it is straight, so one felt edge plus
+# proprioception fixes it. On a wide beam an edge is felt only when a foot is
+# placed near it; at 0.05-0.07 m every touchdown on the beam feels both edges.
+# Before that the robot has to find the beam with its feet. The critic keeps
+# the full ground truth.
+
+SOLE_HALF_WIDTH = 0.035
+"""Lateral half extent of the slipper's taxel grid (slipper_v1): a beam edge
+closer than this to the foot's centre lies under the taxels."""
+
+
+def beam_revealed(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """[B] bool: a loaded foot has felt a beam edge this episode. Idempotent
+  within a step, so every term may call it."""
+  rev = getattr(env, "_beam_revealed", None)
+  if rev is None:
+    rev = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+  rev = rev & (env.episode_length_buf > 0)
+  ep = BeamEpisode.get(env)
+  proj = ep.feet_proj()
+  margin = ep.geo.support_half_width(proj.arc) - proj.lateral.abs()
+  felt = _feet_in_contact(env) & (margin < SOLE_HALF_WIDTH) & (margin > -SOLE_HALF_WIDTH)
+  rev = rev | felt.any(dim=-1)
+  env._beam_revealed = rev  # type: ignore[attr-defined]
+  return rev
+
+
+def beam_revealed_obs(env: ManagerBasedRlEnv) -> torch.Tensor:
+  return beam_revealed(env).float()[:, None]
+
+
+def _touch_revealed(func):
+  def term(env: ManagerBasedRlEnv) -> torch.Tensor:
+    return func(env) * beam_revealed(env).float()[:, None]
+
+  term.__name__ = f"{func.__name__}_touch"
+  term.__doc__ = f"``{func.__name__}``, zero until the beam is revealed by touch."
+  return term
+
+
+feet_beam_pose_touch = _touch_revealed(feet_beam_pose)
+base_beam_pose_touch = _touch_revealed(base_beam_pose)
+beam_progress_touch = _touch_revealed(beam_progress_obs)
+beam_params_touch = _touch_revealed(beam_params_obs)
+
+
+# ---------------------------------------------------------------------------
 # Rewards
 # ---------------------------------------------------------------------------
 

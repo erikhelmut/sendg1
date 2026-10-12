@@ -44,7 +44,11 @@ def build_env(args, task: str):
   n_levels = len(BEAM_WIDTHS)
   cfg.scene.num_envs = args.envs_per_level * n_levels
   cfg.seed = args.seed
-  cfg.events["spawn"].params = {"platform_from_level": 0}
+  cfg.events["spawn"].params = {
+    "platform_from_level": 0,
+    "platform_lateral_range": (-args.start_lateral, args.start_lateral),
+    "yaw_range": (-args.start_yaw, args.start_yaw),
+  }
   if not args.pushes:
     cfg.events.pop("push")
   twist = cfg.commands["twist"]
@@ -106,10 +110,8 @@ def load_policy(args, env):
   from mjlab.tasks.registry import load_rl_cfg
 
   from sendg1.rl.dagger import DistillationRunner
-  from sendg1.tasks.beam_ts import STUDENT_TASK, TEACHER_TASK
 
-  task = TEACHER_TASK if args.policy == "teacher" else STUDENT_TASK
-  rl_cfg = load_rl_cfg(task)
+  rl_cfg = load_rl_cfg(args.task)
   wrapped = RslRlVecEnvWrapper(env, clip_actions=rl_cfg.clip_actions)
   if args.policy == "teacher":
     runner = MjlabOnPolicyRunner(wrapped, asdict(rl_cfg), device="cuda:0")
@@ -151,6 +153,9 @@ def main() -> None:
   ap.add_argument("--episodes", type=int, default=2)
   ap.add_argument("--speed", type=float, default=0.3)
   ap.add_argument("--pushes", action="store_true")
+  ap.add_argument("--task", default=None, help="default: G1-Beam-Teacher / G1-Beam-Student")
+  ap.add_argument("--start-lateral", type=float, default=0.08, help="platform start offset (+/- m)")
+  ap.add_argument("--start-yaw", type=float, default=0.08, help="start yaw offset (+/- rad)")
   ap.add_argument("--seed", type=int, default=12345)
   ap.add_argument("--tag", default="")
   ap.add_argument("--out", default=None)
@@ -161,8 +166,8 @@ def main() -> None:
   import sendg1.tasks  # noqa: F401
   from sendg1.tasks.beam_ts import STUDENT_TASK, TEACHER_TASK
 
-  task = TEACHER_TASK if args.policy == "teacher" else STUDENT_TASK
-  env = build_env(args, task)
+  args.task = args.task or (TEACHER_TASK if args.policy == "teacher" else STUDENT_TASK)
+  env = build_env(args, args.task)
   wrapped, policy = load_policy(args, env)
   obs, _ = wrapped.reset()
   env._beam_ts_records.clear()
@@ -185,6 +190,7 @@ def main() -> None:
   json.dump(
     {
       "policy": args.policy,
+      "task": args.task,
       "checkpoint": str(Path(args.checkpoint).resolve()),
       "protocol": {
         "speed": args.speed,
@@ -193,6 +199,8 @@ def main() -> None:
         "pushes": args.pushes,
         "seed": args.seed,
         "spawn": "start platform at every width",
+        "start_lateral": args.start_lateral,
+        "start_yaw": args.start_yaw,
       },
       "per_width": summary,
       "episodes": kept,

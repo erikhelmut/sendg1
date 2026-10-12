@@ -25,6 +25,7 @@ REPO = Path(__file__).resolve().parent.parent
 def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--teacher", required=True, help="teacher PPO checkpoint (.pt)")
+  ap.add_argument("--task", default=None, help="student task (default G1-Beam-Student)")
   ap.add_argument("--seed", type=int, default=0)
   ap.add_argument("--num-envs", type=int, default=4096)
   ap.add_argument("--max-iterations", type=int, default=3000)
@@ -48,10 +49,11 @@ def main() -> None:
 
   configure_torch_backends()
   device = "cuda:0"
-  env_cfg = load_env_cfg(STUDENT_TASK)
+  task = args.task or STUDENT_TASK
+  env_cfg = load_env_cfg(task)
   env_cfg.scene.num_envs = args.num_envs
   env_cfg.seed = args.seed
-  rl_cfg = load_rl_cfg(STUDENT_TASK)
+  rl_cfg = load_rl_cfg(task)
   rl_cfg.seed = args.seed
   rl_cfg.max_iterations = args.max_iterations
   rl_cfg.logger = args.logger

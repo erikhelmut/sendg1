@@ -45,6 +45,9 @@ def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--policy", choices=["teacher", "student"], required=True)
   ap.add_argument("--checkpoint", required=True)
+  ap.add_argument("--task", default=None, help="default: G1-Beam-Teacher / G1-Beam-Student")
+  ap.add_argument("--start-lateral", type=float, default=0.08, help="platform start offset (+/- m)")
+  ap.add_argument("--start-yaw", type=float, default=0.08, help="start yaw offset (+/- rad)")
   ap.add_argument("--width", type=float, required=True)
   ap.add_argument("--want", choices=["success", "failure", "any"], default="success")
   ap.add_argument("--speed", type=float, default=0.3)
@@ -68,12 +71,16 @@ def main() -> None:
   from sendg1.tasks.beam_ts import STUDENT_TASK, TEACHER_TASK
 
   level = min(range(len(BEAM_WIDTHS)), key=lambda i: abs(BEAM_WIDTHS[i] - args.width))
-  task = TEACHER_TASK if args.policy == "teacher" else STUDENT_TASK
+  task = args.task or (TEACHER_TASK if args.policy == "teacher" else STUDENT_TASK)
   cfg = load_env_cfg(task)
   cfg.scene.num_envs = 1
   cfg.seed = args.seed
   cfg.curriculum = {}
-  cfg.events["spawn"].params = {"platform_from_level": 0}
+  cfg.events["spawn"].params = {
+    "platform_from_level": 0,
+    "platform_lateral_range": (-args.start_lateral, args.start_lateral),
+    "yaw_range": (-args.start_yaw, args.start_yaw),
+  }
   cfg.events.pop("push")
   twist = cfg.commands["twist"]
   twist.ranges.lin_vel_x = (args.speed, args.speed)

@@ -66,7 +66,7 @@ def term_mirrors(
   ``action_names``: the action term's order (actions obs and the actions)."""
   joints = joint_mirror(joint_names)
   acts = joint_mirror(action_names if action_names is not None else joint_names)
-  return {
+  out = {
     # real
     "base_ang_vel": _signs(-1, 1, -1),
     "projected_gravity": _signs(1, -1, 1),
@@ -88,6 +88,11 @@ def term_mirrors(
     "foot_contact_forces": _swap_blocks(3, (1, -1, 1)),
     "action_lag": _signs(1),
   }
+  # Touch-revealed copies mirror like the originals (masking is a scalar).
+  for name in ("feet_beam_pose", "base_beam_pose", "beam_progress", "beam_params"):
+    out[f"{name}_touch"] = out[name]
+  out["beam_revealed"] = _signs(1)
+  return out
 
 
 def group_mirror(term_names, term_dims, mirrors) -> tuple[torch.Tensor, torch.Tensor]:

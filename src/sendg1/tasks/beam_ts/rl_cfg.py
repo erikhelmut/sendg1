@@ -19,6 +19,10 @@ from mjlab.rl.config import RslRlBaseRunnerCfg
 
 TEACHER_OBS = ("real", "privileged")
 STUDENT_OBS = ("real",)
+PROBE_TEACHER_OBS = ("real", "privileged_touch")
+"""Probing teacher's actor: beam geometry only once a foot has felt an edge.
+Its critic keeps ``TEACHER_OBS`` (full ground truth)."""
+BLIND_STUDENT_OBS = ("real_blind",)
 HIDDEN = (512, 256, 128)
 STUDENT_RNN_HIDDEN = 256
 STUDENT_HEAD = (256, 128)
@@ -51,10 +55,15 @@ class SymmetricPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
   )
 
 
-def teacher_ppo_cfg(seed: int = 0, max_iterations: int = 15_000) -> RslRlOnPolicyRunnerCfg:
+def teacher_ppo_cfg(
+  seed: int = 0,
+  max_iterations: int = 15_000,
+  actor_obs: tuple[str, ...] = TEACHER_OBS,
+  experiment_name: str = "beam_ts_teacher",
+) -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(
     seed=seed,
-    obs_groups={"actor": TEACHER_OBS, "critic": TEACHER_OBS},
+    obs_groups={"actor": actor_obs, "critic": TEACHER_OBS},
     actor=_teacher_actor(),
     critic=RslRlModelCfg(hidden_dims=HIDDEN, activation="elu", obs_normalization=True),
     algorithm=SymmetricPpoAlgorithmCfg(
@@ -71,7 +80,7 @@ def teacher_ppo_cfg(seed: int = 0, max_iterations: int = 15_000) -> RslRlOnPolic
       desired_kl=0.01,
       max_grad_norm=1.0,
     ),
-    experiment_name="beam_ts_teacher",
+    experiment_name=experiment_name,
     run_name=f"seed{seed}",
     save_interval=500,
     num_steps_per_env=24,
@@ -115,11 +124,17 @@ class DistillationRunnerCfg(RslRlBaseRunnerCfg):
   algorithm: DAggerAlgorithmCfg = field(default_factory=DAggerAlgorithmCfg)
 
 
-def student_distill_cfg(seed: int = 0, max_iterations: int = 3_000) -> DistillationRunnerCfg:
+def student_distill_cfg(
+  seed: int = 0,
+  max_iterations: int = 3_000,
+  student_obs: tuple[str, ...] = STUDENT_OBS,
+  teacher_obs: tuple[str, ...] = TEACHER_OBS,
+  experiment_name: str = "beam_ts_student",
+) -> DistillationRunnerCfg:
   return DistillationRunnerCfg(
     seed=seed,
-    obs_groups={"student": STUDENT_OBS, "teacher": TEACHER_OBS},
-    experiment_name="beam_ts_student",
+    obs_groups={"student": student_obs, "teacher": teacher_obs},
+    experiment_name=experiment_name,
     run_name=f"seed{seed}",
     save_interval=250,
     num_steps_per_env=50,

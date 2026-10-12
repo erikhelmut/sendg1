@@ -12,7 +12,14 @@ from sendg1.common.beam_ts import tactile as tac
 from sendg1.common.beam_ts.geometry import project_points
 from sendg1.common.beam_ts.terms import STUDENT_LEGAL, TERMS
 from sendg1.common.tactile.layout import LAYOUTS
-from sendg1.tasks.beam_ts import STUDENT_TASK, TEACHER_TASK, assert_student_is_deployable
+from sendg1.tasks.beam_ts import (
+  PROBE_BLIND_STUDENT_TASK,
+  PROBE_STUDENT_TASK,
+  PROBE_TEACHER_TASK,
+  STUDENT_TASK,
+  TEACHER_TASK,
+  assert_student_is_deployable,
+)
 
 STUDENT_EXPECTED = {
   "base_ang_vel",
@@ -53,6 +60,28 @@ def test_leak_guard_fires() -> None:
   env_cfg.observations["real"].terms["base_lin_vel"] = TERMS["base_lin_vel"].build()
   with pytest.raises(ValueError):
     assert_student_is_deployable(env_cfg.observations, ("real",))
+
+
+def _terms(task: str, key: str) -> set[str]:
+  env_cfg, rl_cfg = load_env_cfg(task), load_rl_cfg(task)
+  return {t for g in rl_cfg.obs_groups[key] for t in env_cfg.observations[g].terms}
+
+
+RAW_BEAM_TERMS = {"feet_beam_pose", "base_beam_pose", "beam_progress", "beam_params"}
+
+
+def test_probe_teacher_actor_sees_beam_only_through_touch() -> None:
+  actor = _terms(PROBE_TEACHER_TASK, "actor")
+  assert not actor & RAW_BEAM_TERMS
+  assert {f"{t}_touch" for t in RAW_BEAM_TERMS} | {"beam_revealed"} <= actor
+  assert RAW_BEAM_TERMS <= _terms(PROBE_TEACHER_TASK, "critic")
+
+
+def test_probe_students() -> None:
+  assert _terms(PROBE_STUDENT_TASK, "student") == STUDENT_EXPECTED
+  assert _terms(PROBE_BLIND_STUDENT_TASK, "student") == STUDENT_EXPECTED - {"tactile"}
+  for task in (PROBE_STUDENT_TASK, PROBE_BLIND_STUDENT_TASK):
+    assert load_rl_cfg(task).obs_groups["teacher"] == load_rl_cfg(PROBE_TEACHER_TASK).obs_groups["actor"]
 
 
 def test_privileged_terms_never_legal() -> None:
@@ -110,6 +139,47 @@ def test_env_builds_steps_and_obs_are_finite() -> None:
     env.close()
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_beam_is_revealed_only_by_a_felt_edge() -> None:
+  """On the 0.40 m beam a centred stance feels no edge: the touch terms stay
+  zero. Shifted so one foot overhangs the edge, the next step reveals the beam
+  and the touch terms equal the ground truth."""
+  from mjlab.envs import ManagerBasedRlEnv
+
+  from sendg1.common.beam_ts.mdp import beam_revealed
+
+  cfg = load_env_cfg(PROBE_TEACHER_TASK)
+  cfg.scene.num_envs = 2
+  cfg.events.pop("push")
+  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
+  zero = torch.zeros(2, env.action_manager.total_action_dim, device=env.device)
+  try:
+    env.reset()
+    for _ in range(25):
+      obs, *_ = env.step(zero)
+    assert not beam_revealed(env).any()
+    om = env.observation_manager
+    names = om.active_terms["privileged_touch"]
+    dims = [int(torch.tensor(d).prod()) for d in om.group_obs_term_dim["privileged_touch"]]
+    parts = dict(zip(names, obs["privileged_touch"].split(dims, dim=-1), strict=True))
+    for t in RAW_BEAM_TERMS:
+      assert (parts[f"{t}_touch"] == 0).all(), t
+
+    robot = env.scene["robot"]
+    pose = robot.data.root_link_pose_w.clone()
+    pose[0, 1] += 0.06  # left foot (~0.15 m off centre) now overhangs the 0.20 m half width
+    robot.write_root_link_pose_to_sim(pose)
+    obs, *_ = env.step(zero)
+    rev = beam_revealed(env)
+    assert rev[0] and not rev[1]
+    parts = dict(zip(names, obs["privileged_touch"].split(dims, dim=-1), strict=True))
+    raw = dict(zip(om.active_terms["privileged"], obs["privileged"].split(
+      [int(torch.tensor(d).prod()) for d in om.group_obs_term_dim["privileged"]], dim=-1), strict=True))
+    torch.testing.assert_close(parts["feet_beam_pose_touch"][0], raw["feet_beam_pose"][0])
+  finally:
+    env.close()
+
+
 def _swap_side(name: str) -> str:
   if name.startswith("left_"):
     return "right_" + name[len("left_") :]
@@ -119,7 +189,8 @@ def _swap_side(name: str) -> str:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_mirror_maps_match_g1_kinematics_and_are_involutions() -> None:
+@pytest.mark.parametrize("task", [TEACHER_TASK, PROBE_TEACHER_TASK])
+def test_mirror_maps_match_g1_kinematics_and_are_involutions(task: str) -> None:
   """Mirrored joint angles must give the mirror-image robot (every body at
   (x, -y, z) of its counterpart), the default pose must be its own mirror,
   and mirroring observations / actions twice must be the identity."""
@@ -127,7 +198,7 @@ def test_mirror_maps_match_g1_kinematics_and_are_involutions() -> None:
 
   from sendg1.common.beam_ts.symmetry import joint_mirror, mirror_obs_actions
 
-  cfg = load_env_cfg(TEACHER_TASK)
+  cfg = load_env_cfg(task)
   cfg.scene.num_envs = 2
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
   try:

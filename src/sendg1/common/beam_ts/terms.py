@@ -17,6 +17,10 @@ that observes anything else (``assert_student_is_deployable``).
 ``real`` group (student, teacher, critic): base_ang_vel, projected_gravity,
 joint_pos, joint_vel, actions, command_vx, tactile.
 ``privileged`` group (teacher, critic): everything else.
+
+Probing variant (``make_beam_ts_env_cfg(probe=True)``) adds two groups:
+``privileged_touch`` (probing teacher's actor: beam geometry masked until a foot
+has felt a beam edge) and ``real_blind`` (``real`` without tactile).
 """
 
 from __future__ import annotations
@@ -144,6 +148,27 @@ TERMS: dict[str, TermSpec] = {
   "action_lag": TermSpec(
     _plain(mdp.action_lag_obs), "privileged", "This episode's actuation latency."
   ),
+  # -- privileged, touch-revealed (probing teacher's actor) ---------------------
+  "feet_beam_pose_touch": TermSpec(
+    _plain(mdp.feet_beam_pose_touch),
+    "privileged",
+    "feet_beam_pose, zero until a loaded foot has felt a beam edge (mdp.beam_revealed).",
+  ),
+  "base_beam_pose_touch": TermSpec(
+    _plain(mdp.base_beam_pose_touch), "privileged", "base_beam_pose, zero until revealed by touch."
+  ),
+  "beam_progress_touch": TermSpec(
+    _plain(mdp.beam_progress_touch), "privileged", "beam_progress, zero until revealed by touch."
+  ),
+  "beam_params_touch": TermSpec(
+    _plain(mdp.beam_params_touch), "privileged", "beam_params, zero until revealed by touch."
+  ),
+  "beam_revealed": TermSpec(
+    _plain(mdp.beam_revealed_obs),
+    "privileged",
+    "Whether a foot has felt a beam edge this episode. Derivable from tactile in "
+    "principle, but the threshold uses the true geometry.",
+  ),
 }
 
 REAL_TERMS: tuple[str, ...] = (
@@ -165,6 +190,20 @@ PRIVILEGED_TERMS: tuple[str, ...] = (
   "foot_contact_forces",
   "action_lag",
 )
+PROBE_PRIVILEGED_TERMS: tuple[str, ...] = (
+  "base_lin_vel",
+  "feet_beam_pose_touch",
+  "base_beam_pose_touch",
+  "beam_progress_touch",
+  "beam_params_touch",
+  "beam_revealed",
+  "tactile_clean",
+  "foot_contact_forces",
+  "action_lag",
+)
+"""The probing teacher's actor: beam geometry only once touch could tell it."""
+BLIND_TERMS: tuple[str, ...] = tuple(n for n in REAL_TERMS if n != "tactile")
+"""The blind student: the stock G1's signals, no tactile slipper."""
 STUDENT_LEGAL: frozenset[str] = frozenset(
   n for n, s in TERMS.items() if s.availability in ("onboard", "sensor")
 )
