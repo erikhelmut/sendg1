@@ -29,6 +29,7 @@ from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from sendg1.common.beam_ts import mdp
 from sendg1.common.beam_ts.terms import (
   BLIND_TERMS,
+  STUDENT_TERMS,
   PRIVILEGED_TERMS,
   PROBE_PRIVILEGED_TERMS,
   REAL_TERMS,
@@ -310,6 +311,11 @@ def build_observations(probe: bool = False) -> dict[str, ObservationGroupCfg]:
       concatenate_terms=True,
       enable_corruption=False,
     ),
+    "student_real": ObservationGroupCfg(
+      terms={n: TERMS[n].build() for n in STUDENT_TERMS},
+      concatenate_terms=True,
+      enable_corruption=True,
+    ),
   }
   if probe:
     groups["privileged_touch"] = ObservationGroupCfg(
@@ -317,7 +323,7 @@ def build_observations(probe: bool = False) -> dict[str, ObservationGroupCfg]:
       concatenate_terms=True,
       enable_corruption=False,
     )
-    groups["real_blind"] = ObservationGroupCfg(
+    groups["student_blind"] = ObservationGroupCfg(
       terms={n: TERMS[n].build() for n in BLIND_TERMS},
       concatenate_terms=True,
       enable_corruption=True,

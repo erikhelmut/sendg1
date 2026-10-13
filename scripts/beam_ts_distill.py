@@ -4,7 +4,7 @@
     python scripts/beam_ts_distill.py --teacher runs/beam_ts_teacher/<run>/model_14999.pt \
         --init-max-level 6 --max-iterations 3000
 
-The student drives (after the teacher-control fade), the frozen teacher labels
+The student drives (after the teacher-control hold and per-step fade), the frozen teacher labels
 every visited state, and the student regresses onto the labels. Envs start
 spread uniformly over levels 0..``--init-max-level`` -- the levels the teacher
 masters -- and the per-env curriculum then moves them on the student's own
@@ -30,6 +30,8 @@ def main() -> None:
   ap.add_argument("--num-envs", type=int, default=4096)
   ap.add_argument("--max-iterations", type=int, default=3000)
   ap.add_argument("--init-max-level", type=int, default=0)
+  ap.add_argument("--hold-iterations", type=int, default=None)
+  ap.add_argument("--student-obs", default=None, help="diagnostic only: comma-separated groups (e.g. real,privileged)")
   ap.add_argument("--fade-iterations", type=int, default=None)
   ap.add_argument("--logger", default="wandb", choices=["wandb", "tensorboard"])
   ap.add_argument("--run-name", default=None)
@@ -58,6 +60,10 @@ def main() -> None:
   rl_cfg.max_iterations = args.max_iterations
   rl_cfg.logger = args.logger
   rl_cfg.run_name = args.run_name or f"seed{args.seed}"
+  if args.student_obs:
+    rl_cfg.obs_groups["student"] = tuple(args.student_obs.split(","))
+  if args.hold_iterations is not None:
+    rl_cfg.algorithm.hold_iterations = args.hold_iterations
   if args.fade_iterations is not None:
     rl_cfg.algorithm.fade_iterations = args.fade_iterations
 

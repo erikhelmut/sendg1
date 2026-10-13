@@ -26,10 +26,10 @@ STUDENT_EXPECTED = {
   "projected_gravity",
   "joint_pos",
   "joint_vel",
-  "actions",
   "command_vx",
   "tactile",
 }
+"""The previous action is left out on purpose (copycat, see terms.py)."""
 
 
 def _student_terms() -> set[str]:
@@ -60,6 +60,9 @@ def test_leak_guard_fires() -> None:
   env_cfg.observations["real"].terms["base_lin_vel"] = TERMS["base_lin_vel"].build()
   with pytest.raises(ValueError):
     assert_student_is_deployable(env_cfg.observations, ("real",))
+  env_cfg.observations["student_real"].terms["feet_beam_pose"] = TERMS["feet_beam_pose"].build()
+  with pytest.raises(ValueError):
+    assert_student_is_deployable(env_cfg.observations, ("student_real",))
 
 
 def _terms(task: str, key: str) -> set[str]:
@@ -73,7 +76,7 @@ RAW_BEAM_TERMS = {"feet_beam_pose", "base_beam_pose", "beam_progress", "beam_par
 def test_probe_teacher_actor_sees_beam_only_through_touch() -> None:
   actor = _terms(PROBE_TEACHER_TASK, "actor")
   assert not actor & RAW_BEAM_TERMS
-  assert {f"{t}_touch" for t in RAW_BEAM_TERMS} | {"beam_revealed"} <= actor
+  assert {"feet_beam_pose_felt", "base_beam_pose_felt", "beam_progress_touch", "beam_params_touch", "beam_revealed"} <= actor
   assert RAW_BEAM_TERMS <= _terms(PROBE_TEACHER_TASK, "critic")
 
 
@@ -162,8 +165,8 @@ def test_beam_is_revealed_only_by_a_felt_edge() -> None:
     names = om.active_terms["privileged_touch"]
     dims = [int(torch.tensor(d).prod()) for d in om.group_obs_term_dim["privileged_touch"]]
     parts = dict(zip(names, obs["privileged_touch"].split(dims, dim=-1), strict=True))
-    for t in RAW_BEAM_TERMS:
-      assert (parts[f"{t}_touch"] == 0).all(), t
+    for t in ("feet_beam_pose_felt", "base_beam_pose_felt", "beam_progress_touch", "beam_params_touch"):
+      assert (parts[t] == 0).all(), t
 
     robot = env.scene["robot"]
     pose = robot.data.root_link_pose_w.clone()
@@ -175,7 +178,15 @@ def test_beam_is_revealed_only_by_a_felt_edge() -> None:
     parts = dict(zip(names, obs["privileged_touch"].split(dims, dim=-1), strict=True))
     raw = dict(zip(om.active_terms["privileged"], obs["privileged"].split(
       [int(torch.tensor(d).prod()) for d in om.group_obs_term_dim["privileged"]], dim=-1), strict=True))
-    torch.testing.assert_close(parts["feet_beam_pose_touch"][0], raw["feet_beam_pose"][0])
+    # The overhanging foot's lateral offset is felt, the other foot's (no edge
+    # under it) is not; base / CoM lateral offsets are never given.
+    felt = parts["feet_beam_pose_felt"][0].view(2, 5)
+    true = raw["feet_beam_pose"][0].view(2, 5)
+    torch.testing.assert_close(felt[0], true[0])
+    assert (felt[1, :2] == 0).all()
+    torch.testing.assert_close(felt[1, 2:], true[1, 2:])
+    base = parts["base_beam_pose_felt"][0]
+    assert base[0] == 0 and base[4] == 0 and base[3] != 0
   finally:
     env.close()
 

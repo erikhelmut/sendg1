@@ -18,9 +18,16 @@ that observes anything else (``assert_student_is_deployable``).
 joint_pos, joint_vel, actions, command_vx, tactile.
 ``privileged`` group (teacher, critic): everything else.
 
+``student_real`` group (student): ``real`` without ``actions``. Behaviour
+cloning with the previous action as input lets the student learn "repeat the
+last action": while the teacher drives, that input is the teacher's own last
+action, and the first students copied it (error 0.004 with the teacher's last
+action as input, 0.34 with their own) and fell as soon as they drove. The
+teacher keeps it.
+
 Probing variant (``make_beam_ts_env_cfg(probe=True)``) adds two groups:
 ``privileged_touch`` (probing teacher's actor: beam geometry masked until a foot
-has felt a beam edge) and ``real_blind`` (``real`` without tactile).
+has felt a beam edge) and ``student_blind`` (``student_real`` without tactile).
 """
 
 from __future__ import annotations
@@ -157,6 +164,18 @@ TERMS: dict[str, TermSpec] = {
   "base_beam_pose_touch": TermSpec(
     _plain(mdp.base_beam_pose_touch), "privileged", "base_beam_pose, zero until revealed by touch."
   ),
+  "feet_beam_pose_felt": TermSpec(
+    _plain(mdp.feet_beam_pose_felt),
+    "privileged",
+    "Per foot: lateral offset and edge margin only while loaded with a beam edge "
+    "under the taxels (what the tactile image shows); height and yaw once revealed.",
+  ),
+  "base_beam_pose_felt": TermSpec(
+    _plain(mdp.base_beam_pose_felt),
+    "privileged",
+    "base_beam_pose with the base and CoM lateral offsets zeroed (no sensor measures "
+    "them); heading and height once revealed.",
+  ),
   "beam_progress_touch": TermSpec(
     _plain(mdp.beam_progress_touch), "privileged", "beam_progress, zero until revealed by touch."
   ),
@@ -192,8 +211,8 @@ PRIVILEGED_TERMS: tuple[str, ...] = (
 )
 PROBE_PRIVILEGED_TERMS: tuple[str, ...] = (
   "base_lin_vel",
-  "feet_beam_pose_touch",
-  "base_beam_pose_touch",
+  "feet_beam_pose_felt",
+  "base_beam_pose_felt",
   "beam_progress_touch",
   "beam_params_touch",
   "beam_revealed",
@@ -201,8 +220,12 @@ PROBE_PRIVILEGED_TERMS: tuple[str, ...] = (
   "foot_contact_forces",
   "action_lag",
 )
-"""The probing teacher's actor: beam geometry only once touch could tell it."""
-BLIND_TERMS: tuple[str, ...] = tuple(n for n in REAL_TERMS if n != "tactile")
+"""The probing teacher's actor: beam geometry only as far as touch tells it.
+The first probing teacher used ``feet_beam_pose_touch`` / ``base_beam_pose_touch``
+(full pose, live, after the first felt edge) and could not be distilled."""
+STUDENT_TERMS: tuple[str, ...] = tuple(n for n in REAL_TERMS if n != "actions")
+"""The student: ``real`` without the previous action (see the module docstring)."""
+BLIND_TERMS: tuple[str, ...] = tuple(n for n in STUDENT_TERMS if n != "tactile")
 """The blind student: the stock G1's signals, no tactile slipper."""
 STUDENT_LEGAL: frozenset[str] = frozenset(
   n for n, s in TERMS.items() if s.availability in ("onboard", "sensor")

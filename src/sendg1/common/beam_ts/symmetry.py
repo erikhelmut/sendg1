@@ -91,6 +91,8 @@ def term_mirrors(
   # Touch-revealed copies mirror like the originals (masking is a scalar).
   for name in ("feet_beam_pose", "base_beam_pose", "beam_progress", "beam_params"):
     out[f"{name}_touch"] = out[name]
+  out["feet_beam_pose_felt"] = out["feet_beam_pose"]
+  out["base_beam_pose_felt"] = out["base_beam_pose"]
   out["beam_revealed"] = _signs(1)
   return out
 

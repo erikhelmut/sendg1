@@ -4,7 +4,8 @@ Teacher: actor and critic are both MLP (512, 256, 128), ELU, running obs
 normalisation, and both read ``real`` + ``privileged``. No memory: everything a
 memory would have to infer is handed to it.
 
-Student: GRU(256) -> MLP (256, 128) over ``real`` only. The GRU is the history:
+Student: GRU(256) -> MLP (256, 128) over ``student_real`` (``real`` without the
+previous action, see ``terms.py``). The GRU is the history:
 truncated BPTT over ``gradient_length`` = 10 steps (0.2 s; the hidden state
 still carries the whole episode), rollouts of 50 steps (1 s), 4 epochs: 20
 gradient steps per iteration. Trained by DAgger (``sendg1.rl.dagger``):
@@ -22,11 +23,11 @@ from mjlab.rl import RslRlModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
 from mjlab.rl.config import RslRlBaseRunnerCfg
 
 TEACHER_OBS = ("real", "privileged")
-STUDENT_OBS = ("real",)
+STUDENT_OBS = ("student_real",)
 PROBE_TEACHER_OBS = ("real", "privileged_touch")
 """Probing teacher's actor: beam geometry only once a foot has felt an edge.
 Its critic keeps ``TEACHER_OBS`` (full ground truth)."""
-BLIND_STUDENT_OBS = ("real_blind",)
+BLIND_STUDENT_OBS = ("student_blind",)
 HIDDEN = (512, 256, 128)
 STUDENT_RNN_HIDDEN = 256
 STUDENT_HEAD = (256, 128)

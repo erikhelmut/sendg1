@@ -445,6 +445,14 @@ SOLE_HALF_WIDTH = 0.035
 closer than this to the foot's centre lies under the taxels."""
 
 
+def edge_felt(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """[B, 2] bool: the foot is loaded and a beam edge lies under its taxels."""
+  ep = BeamEpisode.get(env)
+  proj = ep.feet_proj()
+  margin = ep.geo.support_half_width(proj.arc) - proj.lateral.abs()
+  return _feet_in_contact(env) & (margin < SOLE_HALF_WIDTH) & (margin > -SOLE_HALF_WIDTH)
+
+
 def beam_revealed(env: ManagerBasedRlEnv) -> torch.Tensor:
   """[B] bool: a loaded foot has felt a beam edge this episode. Idempotent
   within a step, so every term may call it."""
@@ -452,11 +460,7 @@ def beam_revealed(env: ManagerBasedRlEnv) -> torch.Tensor:
   if rev is None:
     rev = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
   rev = rev & (env.episode_length_buf > 0)
-  ep = BeamEpisode.get(env)
-  proj = ep.feet_proj()
-  margin = ep.geo.support_half_width(proj.arc) - proj.lateral.abs()
-  felt = _feet_in_contact(env) & (margin < SOLE_HALF_WIDTH) & (margin > -SOLE_HALF_WIDTH)
-  rev = rev | felt.any(dim=-1)
+  rev = rev | edge_felt(env).any(dim=-1)
   env._beam_revealed = rev  # type: ignore[attr-defined]
   return rev
 
@@ -478,6 +482,30 @@ feet_beam_pose_touch = _touch_revealed(feet_beam_pose)
 base_beam_pose_touch = _touch_revealed(base_beam_pose)
 beam_progress_touch = _touch_revealed(beam_progress_obs)
 beam_params_touch = _touch_revealed(beam_params_obs)
+
+
+# The ``*_touch`` poses above reveal the whole beam-relative pose, live, after
+# the first felt edge. A teacher trained on them balanced on the CoM's lateral
+# offset from the centreline -- which no onboard sensor measures -- and could
+# not be distilled (the student fell within 0.2 s). The ``*_felt`` versions
+# keep only what the tactile image shows: a foot's lateral offset and edge
+# margin while that foot is loaded with an edge under its taxels. Base and CoM
+# lateral offsets are always zero; heading and heights once revealed. Same
+# shapes as the originals, so a ``*_touch`` teacher can be fine-tuned on them.
+
+
+def feet_beam_pose_felt(env: ManagerBasedRlEnv) -> torch.Tensor:
+  pose = feet_beam_pose(env).view(env.num_envs, 2, 5)
+  felt = edge_felt(env).float()[..., None]
+  rev = beam_revealed(env).float()[:, None, None]
+  pose = torch.cat([pose[..., :2] * felt, pose[..., 2:] * rev], dim=-1)
+  return pose.flatten(start_dim=1)
+
+
+def base_beam_pose_felt(env: ManagerBasedRlEnv) -> torch.Tensor:
+  pose = base_beam_pose(env) * beam_revealed(env).float()[:, None]
+  keep = torch.tensor([0.0, 1.0, 1.0, 1.0, 0.0], device=env.device)
+  return pose * keep
 
 
 # ---------------------------------------------------------------------------
