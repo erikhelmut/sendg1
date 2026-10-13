@@ -171,10 +171,11 @@ def main() -> None:
   wrapped, policy = load_policy(args, env)
   obs, _ = wrapped.reset()
   env._beam_ts_records.clear()
-  target = args.episodes * env.num_envs
+  # Run until every env has finished ``episodes`` episodes (envs that fail fast
+  # must not fill the quota for slow ones).
   done_per_env = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
   with torch.inference_mode():
-    while len(env._beam_ts_records) < target:
+    while bool((done_per_env < args.episodes).any()):
       obs, _, dones, _ = wrapped.step(policy(obs))
       policy.reset(dones.bool())
       done_per_env += dones.long()
