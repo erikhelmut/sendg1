@@ -1,0 +1,11 @@
+{
+ "priv_w0.05_success": "Privileged teacher on the narrowest beam, narrower than the sole: it balances using its CoM offset from the centreline, which the robot cannot measure.",
+ "priv_w0.05_failure": "One of the privileged teacher's rare 50 mm failures.",
+ "touch_w0.15_widestart_success": "Wide start (up to 0.15 m off-centre, 0.17 rad yaw): the touch teacher has no beam information until a loaded foot feels an edge.",
+ "touch_w0.07_success": "Touch teacher at 70 mm, its limit (23% success).",
+ "touch_w0.05_failure": "The touch teacher never crosses 50 mm.",
+ "tactile_w0.15_success": "Tactile student at 150 mm, its narrowest success (10% of runs).",
+ "tactile_w0.10_failure": "Tactile student at 100 mm: a foot misses the beam in the first steps.",
+ "blind_w0.30_success": "Blind student at 300 mm, its narrowest success width.",
+ "blind_w0.20_failure": "Blind student at 200 mm: it never crosses this width."
+}
