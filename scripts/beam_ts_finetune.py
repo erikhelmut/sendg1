@@ -24,6 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--checkpoint", required=True)
+  ap.add_argument("--task", default=None, help="default: G1-Beam-Teacher")
   ap.add_argument("--seed", type=int, default=0)
   ap.add_argument("--num-envs", type=int, default=4096)
   ap.add_argument("--max-iterations", type=int, default=2000)
@@ -44,10 +45,11 @@ def main() -> None:
 
   configure_torch_backends()
   device = "cuda:0"
-  env_cfg = load_env_cfg(TEACHER_TASK)
+  task = args.task or TEACHER_TASK
+  env_cfg = load_env_cfg(task)
   env_cfg.scene.num_envs = args.num_envs
   env_cfg.seed = args.seed
-  rl_cfg = load_rl_cfg(TEACHER_TASK)
+  rl_cfg = load_rl_cfg(task)
   rl_cfg.seed = args.seed
   rl_cfg.logger = args.logger
   rl_cfg.run_name = args.run_name or f"seed{args.seed}_finetune"
