@@ -8,8 +8,8 @@ Student: GRU(256) -> MLP (256, 128) over ``real`` only. The GRU is the history:
 truncated BPTT over ``gradient_length`` = 10 steps (0.2 s; the hidden state
 still carries the whole episode), rollouts of 50 steps (1 s), 4 epochs: 20
 gradient steps per iteration. Trained by DAgger (``sendg1.rl.dagger``):
-scale-weighted MSE onto the frozen teacher's actions, teacher control faded
-out over the first 500 updates. The first student (1 epoch, 25-step windows:
+scale-weighted MSE onto the frozen teacher's actions. The teacher drives
+alone for 200 updates, then per step with probability decaying to 0 at 1500. The first student (1 epoch, 25-step windows:
 2 gradient steps per iteration, fade over 150) still had a loss above the
 zero-action baseline when the fade ended and never walked.
 """
@@ -105,7 +105,8 @@ class DAggerAlgorithmCfg:
   loss_type: str = "mse"
   optimizer: str = "adam"
   beta_start: float = 1.0
-  fade_iterations: int = 500
+  hold_iterations: int = 200
+  fade_iterations: int = 1500
 
 
 @dataclass

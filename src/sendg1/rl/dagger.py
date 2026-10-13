@@ -5,15 +5,16 @@ the frozen teacher labels every visited state, and the student regresses onto
 the labels (MSE) with truncated BPTT through its recurrent state. Two things
 are added here:
 
-1. **Teacher-to-student control fade.** At the start the student's actions are
-   garbage and it would only visit states the teacher never sees (falling off
-   the beam within a second). For the first ``fade_iterations`` updates the
-   teacher drives a share ``beta`` of the EPISODES, decaying linearly from
-   ``beta_start`` to 0; after that the student drives alone. The draw is per
-   env and per episode, not per step: mixing per step lets the untrained
-   student's actions into every trajectory, and a robot on a 0.1 m beam falls
-   off within a few such steps whoever drives the rest. Labels are always the
-   teacher's, whoever drives.
+1. **Teacher-to-student control mix.** For the first ``hold_iterations``
+   updates the teacher drives every step and the student only learns. Then,
+   every step and per env, the teacher's action is applied with probability
+   ``beta``, decaying linearly to 0 at ``fade_iterations``; after that the
+   student drives alone. Labels are always the teacher's, whoever drives.
+   Per-step mixing is what lets the student see its own small drifts while the
+   teacher still pulls the state back. The first version handed over whole
+   episodes: the student copied the teacher closely on the teacher's states
+   (MSE 0.024) but drifted off within 0.2 s once it drove, so after the
+   hand-over all its data were unrecoverable falls and it never improved.
 2. **Loss in joint-target space.** The action is a joint position offset
    ``scale * a``, and the scales differ by 7x (wrist pitch/yaw 0.075, the rest
    0.35-0.55). Plain MSE on ``a`` let the wrists dominate: the teacher holds
@@ -41,15 +42,16 @@ class DAggerDistillation(Distillation):
     self,
     *args,
     beta_start: float = 1.0,
-    fade_iterations: int = 150,
+    hold_iterations: int = 200,
+    fade_iterations: int = 1500,
     **kwargs,
   ) -> None:
     super().__init__(*args, **kwargs)
     self.beta_start = beta_start
+    self.hold_iterations = hold_iterations
     self.fade_iterations = fade_iterations
     self._teacher_steps = 0
     self._total_steps = 0
-    self._teacher_drives: torch.Tensor | None = None
 
   def set_action_weights(self, weights: torch.Tensor) -> None:
     """Per action dimension loss weights (``DistillationRunner`` passes the
@@ -63,9 +65,10 @@ class DAggerDistillation(Distillation):
 
   @property
   def beta(self) -> float:
-    if self.fade_iterations <= 0:
-      return 0.0
-    return max(0.0, self.beta_start * (1.0 - self.num_updates / self.fade_iterations))
+    if self.num_updates < self.hold_iterations:
+      return 1.0
+    span = max(self.fade_iterations - self.hold_iterations, 1)
+    return max(0.0, self.beta_start * (1.0 - (self.num_updates - self.hold_iterations) / span))
 
   def act(self, obs: TensorDict) -> torch.Tensor:
     student = self.student(obs, stochastic_output=True).detach()
@@ -73,19 +76,10 @@ class DAggerDistillation(Distillation):
     self.transition.actions = student
     self.transition.privileged_actions = teacher
     self.transition.observations = obs
-    if self._teacher_drives is None:
-      self._teacher_drives = torch.rand(student.shape[0], device=student.device) < self.beta
-    use_teacher = self._teacher_drives[:, None]
+    use_teacher = (torch.rand(student.shape[0], device=student.device) < self.beta)[:, None]
     self._teacher_steps += int(use_teacher.sum())
     self._total_steps += student.shape[0]
     return torch.where(use_teacher, teacher, student)
-
-  def process_env_step(self, obs, rewards, dones, extras) -> None:
-    super().process_env_step(obs, rewards, dones, extras)
-    if self._teacher_drives is not None:
-      done = dones.view(-1).bool()
-      redraw = torch.rand(done.shape[0], device=done.device) < self.beta
-      self._teacher_drives = torch.where(done, redraw, self._teacher_drives)
 
   def update(self) -> dict[str, float]:
     beta = self.beta
