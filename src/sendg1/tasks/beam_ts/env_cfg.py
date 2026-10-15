@@ -445,6 +445,10 @@ def make_beam_e2e_env_cfg(*, play: bool = False, num_envs: int | None = None) ->
     **rewards,
     "load_off_support": RewardTermCfg(func=mdp.load_off_support, weight=-1.0),
     "early_contact_overload": RewardTermCfg(func=mdp.early_contact_overload, weight=-3.0),
+    # One-off -2 on an early termination (weights are scaled by the 0.02 s
+    # step). Without it, the random initial policy's regulariser costs made
+    # falling over at once the best return and episodes collapsed to 7 steps.
+    "termination": RewardTermCfg(func=envs_mdp.is_terminated, weight=-100.0),
   }
   cfg.events["spawn"].params.update(E2E_SPAWN)
   cfg.events["register_actor_mirror"] = EventTermCfg(func=mdp.register_actor_mirror, mode="startup")

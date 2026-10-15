@@ -718,16 +718,18 @@ def touchdown_force_rate(env: ManagerBasedRlEnv, body_weight_n: float = 343.0) -
 
 def track_forward_progress(env: ManagerBasedRlEnv, std: float = 0.1, overshoot: float = 2.0) -> torch.Tensor:
   """Forward progress with slack, for the end-to-end policy. Walking command:
-  clip(v / v_cmd, -1, 1) - overshoot * relu(v / v_cmd - 1), so moving at half
+  clip(v / v_cmd, 0, 1) - overshoot * relu(v / v_cmd - 1), so moving at half
   the command earns half (exp tracking pays ~0.1) and a pause to feel for the
-  beam only forgoes reward. Standing command: exp(-v^2 / std^2)."""
+  beam only forgoes reward. Never negative below the command: a negative
+  per-step reward taught the first run to fall over at once. Standing
+  command: exp(-v^2 / std^2)."""
   ep = BeamEpisode.get(env)
   ep.update()
   v, _ = ep.along_velocity()
   cmd = _forward_cmd(env)
   walking = cmd > 0.05
   ratio = v / cmd.clamp(min=0.05)
-  walk = ratio.clamp(-1.0, 1.0) - overshoot * torch.relu(ratio - 1.0)
+  walk = ratio.clamp(0.0, 1.0) - overshoot * torch.relu(ratio - 1.0)
   stand = torch.exp(-torch.square(v) / std**2)
   return torch.where(walking, walk, stand)
 
@@ -744,11 +746,16 @@ def load_off_support(env: ManagerBasedRlEnv, body_weight_n: float = 343.0) -> to
 
 
 def early_contact_overload(
-  env: ManagerBasedRlEnv, window_s: float = 0.1, max_load: float = 0.3, body_weight_n: float = 343.0
+  env: ManagerBasedRlEnv,
+  window_s: float = 0.1,
+  max_load: float = 0.3,
+  body_weight_n: float = 343.0,
+  settle_s: float = 0.5,
 ) -> torch.Tensor:
   """Sum over feet of relu(load / body weight - max_load)^2 during the first
   ``window_s`` of each contact: the first touch of a step should be light (it
-  is the probe), weight goes on afterwards. A penalty, so tapping cannot farm it."""
+  is the probe), weight goes on afterwards. A penalty, so tapping cannot farm it.
+  Off for the first ``settle_s`` of an episode, while the robot lands from spawn."""
   contact = _feet_in_contact(env)
   t = getattr(env, "_beam_contact_time", None)
   if t is None:
@@ -759,7 +766,7 @@ def early_contact_overload(
   force = env.scene[FOOT_CONTACT_SENSOR].data.force
   assert force is not None
   load = force.view(env.num_envs, 2, 3)[..., 2].abs() / body_weight_n
-  early = contact & (t <= window_s)
+  early = contact & (t <= window_s) & (env.episode_length_buf[:, None] * env.step_dt > settle_s)
   return (torch.relu(load - max_load).square() * early.float()).sum(-1)
 
 
