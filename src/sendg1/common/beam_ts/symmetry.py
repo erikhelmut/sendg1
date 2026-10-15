@@ -94,6 +94,8 @@ def term_mirrors(
   out["feet_beam_pose_felt"] = out["feet_beam_pose"]
   out["base_beam_pose_felt"] = out["base_beam_pose"]
   out["beam_revealed"] = _signs(1)
+  out["tactile_map"] = out["tactile"]
+  out["tactile_map_clean"] = out["tactile"]
   return out
 
 

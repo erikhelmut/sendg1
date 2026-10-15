@@ -7,6 +7,9 @@ Probing variant: ``G1-Beam-Probe-Teacher`` sees the beam geometry only once a
 foot has felt a beam edge (``mdp.beam_revealed``), so it has to find the beam
 by touch like the student. It is distilled into ``G1-Beam-Probe-Student``
 (tactile) and ``G1-Beam-Probe-Student-Blind`` (no tactile).
+
+End-to-end: ``G1-Beam-E2E`` trains the deployable policy directly with PPO, a
+GRU actor on the robot's own signals and a privileged critic.
 """
 
 from __future__ import annotations
@@ -15,10 +18,11 @@ from mjlab.tasks.registry import register_mjlab_task
 
 from sendg1.common.beam_ts.terms import STUDENT_LEGAL, TERMS
 from sendg1.rl.dagger import DistillationRunner
-from sendg1.tasks.beam_ts.env_cfg import make_beam_ts_env_cfg
+from sendg1.tasks.beam_ts.env_cfg import make_beam_e2e_env_cfg, make_beam_ts_env_cfg
 from sendg1.tasks.beam_ts.rl_cfg import (
   BLIND_STUDENT_OBS,
   PROBE_TEACHER_OBS,
+  e2e_ppo_cfg,
   student_distill_cfg,
   teacher_ppo_cfg,
 )
@@ -28,6 +32,7 @@ STUDENT_TASK = "G1-Beam-Student"
 PROBE_TEACHER_TASK = "G1-Beam-Probe-Teacher"
 PROBE_STUDENT_TASK = "G1-Beam-Probe-Student"
 PROBE_BLIND_STUDENT_TASK = "G1-Beam-Probe-Student-Blind"
+E2E_TASK = "G1-Beam-E2E"
 
 
 def assert_student_is_deployable(observations: dict, groups: tuple[str, ...]) -> None:
@@ -87,3 +92,12 @@ for _task, _cfg in _probe_students.items():
     rl_cfg=_cfg,
     runner_cls=DistillationRunner,
   )
+
+_e2e_env = make_beam_e2e_env_cfg()
+assert_student_is_deployable(_e2e_env.observations, ("actor",))
+register_mjlab_task(
+  task_id=E2E_TASK,
+  env_cfg=_e2e_env,
+  play_env_cfg=make_beam_e2e_env_cfg(play=True),
+  rl_cfg=e2e_ppo_cfg(),
+)

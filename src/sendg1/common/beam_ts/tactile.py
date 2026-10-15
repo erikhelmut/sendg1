@@ -67,6 +67,8 @@ EDGE_Y = 0.0145
 count as edge taxels."""
 
 FEATURES_PER_FOOT_EXTRA = 7  # load, cop x/y, area, edge lat/med, contact
+CONTACT_MAP_RAMP_N = (2.0, 6.0)
+"""Soft contact map: a taxel reads 0 at or below 2 N and 1 at or above 6 N."""
 
 
 @dataclass(frozen=True)
@@ -135,8 +137,15 @@ def canonical_normals(env: ManagerBasedRlEnv, params: TactileParams) -> torch.Te
   return torch.stack([normal[:, 0], normal[:, 1, perm]], dim=1)
 
 
-def features_from_normals(normal: torch.Tensor, layout: TaxelLayout) -> torch.Tensor:
-  """[B, 2, T] canonical normals -> [B, 2 * (T + 7)] features."""
+def features_from_normals(
+  normal: torch.Tensor, layout: TaxelLayout, contact_map: bool = False
+) -> torch.Tensor:
+  """[B, 2, T] canonical normals -> [B, 2 * (T + 7)] features.
+
+  ``contact_map``: the T per-taxel entries are a soft 0-1 "this taxel touches"
+  map (``CONTACT_MAP_RAMP_N``) instead of each taxel's share of the foot's
+  load. Which taxels touch is the beam edge's footprint under the sole, and a
+  thresholded map is barely moved by gain errors."""
   centers, _, x_mid, x_half, y_half, lateral, medial = _layout_consts(
     layout, str(normal.device)
   )
@@ -153,6 +162,9 @@ def features_from_normals(normal: torch.Tensor, layout: TaxelLayout) -> torch.Te
   area = (normal > TAXEL_ON_N).float().mean(-1, keepdim=True)
   edge_lat = (shape * lateral).sum(-1, keepdim=True)
   edge_med = (shape * medial).sum(-1, keepdim=True)
+  if contact_map:
+    lo, hi = CONTACT_MAP_RAMP_N
+    shape = ((normal - lo) / (hi - lo)).clamp(0.0, 1.0)
   per_foot = torch.cat(
     [shape, load, cop_x, cop_y, area, edge_lat, edge_med, in_contact], dim=-1
   )

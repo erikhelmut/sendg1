@@ -53,7 +53,7 @@ from sendg1.common.beam_ts import tactile as tac
 from sendg1.common.beam_ts.geometry import BeamGeometry
 from sendg1.common.robots.g1 import G1_FOOT_GEOMS, G1_FOOT_SITES
 from sendg1.common.tactile.layout import LAYOUTS
-from sendg1.common.tactile.sensing import TactileParams
+from sendg1.common.tactile.sensing import TactileParams, read_tactile
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -328,6 +328,20 @@ def tactile_features_noisy(env: ManagerBasedRlEnv) -> torch.Tensor:
 def tactile_features_clean(env: ManagerBasedRlEnv) -> torch.Tensor:
   layout = LAYOUTS[TACTILE.layout]
   return tac.features_from_normals(tac.canonical_normals(env, TACTILE), layout)
+
+
+def tactile_map_noisy(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """End-to-end actor's tactile input: faulted sensor, per-taxel contact map
+  instead of the load shape (``tactile.features_from_normals``)."""
+  layout = LAYOUTS[TACTILE.layout]
+  normal = tac.canonical_normals(env, TACTILE)
+  noisy = tac.TactileNoiseState.get(env, layout).apply(normal)
+  return tac.features_from_normals(noisy, layout, contact_map=True)
+
+
+def tactile_map_clean(env: ManagerBasedRlEnv) -> torch.Tensor:
+  layout = LAYOUTS[TACTILE.layout]
+  return tac.features_from_normals(tac.canonical_normals(env, TACTILE), layout, contact_map=True)
 
 
 def feet_beam_pose(env: ManagerBasedRlEnv) -> torch.Tensor:
@@ -702,6 +716,53 @@ def touchdown_force_rate(env: ManagerBasedRlEnv, body_weight_n: float = 343.0) -
   return rise.square().sum(-1)
 
 
+def track_forward_progress(env: ManagerBasedRlEnv, std: float = 0.1, overshoot: float = 2.0) -> torch.Tensor:
+  """Forward progress with slack, for the end-to-end policy. Walking command:
+  clip(v / v_cmd, -1, 1) - overshoot * relu(v / v_cmd - 1), so moving at half
+  the command earns half (exp tracking pays ~0.1) and a pause to feel for the
+  beam only forgoes reward. Standing command: exp(-v^2 / std^2)."""
+  ep = BeamEpisode.get(env)
+  ep.update()
+  v, _ = ep.along_velocity()
+  cmd = _forward_cmd(env)
+  walking = cmd > 0.05
+  ratio = v / cmd.clamp(min=0.05)
+  walk = ratio.clamp(-1.0, 1.0) - overshoot * torch.relu(ratio - 1.0)
+  stand = torch.exp(-torch.square(v) / std**2)
+  return torch.where(walking, walk, stand)
+
+
+def load_off_support(env: ManagerBasedRlEnv, body_weight_n: float = 343.0) -> torch.Tensor:
+  """Sum over feet of (vertical load / body weight) x (share of the sole's
+  taxels with no support beneath them). Weight on a foot that hangs half off
+  the beam costs; a light touch does not. The cheap strategy it leaves is the
+  probing one: touch, feel, then commit weight."""
+  reading = read_tactile(env, TACTILE)
+  unsupported = 1.0 - reading.support.mean(-1)  # [B, 2]
+  load = reading.net_force[..., 2].abs() / body_weight_n
+  return (load * unsupported).sum(-1)
+
+
+def early_contact_overload(
+  env: ManagerBasedRlEnv, window_s: float = 0.1, max_load: float = 0.3, body_weight_n: float = 343.0
+) -> torch.Tensor:
+  """Sum over feet of relu(load / body weight - max_load)^2 during the first
+  ``window_s`` of each contact: the first touch of a step should be light (it
+  is the probe), weight goes on afterwards. A penalty, so tapping cannot farm it."""
+  contact = _feet_in_contact(env)
+  t = getattr(env, "_beam_contact_time", None)
+  if t is None:
+    t = torch.zeros(env.num_envs, 2, device=env.device)
+    env._beam_contact_time = t
+  t.mul_(contact.float()).add_(contact.float() * env.step_dt)
+  t[env.episode_length_buf <= 1] = 0.0
+  force = env.scene[FOOT_CONTACT_SENSOR].data.force
+  assert force is not None
+  load = force.view(env.num_envs, 2, 3)[..., 2].abs() / body_weight_n
+  early = contact & (t <= window_s)
+  return (torch.relu(load - max_load).square() * early.float()).sum(-1)
+
+
 class pose_l2:
   """Mean over the selected joints of ((q - q_default) / std)^2: a quadratic
   pull toward the default pose. Unlike mjlab's exp-kernel ``posture`` it does
@@ -814,6 +875,16 @@ def spawn_on_beam(
   robot.write_root_link_pose_to_sim(torch.cat([pos, quat], dim=-1), env_ids=env_ids)
   robot.write_root_link_velocity_to_sim(torch.zeros(n, 6, device=dev), env_ids=env_ids)
   ep.on_spawn(env_ids, arc, platform)
+
+
+def register_actor_mirror(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) -> None:
+  """Startup event: hand the actor group's mirror map to the symmetric GRU
+  actor (``sendg1.rl.symmetric_rnn``), which only ever sees tensors."""
+  from sendg1.common.beam_ts.symmetry import _maps
+  from sendg1.rl import symmetric_rnn
+
+  maps = _maps(env)
+  symmetric_rnn.set_mirrors(obs={g: m for g, m in maps.items() if g != "__actions__"}, actions=maps["__actions__"])
 
 
 def reset_tactile_noise(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) -> None:

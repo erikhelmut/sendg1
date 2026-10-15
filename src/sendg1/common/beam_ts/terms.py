@@ -93,6 +93,10 @@ def _tactile_noisy() -> ObservationTermCfg:
   return ObservationTermCfg(func=mdp.tactile_features_noisy, delay_min_lag=0, delay_max_lag=1)
 
 
+def _tactile_map_noisy() -> ObservationTermCfg:
+  return ObservationTermCfg(func=mdp.tactile_map_noisy, delay_min_lag=0, delay_max_lag=1)
+
+
 TERMS: dict[str, TermSpec] = {
   # -- real ------------------------------------------------------------------
   "base_ang_vel": TermSpec(
@@ -118,7 +122,16 @@ TERMS: dict[str, TermSpec] = {
     "Tactile slipper, per-foot features (sendg1.common.beam_ts.tactile) from the "
     "faulted taxel readings, 0-1 step latency.",
   ),
+  "tactile_map": TermSpec(
+    _tactile_map_noisy,
+    "sensor",
+    "Tactile slipper, per foot: soft per-taxel contact map, load, CoP, contact "
+    "area, edge loading, contact flag; faulted readings, 0-1 step latency.",
+  ),
   # -- privileged --------------------------------------------------------------
+  "tactile_map_clean": TermSpec(
+    _plain(mdp.tactile_map_clean), "privileged", "Noise-free tactile_map."
+  ),
   "base_lin_vel": TermSpec(
     lambda: ObservationTermCfg(
       func=envs_mdp.builtin_sensor, params={"sensor_name": "robot/imu_lin_vel"}
@@ -227,6 +240,15 @@ STUDENT_TERMS: tuple[str, ...] = tuple(n for n in REAL_TERMS if n != "actions")
 """The student: ``real`` without the previous action (see the module docstring)."""
 BLIND_TERMS: tuple[str, ...] = tuple(n for n in STUDENT_TERMS if n != "tactile")
 """The blind student: the stock G1's signals, no tactile slipper."""
+E2E_ACTOR_TERMS: tuple[str, ...] = tuple(
+  "tactile_map" if n == "tactile" else n for n in REAL_TERMS
+)
+"""End-to-end PPO actor (``G1-Beam-E2E``): everything the robot measures,
+including its previous action, with the contact-map tactile features."""
+E2E_PRIVILEGED_TERMS: tuple[str, ...] = tuple(
+  "tactile_map_clean" if n == "tactile_clean" else n for n in PRIVILEGED_TERMS
+)
+"""End-to-end critic, on top of the actor's terms: full ground truth."""
 STUDENT_LEGAL: frozenset[str] = frozenset(
   n for n, s in TERMS.items() if s.availability in ("onboard", "sensor")
 )

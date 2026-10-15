@@ -149,3 +149,51 @@ def student_distill_cfg(
     wandb_project="sendg1",
     upload_model=False,
   )
+
+
+E2E_RNN_HIDDEN = 256
+E2E_HEAD = (256, 128)
+
+
+def e2e_ppo_cfg(seed: int = 0, max_iterations: int = 20_000) -> RslRlOnPolicyRunnerCfg:
+  """End-to-end PPO (``G1-Beam-E2E``): GRU actor on the robot's own signals,
+  mirror-equivariant by construction (``sendg1.rl.symmetric_rnn``; rsl_rl's
+  symmetry augmentation does not support recurrent actors), MLP critic on
+  ground truth. 32-step rollouts: BPTT over 0.64 s."""
+  return RslRlOnPolicyRunnerCfg(
+    seed=seed,
+    obs_groups={"actor": ("actor",), "critic": ("critic",)},
+    actor=RslRlModelCfg(
+      class_name="sendg1.rl.symmetric_rnn:SymmetricRNNModel",
+      rnn_type="gru",
+      rnn_hidden_dim=E2E_RNN_HIDDEN,
+      rnn_num_layers=1,
+      hidden_dims=E2E_HEAD,
+      activation="elu",
+      obs_normalization=True,
+      distribution_cfg={"class_name": "GaussianDistribution", "init_std": 1.0, "std_type": "scalar"},
+    ),
+    critic=RslRlModelCfg(hidden_dims=HIDDEN, activation="elu", obs_normalization=True),
+    algorithm=RslRlPpoAlgorithmCfg(
+      value_loss_coef=1.0,
+      use_clipped_value_loss=True,
+      clip_param=0.2,
+      entropy_coef=ENTROPY_COEF,
+      num_learning_epochs=5,
+      num_mini_batches=4,
+      learning_rate=1.0e-3,
+      schedule="adaptive",
+      gamma=0.99,
+      lam=0.95,
+      desired_kl=0.01,
+      max_grad_norm=1.0,
+    ),
+    experiment_name="beam_e2e",
+    run_name=f"seed{seed}",
+    save_interval=500,
+    num_steps_per_env=32,
+    max_iterations=max_iterations,
+    logger="wandb",
+    wandb_project="sendg1",
+    upload_model=False,
+  )

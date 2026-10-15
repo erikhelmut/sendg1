@@ -29,6 +29,8 @@ from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from sendg1.common.beam_ts import mdp
 from sendg1.common.beam_ts.terms import (
   BLIND_TERMS,
+  E2E_ACTOR_TERMS,
+  E2E_PRIVILEGED_TERMS,
   STUDENT_TERMS,
   PRIVILEGED_TERMS,
   PROBE_PRIVILEGED_TERMS,
@@ -391,4 +393,60 @@ def make_beam_ts_env_cfg(
   if play:
     cfg.curriculum = {}
     cfg.scene.terrain.max_init_terrain_level = None
+  return cfg
+
+
+# ---------------------------------------------------------------------------
+# End-to-end PPO (G1-Beam-E2E)
+# ---------------------------------------------------------------------------
+
+E2E_MAX_FORWARD_SPEED = 0.3
+"""Slower than the teachers' 0.4 m/s: a careful, probing step on an unseen beam
+is easier to learn at walking pace, and evaluation runs at 0.3 m/s anyway."""
+E2E_SPAWN = {
+  "platform_from_level": 0,
+  "platform_arc_range": (-0.3, 0.2),
+  "platform_lateral_range": (-0.15, 0.15),
+  "yaw_range": (-0.25, 0.25),
+}
+"""Every episode starts on the start platform, 0.3-0.8 m before the beam, up to
+15 cm off the centreline and 14 deg off heading. The actor never sees where the
+beam is, so it has to find and follow it by touch."""
+
+
+def make_beam_e2e_env_cfg(*, play: bool = False, num_envs: int | None = None) -> ManagerBasedRlEnvCfg:
+  """End-to-end PPO: GRU actor on ``E2E_ACTOR_TERMS`` (what the robot measures,
+  contact-map tactile features), MLP critic on those plus ground truth.
+
+  Rewards as the teachers', except: forward progress with slack
+  (``track_forward_progress``) instead of exact speed tracking, plus
+  ``load_off_support`` and ``early_contact_overload``, which make a light,
+  feeling first touch the cheap way to step onto an unseen beam."""
+  cfg = make_beam_ts_env_cfg(play=play, num_envs=num_envs)
+  critic_real = tuple(n for n in E2E_ACTOR_TERMS if n != "tactile_map")
+  cfg.observations = {
+    "actor": ObservationGroupCfg(
+      terms={n: TERMS[n].build() for n in E2E_ACTOR_TERMS},
+      concatenate_terms=True,
+      enable_corruption=True,
+    ),
+    # The faulted tactile term is stateful (frame drops), so it is computed
+    # once, for the actor; the critic reads the clean map.
+    "critic": ObservationGroupCfg(
+      terms={n: TERMS[n].build() for n in critic_real + E2E_PRIVILEGED_TERMS},
+      concatenate_terms=True,
+      enable_corruption=False,
+    ),
+  }
+  rewards = dict(cfg.rewards)
+  rewards.pop("track_forward_vel")
+  cfg.rewards = {
+    "track_forward_progress": RewardTermCfg(func=mdp.track_forward_progress, weight=2.0),
+    **rewards,
+    "load_off_support": RewardTermCfg(func=mdp.load_off_support, weight=-1.0),
+    "early_contact_overload": RewardTermCfg(func=mdp.early_contact_overload, weight=-3.0),
+  }
+  cfg.events["spawn"].params.update(E2E_SPAWN)
+  cfg.events["register_actor_mirror"] = EventTermCfg(func=mdp.register_actor_mirror, mode="startup")
+  cfg.commands["twist"].ranges.lin_vel_x = (0.1, E2E_MAX_FORWARD_SPEED)
   return cfg

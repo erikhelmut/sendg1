@@ -15,6 +15,7 @@ from sendg1.common.tactile.layout import LAYOUTS
 from sendg1.tasks.beam_ts import (
   PROBE_BLIND_STUDENT_TASK,
   PROBE_STUDENT_TASK,
+  E2E_TASK,
   PROBE_TEACHER_TASK,
   STUDENT_TASK,
   TEACHER_TASK,
@@ -251,5 +252,56 @@ def test_mirror_maps_match_g1_kinematics_and_are_involutions(task: str) -> None:
     for k in obs.keys():
       torch.testing.assert_close(twice[2:][k], obs[k])
     torch.testing.assert_close(act_twice[2:], actions)
+  finally:
+    env.close()
+
+
+def test_e2e_actor_sees_only_deployable_signals() -> None:
+  env_cfg = load_env_cfg(E2E_TASK)
+  rl_cfg = load_rl_cfg(E2E_TASK)
+  terms = {t for g in rl_cfg.obs_groups["actor"] for t in env_cfg.observations[g].terms}
+  assert terms == (STUDENT_EXPECTED - {"tactile"}) | {"tactile_map", "actions"}
+  critic = {t for g in rl_cfg.obs_groups["critic"] for t in env_cfg.observations[g].terms}
+  assert {"base_beam_pose", "feet_beam_pose", "base_lin_vel"} <= critic
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_e2e_actor_is_mirror_equivariant() -> None:
+  """pi(M_o o_1..t) = M_a pi(o_1..t) over a whole observation sequence."""
+  from dataclasses import asdict
+
+  from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+
+  from sendg1.common.beam_ts.symmetry import _maps
+
+  cfg = load_env_cfg(E2E_TASK)
+  cfg.scene.num_envs = 4
+  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
+  try:
+    wrapped = RslRlVecEnvWrapper(env)
+    rl = asdict(load_rl_cfg(E2E_TASK))
+    rl["logger"] = "tensorboard"
+    runner = MjlabOnPolicyRunner(wrapped, rl, log_dir=None, device="cuda:0")
+    actor = runner.alg.actor
+    maps = _maps(wrapped)
+    obs, _ = wrapped.reset()
+    seq = []
+    for _ in range(15):
+      seq.append(obs.clone())
+      obs, *_ = wrapped.step(0.3 * torch.randn(4, env.action_manager.total_action_dim, device=env.device))
+    src, sign = maps["actor"]
+    asrc, asign = maps["__actions__"]
+    with torch.no_grad():
+      actor.reset()
+      a = [actor(o) for o in seq]
+      actor.reset()
+      am = []
+      for o in seq:
+        om = o.clone()
+        om["actor"] = o["actor"][:, src] * sign
+        am.append(actor(om))
+    for x, y in zip(a, am, strict=True):
+      torch.testing.assert_close(y, x[:, asrc] * asign, atol=1e-5, rtol=1e-4)
   finally:
     env.close()
