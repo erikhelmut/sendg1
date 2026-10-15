@@ -718,18 +718,18 @@ def touchdown_force_rate(env: ManagerBasedRlEnv, body_weight_n: float = 343.0) -
 
 def track_forward_progress(env: ManagerBasedRlEnv, std: float = 0.1, overshoot: float = 2.0) -> torch.Tensor:
   """Forward progress with slack, for the end-to-end policy. Walking command:
-  clip(v / v_cmd, 0, 1) - overshoot * relu(v / v_cmd - 1), so moving at half
+  clip(v / v_cmd, -1, 1) - overshoot * relu(v / v_cmd - 1), so moving at half
   the command earns half (exp tracking pays ~0.1) and a pause to feel for the
-  beam only forgoes reward. Never negative below the command: a negative
-  per-step reward taught the first run to fall over at once. Standing
-  command: exp(-v^2 / std^2)."""
+  beam only forgoes reward. The lower clip is symmetric: clipping at 0 paid
+  for rocking in place (backward sway cost nothing), and the first full run
+  stood still and swayed. Standing command: exp(-v^2 / std^2)."""
   ep = BeamEpisode.get(env)
   ep.update()
   v, _ = ep.along_velocity()
   cmd = _forward_cmd(env)
   walking = cmd > 0.05
   ratio = v / cmd.clamp(min=0.05)
-  walk = ratio.clamp(0.0, 1.0) - overshoot * torch.relu(ratio - 1.0)
+  walk = ratio.clamp(-1.0, 1.0) - overshoot * torch.relu(ratio - 1.0)
   stand = torch.exp(-torch.square(v) / std**2)
   return torch.where(walking, walk, stand)
 
@@ -962,8 +962,11 @@ def beam_levels(
   env_ids: torch.Tensor | None,
   standing_share: tuple[float, float] = STANDING_SHARE,
   replay_share: float = REPLAY_SHARE,
+  standing_promotes: bool = True,
 ) -> dict[str, torch.Tensor]:
-  """Per-env width curriculum plus the coupled command mix. See module doc."""
+  """Per-env width curriculum plus the coupled command mix. See module doc.
+  ``standing_promotes=False``: surviving a standing command does not promote,
+  so the level only rises on walking successes."""
   terrain = env.scene.terrain
   assert terrain is not None
   geo = BeamGeometry.get(env)
@@ -981,7 +984,10 @@ def beam_levels(
 
   if env.common_step_counter > 0 and len(env_ids) > 0:
     st = ep.stats(env_ids)
-    up = st.success.long()
+    up = st.success
+    if not standing_promotes:
+      up = up & (st.cmd_dist >= WALK_MIN_DIST)
+    up = up.long()
     down = st.terminated.long()
     moved = (home[env_ids] + up - down).clamp(0, geo.num_levels - 1)
     home[env_ids] = torch.where(replay[env_ids], home[env_ids], moved)

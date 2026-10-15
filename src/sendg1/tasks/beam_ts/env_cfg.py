@@ -453,4 +453,8 @@ def make_beam_e2e_env_cfg(*, play: bool = False, num_envs: int | None = None) ->
   cfg.events["spawn"].params.update(E2E_SPAWN)
   cfg.events["register_actor_mirror"] = EventTermCfg(func=mdp.register_actor_mirror, mode="startup")
   cfg.commands["twist"].ranges.lin_vel_x = (0.1, E2E_MAX_FORWARD_SPEED)
+  # The first full run rose to level 3 on standing commands alone while
+  # walking commands got 5 % of their distance: only walking promotes here.
+  if "beam_levels" in cfg.curriculum:  # play mode has no curriculum
+    cfg.curriculum["beam_levels"].params["standing_promotes"] = False
   return cfg
