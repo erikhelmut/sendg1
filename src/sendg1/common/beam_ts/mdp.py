@@ -671,8 +671,7 @@ def passing_step(
 
 def feet_in_line(env: ManagerBasedRlEnv, std: float = 0.08, command_threshold: float = 0.05) -> torch.Tensor:
   """exp(-gap^2 / std^2), gap the lateral distance between the feet in the
-  base's heading frame, while walking is commanded and at least one foot is
-  down. Kinematic only: it asks for a heel-to-toe gait, not for a place on the
+  base's heading frame, while walking is commanded and both feet are down. Kinematic only: it asks for a heel-to-toe gait, not for a place on the
   beam. The tight centreline reward alone left E2E v3 shuffling with its
   feet 8-17 cm apart (exp(-(8/3.5)^2) ~ 0: no slope); this kernel is wide
   enough to pull from there. The v4 teacher's gap is ~1 cm."""
@@ -683,8 +682,11 @@ def feet_in_line(env: ManagerBasedRlEnv, std: float = 0.08, command_threshold: f
   rel = feet[:, 0] - feet[:, 1]
   gap = -torch.sin(heading) * rel[:, 0] + torch.cos(heading) * rel[:, 1]
   walking = _forward_cmd(env) > command_threshold
-  down = _feet_in_contact(env).any(-1)
-  return torch.exp(-torch.square(gap / std)) * (walking & down).float()
+  # Double support only: counted whenever a foot was down, v4 (weight 3)
+  # raised the reward by sweeping the swing foot past the stance foot while
+  # the two-foot gap stayed at 9-10 cm.
+  both = _feet_in_contact(env).all(-1)
+  return torch.exp(-torch.square(gap / std)) * (walking & both).float()
 
 
 def stance_foot_flat(env: ManagerBasedRlEnv, std: float = 0.15) -> torch.Tensor:
