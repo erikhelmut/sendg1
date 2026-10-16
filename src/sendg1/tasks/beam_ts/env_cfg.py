@@ -420,6 +420,8 @@ E2E_SUCCESS_BEAM_M = 1.0
 """Metres of beam that promote a walking episode at any pace."""
 E2E_STATE_BANK = Path(__file__).resolve().parents[4] / "results" / "beam_ts" / "v4_beam_states.pt"
 """Mid-beam states of the v4 teacher on 0.05-0.10 m (scripts/beam_ts_state_bank.py)."""
+E2E_SHOULDER_ROLL_STD = 1.2
+"""Posture tolerance (rad) of shoulder roll: arms may go out sideways."""
 E2E_BANK_SHARE = 0.25
 """Share of resets restarted mid-beam from the bank."""
 
@@ -473,7 +475,14 @@ def make_beam_e2e_env_cfg(*, play: bool = False, num_envs: int | None = None) ->
   # which the actor can only find by touch.
   for name in ("foot_centreline", "com_over_beam"):
     cfg.rewards[name].params["sigmas"] = (E2E_CENTRELINE_SIGMA,)
-  cfg.rewards["arm_posture"].weight *= 0.5  # arms may help balance
+  # Arms out to the side, as a person balances: shoulder roll nearly free in
+  # both posture terms (default std 0.23 / 0.3 rad held the arms at the sides).
+  # Shoulder pitch / yaw, elbows and wrists keep their pull, which is what
+  # rules out odd arm configurations; self-collisions are still penalised.
+  for name, roll_std in (("posture", E2E_SHOULDER_ROLL_STD), ("arm_posture", E2E_SHOULDER_ROLL_STD)):
+    std = dict(cfg.rewards[name].params["std"])
+    std[r".*shoulder_roll.*"] = roll_std
+    cfg.rewards[name].params["std"] = std
   # v3's first 1600 iterations kept the side-by-side shuffle: a mild,
   # beam-independent nudge towards feet on one line (see mdp.feet_in_line).
   # Weight 1 narrowed the gap only from ~15 to ~8-12 cm in 3500 iterations.
