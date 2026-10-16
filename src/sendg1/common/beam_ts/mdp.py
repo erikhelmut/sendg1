@@ -669,6 +669,24 @@ def passing_step(
   return r * (cmd > command_threshold).float() / env.step_dt
 
 
+def feet_in_line(env: ManagerBasedRlEnv, std: float = 0.08, command_threshold: float = 0.05) -> torch.Tensor:
+  """exp(-gap^2 / std^2), gap the lateral distance between the feet in the
+  base's heading frame, while walking is commanded and at least one foot is
+  down. Kinematic only: it asks for a heel-to-toe gait, not for a place on the
+  beam. The tight centreline reward alone left E2E v3 shuffling with its
+  feet 8-17 cm apart (exp(-(8/3.5)^2) ~ 0: no slope); this kernel is wide
+  enough to pull from there. The v4 teacher's gap is ~1 cm."""
+  robot = _robot(env)
+  ep = BeamEpisode.get(env)
+  feet = robot.data.site_pos_w[:, ep._foot_sites, :2]
+  heading = robot.data.heading_w
+  rel = feet[:, 0] - feet[:, 1]
+  gap = -torch.sin(heading) * rel[:, 0] + torch.cos(heading) * rel[:, 1]
+  walking = _forward_cmd(env) > command_threshold
+  down = _feet_in_contact(env).any(-1)
+  return torch.exp(-torch.square(gap / std)) * (walking & down).float()
+
+
 def stance_foot_flat(env: ManagerBasedRlEnv, std: float = 0.15) -> torch.Tensor:
   """Mean over feet in contact of exp(-tilt^2 / std^2), tilt ~ |xy of gravity
   in the sole frame| (rad). A flat sole puts load on many taxels instead of one
