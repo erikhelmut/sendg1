@@ -47,7 +47,7 @@ from mjlab.tasks.velocity.mdp.velocity_command import (
   UniformVelocityCommand,
   UniformVelocityCommandCfg,
 )
-from mjlab.utils.lab_api.math import quat_from_euler_xyz
+from mjlab.utils.lab_api.math import quat_apply, quat_from_euler_xyz, quat_mul
 
 from sendg1.common.beam_ts import tactile as tac
 from sendg1.common.beam_ts.geometry import BeamGeometry
@@ -884,6 +884,53 @@ def spawn_on_beam(
   ep.on_spawn(env_ids, arc, platform)
 
 
+def spawn_from_bank(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  bank_path: str,
+  share: float = 0.25,
+  arc_range: tuple[float, float] = (0.3, 2.5),
+) -> None:
+  """Reset event, after ``spawn`` and ``reset_joints``: restart a ``share`` of
+  the resets mid-beam from a recorded teacher state (``scripts/beam_ts_state_bank.py``),
+  ``arc_range`` m past the beam start: joint state, height, lateral offset,
+  attitude and twist relative to the beam. Reference-state initialisation: the
+  policy practises the narrow beam itself, in a stance that fits on it. These
+  episodes do not move the curriculum level (:func:`beam_levels`)."""
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  bank = getattr(env, "_beam_state_bank", None)
+  if bank is None:
+    raw = torch.load(bank_path, map_location=env.device, weights_only=False)
+    bank = {k: v for k, v in raw.items() if isinstance(v, torch.Tensor)}
+    env._beam_state_bank = bank
+    env._beam_bank = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+  env._beam_bank[env_ids] = False
+  ids = env_ids[torch.rand(len(env_ids), device=env.device) < share]
+  if len(ids) == 0:
+    return
+  n = len(ids)
+  pick = torch.randint(0, len(bank["height"]), (n,), device=env.device)
+  robot = _robot(env)
+  geo = BeamGeometry.get(env)
+  beam = geo.beam_arc()[ids]
+  arc = (beam[:, 0] + torch.empty(n, device=env.device).uniform_(*arc_range)).minimum(beam[:, 1] - 0.5)
+  xy, yaw = _point_at_arc(geo.path()[ids, :, :2], arc)
+  nrm = torch.stack([-torch.sin(yaw), torch.cos(yaw)], dim=-1)
+  xy = xy + bank["lateral"][pick, None] * nrm
+  z = geo.top_z()[ids] + bank["height"][pick]
+  zero = torch.zeros_like(yaw)
+  q_beam = quat_from_euler_xyz(zero, zero, yaw)
+  quat = quat_mul(q_beam, bank["quat"][pick])
+  pose = torch.cat([xy, z[:, None], quat], dim=-1)
+  vel = torch.cat([quat_apply(q_beam, bank["lin_vel"][pick]), quat_apply(q_beam, bank["ang_vel"][pick])], dim=-1)
+  robot.write_root_link_pose_to_sim(pose, env_ids=ids)
+  robot.write_root_link_velocity_to_sim(vel, env_ids=ids)
+  robot.write_joint_state_to_sim(bank["joint_pos"][pick], bank["joint_vel"][pick], env_ids=ids)
+  BeamEpisode.get(env).on_spawn(ids, arc, torch.zeros(n, dtype=torch.bool, device=env.device))
+  env._beam_bank[ids] = True
+
+
 def register_actor_mirror(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) -> None:
   """Startup event: hand the actor group's mirror map to the symmetric GRU
   actor (``sendg1.rl.symmetric_rnn``), which only ever sees tensors."""
@@ -963,10 +1010,16 @@ def beam_levels(
   standing_share: tuple[float, float] = STANDING_SHARE,
   replay_share: float = REPLAY_SHARE,
   standing_promotes: bool = True,
+  success_beam_m: float | None = None,
 ) -> dict[str, torch.Tensor]:
   """Per-env width curriculum plus the coupled command mix. See module doc.
   ``standing_promotes=False``: surviving a standing command does not promote,
-  so the level only rises on walking successes."""
+  so the level only rises on walking successes. ``success_beam_m``: a walking
+  episode also succeeds once it has covered that many metres of the beam
+  without falling, at any pace (the default criterion, 70 % of the commanded
+  distance, is rarely met on narrow beams and stalled the first E2E run's
+  curriculum at level ~2). Episodes restarted from the state bank
+  (:func:`spawn_from_bank`) never move the level."""
   terrain = env.scene.terrain
   assert terrain is not None
   geo = BeamGeometry.get(env)
@@ -985,14 +1038,24 @@ def beam_levels(
   if env.common_step_counter > 0 and len(env_ids) > 0:
     st = ep.stats(env_ids)
     up = st.success
+    if success_beam_m is not None:
+      on_beam = ep.spawn_arc[env_ids] + ep.max_progress[env_ids] - geo.beam_arc()[env_ids, 0]
+      up = up | (~st.terminated & (on_beam >= success_beam_m))
     if not standing_promotes:
       up = up & (st.cmd_dist >= WALK_MIN_DIST)
     up = up.long()
     down = st.terminated.long()
     moved = (home[env_ids] + up - down).clamp(0, geo.num_levels - 1)
-    home[env_ids] = torch.where(replay[env_ids], home[env_ids], moved)
+    frozen = replay[env_ids]
+    bank = getattr(env, "_beam_bank", None)
+    if bank is not None:
+      frozen = frozen | bank[env_ids]
+    home[env_ids] = torch.where(frozen, home[env_ids], moved)
 
     out["success"] = st.success.float().mean()
+    out["promoted"] = (up.bool() & ~frozen).float().mean()
+    if bank is not None:
+      out["bank_share"] = bank[env_ids].float().mean()
     out["terminated"] = st.terminated.float().mean()
     out["progress_m"] = st.progress.mean()
     out["reached_end"] = st.reached_end.float().mean()

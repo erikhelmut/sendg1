@@ -51,6 +51,7 @@ def build_env(args, task: str):
   }
   if not args.pushes:
     cfg.events.pop("push")
+  cfg.events.pop("spawn_from_bank", None)  # training-only mid-beam restarts
   twist = cfg.commands["twist"]
   twist.ranges.lin_vel_x = (args.speed, args.speed)
   twist.rel_standing_envs = 0.0

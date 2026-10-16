@@ -12,6 +12,7 @@ Every reward term, weight and termination is in this file, in one table each.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
@@ -409,9 +410,18 @@ E2E_SPAWN = {
   "platform_lateral_range": (-0.15, 0.15),
   "yaw_range": (-0.25, 0.25),
 }
-"""Every episode starts on the start platform, 0.3-0.8 m before the beam, up to
+"""Platform episodes start on the start platform, 0.3-0.8 m before the beam, up to
 15 cm off the centreline and 14 deg off heading. The actor never sees where the
 beam is, so it has to find and follow it by touch."""
+
+E2E_CENTRELINE_SIGMA = 0.035
+"""Fixed stance-foot / CoM centreline reward width (m), all levels."""
+E2E_SUCCESS_BEAM_M = 1.0
+"""Metres of beam that promote a walking episode at any pace."""
+E2E_STATE_BANK = Path(__file__).resolve().parents[4] / "results" / "beam_ts" / "v4_beam_states.pt"
+"""Mid-beam states of the v4 teacher on 0.05-0.10 m (scripts/beam_ts_state_bank.py)."""
+E2E_BANK_SHARE = 0.25
+"""Share of resets restarted mid-beam from the bank."""
 
 
 def make_beam_e2e_env_cfg(*, play: bool = False, num_envs: int | None = None) -> ManagerBasedRlEnvCfg:
@@ -456,5 +466,19 @@ def make_beam_e2e_env_cfg(*, play: bool = False, num_envs: int | None = None) ->
   # The first full run rose to level 3 on standing commands alone while
   # walking commands got 5 % of their distance: only walking promotes here.
   if "beam_levels" in cfg.curriculum:  # play mode has no curriculum
-    cfg.curriculum["beam_levels"].params["standing_promotes"] = False
+    cfg.curriculum["beam_levels"].params.update(standing_promotes=False, success_beam_m=E2E_SUCCESS_BEAM_M)
+  # Run 2 stalled at mean level ~2.2 and shuffled with its feet ~10-17 cm
+  # apart: the level-coupled widths (12 cm at level 0) never asked for more.
+  # One tight width everywhere: a foot (and the CoM) pays only over the beam,
+  # which the actor can only find by touch.
+  for name in ("foot_centreline", "com_over_beam"):
+    cfg.rewards[name].params["sigmas"] = (E2E_CENTRELINE_SIGMA,)
+  cfg.rewards["arm_posture"].weight *= 0.5  # arms may help balance
+  # Reference-state initialisation from the v4 teacher's narrow-beam stance.
+  if not play:
+    cfg.events["spawn_from_bank"] = EventTermCfg(
+      func=mdp.spawn_from_bank,
+      mode="reset",
+      params={"bank_path": str(E2E_STATE_BANK), "share": E2E_BANK_SHARE},
+    )
   return cfg
