@@ -486,7 +486,8 @@ def make_beam_e2e_env_cfg(*, play: bool = False, num_envs: int | None = None) ->
   # v3's first 1600 iterations kept the side-by-side shuffle: a mild,
   # beam-independent nudge towards feet on one line (see mdp.feet_in_line).
   # Weight 1 narrowed the gap only from ~15 to ~8-12 cm in 3500 iterations.
-  cfg.rewards["feet_in_line"] = RewardTermCfg(func=mdp.feet_in_line, weight=3.0)
+  # Per step since v4b: per-time versions were farmed (see mdp.feet_in_line).
+  cfg.rewards["feet_in_line"] = RewardTermCfg(func=mdp.feet_in_line, weight=2.0)
   # Reference-state initialisation from the v4 teacher's narrow-beam stance.
   if not play:
     cfg.events["spawn_from_bank"] = EventTermCfg(

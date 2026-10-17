@@ -669,24 +669,49 @@ def passing_step(
   return r * (cmd > command_threshold).float() / env.step_dt
 
 
-def feet_in_line(env: ManagerBasedRlEnv, std: float = 0.08, command_threshold: float = 0.05) -> torch.Tensor:
-  """exp(-gap^2 / std^2), gap the lateral distance between the feet in the
-  base's heading frame, while walking is commanded and both feet are down. Kinematic only: it asks for a heel-to-toe gait, not for a place on the
-  beam. The tight centreline reward alone left E2E v3 shuffling with its
-  feet 8-17 cm apart (exp(-(8/3.5)^2) ~ 0: no slope); this kernel is wide
-  enough to pull from there. The v4 teacher's gap is ~1 cm."""
+def feet_in_line(
+  env: ManagerBasedRlEnv,
+  std: float = 0.08,
+  min_lead: float = 0.05,
+  min_air_time: float = 0.1,
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """At each ALTERNATING touchdown that lands at least ``min_lead`` ahead of
+  the other foot: exp(-gap^2 / std^2), gap the lateral distance between the
+  feet in the base's heading frame. Divided by step_dt, so the weight is the
+  reward per step. Kinematic only: it asks for a heel-to-toe gait, not for a
+  place on the beam (the v4 teacher's gap is ~1 cm).
+
+  Paid per step, not per time: per time (any foot down) the swing foot
+  sweeping past the stance foot earned it; per time in double support,
+  walking slower did. Neither narrowed the two-foot gap (9-10 cm)."""
+  data = env.scene[FOOT_CONTACT_SENSOR].data
+  assert data.current_contact_time is not None and data.last_air_time is not None
+  first = (data.current_contact_time > 0) & (data.current_contact_time <= env.step_dt + 1e-6)
+  first &= data.last_air_time > min_air_time
+  last = getattr(env, "_beam_line_last", None)
+  if last is None:
+    last = torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device)
+    env._beam_line_last = last
+  last[env.episode_length_buf <= 1] = -1
+  foot = torch.arange(2, device=env.device)[None, :]
+  alternating = first & (last[:, None] != foot)
+
   robot = _robot(env)
   ep = BeamEpisode.get(env)
   feet = robot.data.site_pos_w[:, ep._foot_sites, :2]
   heading = robot.data.heading_w
   rel = feet[:, 0] - feet[:, 1]
-  gap = -torch.sin(heading) * rel[:, 0] + torch.cos(heading) * rel[:, 1]
+  c, s = torch.cos(heading), torch.sin(heading)
+  ahead = c * rel[:, 0] + s * rel[:, 1]  # left foot ahead of right (m)
+  gap = -s * rel[:, 0] + c * rel[:, 1]
+  lead = torch.stack([ahead, -ahead], dim=-1)
+  r = torch.exp(-torch.square(gap / std))[:, None] * (alternating & (lead > min_lead)).float()
+
+  both = first.all(-1)
+  last[:] = torch.where(both, -1, torch.where(first[:, 0], 0, torch.where(first[:, 1], 1, last)))
   walking = _forward_cmd(env) > command_threshold
-  # Double support only: counted whenever a foot was down, v4 (weight 3)
-  # raised the reward by sweeping the swing foot past the stance foot while
-  # the two-foot gap stayed at 9-10 cm.
-  both = _feet_in_contact(env).all(-1)
-  return torch.exp(-torch.square(gap / std)) * (walking & both).float()
+  return r.sum(-1) * walking.float() / env.step_dt
 
 
 def stance_foot_flat(env: ManagerBasedRlEnv, std: float = 0.15) -> torch.Tensor:
