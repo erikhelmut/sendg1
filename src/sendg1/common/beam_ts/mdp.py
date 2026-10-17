@@ -672,46 +672,56 @@ def passing_step(
 def feet_in_line(
   env: ManagerBasedRlEnv,
   std: float = 0.08,
-  min_lead: float = 0.05,
+  scale: float = 0.3,
   min_air_time: float = 0.1,
   command_threshold: float = 0.05,
 ) -> torch.Tensor:
-  """At each ALTERNATING touchdown that lands at least ``min_lead`` ahead of
-  the other foot: exp(-gap^2 / std^2), gap the lateral distance between the
-  feet in the base's heading frame. Divided by step_dt, so the weight is the
-  reward per step. Kinematic only: it asks for a heel-to-toe gait, not for a
-  place on the beam (the v4 teacher's gap is ~1 cm).
+  """Metres walked heel-to-toe. At each ALTERNATING touchdown:
+  exp(-gap^2 / std^2) * clip(gained / scale, 0, 1), gap the lateral distance
+  between the feet in the base's heading frame and gained the new ground the
+  landing foot takes beyond the furthest touchdown of the episode so far.
+  Divided by step_dt. Kinematic only: it asks for a heel-to-toe gait, not
+  for a place on the beam (the v4 teacher: gap ~1 cm, 31 cm steps).
 
-  Paid per step, not per time: per time (any foot down) the swing foot
-  sweeping past the stance foot earned it; per time in double support,
-  walking slower did. Neither narrowed the two-foot gap (9-10 cm)."""
+  Every cheaper form was farmed without narrowing the two-foot gap (9-10 cm):
+  per time with a foot down (swing foot sweeping past the stance foot), per
+  time in double support (walking slower), per step (7 cm steps). Paid per
+  metre gained, none of these pay more."""
   data = env.scene[FOOT_CONTACT_SENSOR].data
   assert data.current_contact_time is not None and data.last_air_time is not None
   first = (data.current_contact_time > 0) & (data.current_contact_time <= env.step_dt + 1e-6)
   first &= data.last_air_time > min_air_time
+  fresh = env.episode_length_buf <= 1
   last = getattr(env, "_beam_line_last", None)
   if last is None:
     last = torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device)
     env._beam_line_last = last
-  last[env.episode_length_buf <= 1] = -1
+  last[fresh] = -1
   foot = torch.arange(2, device=env.device)[None, :]
   alternating = first & (last[:, None] != foot)
 
-  robot = _robot(env)
   ep = BeamEpisode.get(env)
+  arc = ep.feet_proj().arc
+  frontier = getattr(env, "_beam_line_frontier", None)
+  if frontier is None:
+    frontier = arc.max(-1).values.clone()
+    env._beam_line_frontier = frontier
+  frontier[fresh] = arc[fresh].max(-1).values
+  gained = (arc - frontier[:, None]).clamp(0.0, scale) / scale
+
+  robot = _robot(env)
   feet = robot.data.site_pos_w[:, ep._foot_sites, :2]
   heading = robot.data.heading_w
   rel = feet[:, 0] - feet[:, 1]
-  c, s = torch.cos(heading), torch.sin(heading)
-  ahead = c * rel[:, 0] + s * rel[:, 1]  # left foot ahead of right (m)
-  gap = -s * rel[:, 0] + c * rel[:, 1]
-  lead = torch.stack([ahead, -ahead], dim=-1)
-  r = torch.exp(-torch.square(gap / std))[:, None] * (alternating & (lead > min_lead)).float()
+  gap = -torch.sin(heading) * rel[:, 0] + torch.cos(heading) * rel[:, 1]
+  r = (torch.exp(-torch.square(gap / std))[:, None] * gained * alternating.float()).sum(-1)
 
+  landed = torch.where(first, arc, torch.full_like(arc, -1e9)).max(-1).values
+  frontier[:] = torch.maximum(frontier, landed)
   both = first.all(-1)
   last[:] = torch.where(both, -1, torch.where(first[:, 0], 0, torch.where(first[:, 1], 1, last)))
   walking = _forward_cmd(env) > command_threshold
-  return r.sum(-1) * walking.float() / env.step_dt
+  return r * walking.float() / env.step_dt
 
 
 def stance_foot_flat(env: ManagerBasedRlEnv, std: float = 0.15) -> torch.Tensor:
