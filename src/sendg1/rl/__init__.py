@@ -1,1 +1,1 @@
-"""Learning algorithms beyond what rsl_rl ships: DAgger-style distillation."""
+"""Model classes beyond what rsl_rl ships: see ``symmetric_rnn``."""
