@@ -67,6 +67,13 @@ EDGE_Y = 0.0145
 count as edge taxels."""
 
 FEATURES_PER_FOOT_EXTRA = 7  # load, cop x/y, area, edge lat/med, contact
+TOUCH_BIT_N = 3.0
+"""A taxel counts as touching above 3 N (``touch_features``). Standing on the
+widest beam a loaded taxel reads ~6 N (median; 10th percentile 4 N), so the
+threshold sits halfway between nothing and a typical load. At full noise
+strength (3 N std) ~16% of unloaded taxels flicker on; at level 0 (0.9 N std)
+almost none."""
+TOUCH_PER_FOOT = 26 + 5  # bits, load, cop x/y, area, contact
 CONTACT_MAP_RAMP_N = (2.0, 6.0)
 """Soft contact map: a taxel reads 0 at or below 2 N and 1 at or above 6 N."""
 
@@ -169,6 +176,42 @@ def features_from_normals(
     [shape, load, cop_x, cop_y, area, edge_lat, edge_med, in_contact], dim=-1
   )
   return per_foot.flatten(start_dim=1)
+
+
+def touch_features(normal: torch.Tensor, layout: TaxelLayout) -> torch.Tensor:
+  """[B, 2, T] canonical normals -> [B, 2 * (T + 5)] features, per foot:
+
+  ``bits[T]``  1 where a taxel reads above ``TOUCH_BIT_N``, else 0: which part of
+               the sole touches.
+  ``load``     total normal force / body weight, clipped to [0, 1.5].
+  ``cop[2]``   centre of pressure from the taxels, x and y scaled to the sole's
+               half extents (+-1), 0 while the foot is not in contact.
+  ``area``     fraction of taxels touching (the mean of ``bits``).
+  ``contact``  1 if total normal force is above ``CONTACT_N``.
+
+  Frames as in ``features_from_normals``: +y is lateral on both feet."""
+  centers, _, x_mid, x_half, y_half, *_ = _layout_consts(layout, str(normal.device))
+  total = normal.sum(-1, keepdim=True)
+  bits = (normal > TOUCH_BIT_N).float()
+  load = (total / BODY_WEIGHT_N).clamp(0.0, 1.5)
+  w = normal / total.clamp(min=1e-6)
+  in_contact = (total > CONTACT_N).float()
+  cop_x = (((w * centers[:, 0]).sum(-1, keepdim=True) - x_mid) / x_half).clamp(-1, 1) * in_contact
+  cop_y = ((w * centers[:, 1]).sum(-1, keepdim=True) / y_half).clamp(-1, 1) * in_contact
+  area = bits.mean(-1, keepdim=True)
+  return torch.cat([bits, load, cop_x, cop_y, area, in_contact], dim=-1).flatten(start_dim=1)
+
+
+def canonical_forces(env: ManagerBasedRlEnv, params: TactileParams) -> torch.Tensor:
+  """[B, 2, T, 3] clean per-taxel (normal, shear x, shear y) in newtons, in the
+  canonical frame (right foot re-indexed, its shear y negated so +y is lateral
+  on both feet)."""
+  layout = LAYOUTS[params.layout]
+  reading = read_tactile(env, params)
+  _, perm, *_ = _layout_consts(layout, str(reading.normal.device))
+  f = torch.cat([reading.normal[..., None], reading.shear[..., :2]], dim=-1)  # [B, 2, T, 3]
+  right = f[:, 1, perm] * torch.tensor([1.0, 1.0, -1.0], device=f.device)
+  return torch.stack([f[:, 0], right], dim=1)
 
 
 def cop_offset_from_support(env: ManagerBasedRlEnv, params: TactileParams) -> torch.Tensor:

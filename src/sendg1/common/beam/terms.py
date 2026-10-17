@@ -78,6 +78,10 @@ def _tactile_map_noisy() -> ObservationTermCfg:
   return ObservationTermCfg(func=mdp.tactile_map_noisy, delay_min_lag=0, delay_max_lag=1)
 
 
+def _tactile_touch_noisy() -> ObservationTermCfg:
+  return ObservationTermCfg(func=mdp.tactile_touch_noisy, delay_min_lag=0, delay_max_lag=1)
+
+
 TERMS: dict[str, TermSpec] = {
   # -- actor -------------------------------------------------------------------
   "base_ang_vel": TermSpec(
@@ -103,9 +107,26 @@ TERMS: dict[str, TermSpec] = {
     "Tactile slipper, per foot: soft per-taxel contact map, load, CoP, contact "
     "area, edge loading, contact flag; faulted readings, 0-1 step latency.",
   ),
+  "tactile_touch": TermSpec(
+    _tactile_touch_noisy,
+    "sensor",
+    "Tactile slipper, per foot: 26-bit taxel touch map, load, CoP, contact "
+    "area, contact flag; faulted readings, 0-1 step latency.",
+  ),
   # -- privileged --------------------------------------------------------------
   "tactile_map_clean": TermSpec(
     _plain(mdp.tactile_map_clean), "privileged", "Noise-free tactile_map."
+  ),
+  "tactile_touch_clean": TermSpec(
+    _plain(mdp.tactile_touch_clean), "privileged", "Noise-free tactile_touch."
+  ),
+  "taxel_forces_clean": TermSpec(
+    _plain(mdp.taxel_forces_clean),
+    "privileged",
+    "Clean per-taxel normal and shear forces of both feet.",
+  ),
+  "foot_slip_vel": TermSpec(
+    _plain(mdp.foot_slip_vel), "privileged", "Planar foot velocity while in contact."
   ),
   "base_lin_vel": TermSpec(
     lambda: ObservationTermCfg(
@@ -170,6 +191,16 @@ PRIVILEGED_TERMS: tuple[str, ...] = (
 )
 """The critic, on top of the actor's terms (the clean tactile map replacing the
 faulted one): full ground truth. The curved task adds ``beam_ahead``."""
+TOUCH_ACTOR_TERMS: tuple[str, ...] = tuple(
+  "tactile_touch" if n == "tactile_map" else n for n in ACTOR_TERMS
+)
+"""The touch-feature actor: as ``ACTOR_TERMS`` with ``tactile_touch`` (binary
+taxel map, load, CoP, area, contact) for the soft contact map."""
+TOUCH_PRIVILEGED_TERMS: tuple[str, ...] = tuple(
+  "tactile_touch_clean" if n == "tactile_map_clean" else n for n in PRIVILEGED_TERMS
+) + ("taxel_forces_clean", "foot_slip_vel")
+"""Its critic adds the clean per-taxel normal and shear forces and the foot
+slip velocity. Friction is in ``beam_params``."""
 DEPLOYABLE: frozenset[str] = frozenset(
   n for n, s in TERMS.items() if s.availability in ("onboard", "sensor")
 )

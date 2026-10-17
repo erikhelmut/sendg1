@@ -1,6 +1,11 @@
 """Beam walking, plain PPO: ``G1-Beam-E2E`` (straight beams) and
 ``G1-Beam-E2E-Curved`` (straight and bent beams).
 
+Touch-feature experiments, both on curved beams: ``G1-Beam-Touch-Curved``
+(symmetric GRU) and ``G1-Beam-Touch-Curved-Plain`` (plain GRU), with the
+``touch`` tactile input (``env_cfg.Tactile``). Same rewards, curriculum and
+PPO settings as ``G1-Beam-E2E-Curved``.
+
 A GRU actor on the robot's own signals and the tactile slipper, a privileged
 critic. Trained with mjlab's ``train``; evaluated with
 ``scripts/beam_eval.py``.
@@ -16,6 +21,8 @@ from sendg1.tasks.beam.rl_cfg import beam_ppo_cfg
 
 TASK = "G1-Beam-E2E"
 CURVED_TASK = "G1-Beam-E2E-Curved"
+TOUCH_TASK = "G1-Beam-Touch-Curved"
+TOUCH_PLAIN_TASK = "G1-Beam-Touch-Curved-Plain"
 
 
 def assert_actor_is_deployable(observations: dict, groups: tuple[str, ...] = ("actor",)) -> None:
@@ -31,12 +38,19 @@ def assert_actor_is_deployable(observations: dict, groups: tuple[str, ...] = ("a
         )
 
 
-for _task, _curves, _experiment in ((TASK, False, "beam_e2e"), (CURVED_TASK, True, "beam_e2e_curved")):
-  _env = make_beam_env_cfg(curves=_curves)
+_TASKS = (
+  # task, curves, tactile, symmetric actor, experiment
+  (TASK, False, "map", True, "beam_e2e"),
+  (CURVED_TASK, True, "map", True, "beam_e2e_curved"),
+  (TOUCH_TASK, True, "touch", True, "beam_touch_curved"),
+  (TOUCH_PLAIN_TASK, True, "touch", False, "beam_touch_curved_plain"),
+)
+for _task, _curves, _tactile, _symmetric, _experiment in _TASKS:
+  _env = make_beam_env_cfg(curves=_curves, tactile=_tactile)
   assert_actor_is_deployable(_env.observations)
   register_mjlab_task(
     task_id=_task,
     env_cfg=_env,
-    play_env_cfg=make_beam_env_cfg(play=True, curves=_curves),
-    rl_cfg=beam_ppo_cfg(experiment_name=_experiment),
+    play_env_cfg=make_beam_env_cfg(play=True, curves=_curves, tactile=_tactile),
+    rl_cfg=beam_ppo_cfg(experiment_name=_experiment, symmetric=_symmetric),
   )

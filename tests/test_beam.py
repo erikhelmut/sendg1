@@ -22,7 +22,13 @@ from sendg1.common.beam.terrain import (
   resample_polyline,
 )
 from sendg1.common.tactile.layout import LAYOUTS
-from sendg1.tasks.beam import CURVED_TASK, TASK, assert_actor_is_deployable
+from sendg1.tasks.beam import (
+  CURVED_TASK,
+  TASK,
+  TOUCH_PLAIN_TASK,
+  TOUCH_TASK,
+  assert_actor_is_deployable,
+)
 
 ACTOR_EXPECTED = {
   "base_ang_vel",
@@ -34,18 +40,58 @@ ACTOR_EXPECTED = {
   "tactile_map",
 }
 ACTOR_DIM = 3 + 3 + 29 + 29 + 29 + 1 + 2 * 33
+TOUCH_ACTOR_DIM = ACTOR_DIM - 2 * 33 + 2 * 31
+ALL_TASKS = [TASK, CURVED_TASK, TOUCH_TASK, TOUCH_PLAIN_TASK]
+TOUCH_TASKS = (TOUCH_TASK, TOUCH_PLAIN_TASK)
 
 
-@pytest.mark.parametrize("task", [TASK, CURVED_TASK])
+def _actor_expected(task: str) -> tuple[set[str], int]:
+  if task in TOUCH_TASKS:
+    return (ACTOR_EXPECTED - {"tactile_map"}) | {"tactile_touch"}, TOUCH_ACTOR_DIM
+  return ACTOR_EXPECTED, ACTOR_DIM
+
+
+@pytest.mark.parametrize("task", ALL_TASKS)
 def test_actor_sees_only_deployable_signals(task: str) -> None:
   env_cfg = load_env_cfg(task)
   rl_cfg = load_rl_cfg(task)
   terms = {t for g in rl_cfg.obs_groups["actor"] for t in env_cfg.observations[g].terms}
-  assert terms == ACTOR_EXPECTED
+  assert terms == _actor_expected(task)[0]
   assert terms <= DEPLOYABLE
   critic = {t for g in rl_cfg.obs_groups["critic"] for t in env_cfg.observations[g].terms}
   assert {"base_beam_pose", "feet_beam_pose", "base_lin_vel"} <= critic
-  assert ("beam_ahead" in critic) == (task == CURVED_TASK)
+  assert ("beam_ahead" in critic) == (task != TASK)
+  touch_critic = {"tactile_touch_clean", "taxel_forces_clean", "foot_slip_vel", "beam_params"}
+  assert (touch_critic <= critic) == (task in TOUCH_TASKS)
+
+
+def test_touch_tasks_differ_only_in_the_actor_model() -> None:
+  sym, plain = load_rl_cfg(TOUCH_TASK), load_rl_cfg(TOUCH_PLAIN_TASK)
+  assert sym.actor.class_name.endswith("SymmetricRNNModel")
+  assert plain.actor.class_name == "RNNModel"
+  plain.actor.class_name = sym.actor.class_name
+  assert plain.actor == sym.actor and plain.algorithm == sym.algorithm and plain.critic == sym.critic
+  assert load_env_cfg(TOUCH_TASK).rewards.keys() == load_env_cfg(CURVED_TASK).rewards.keys()
+
+
+def test_touch_features() -> None:
+  """Bits are binary, area is their mean, CoP is zero on an unloaded foot and
+  lateral (+y) on both feet for a lateral-edge load."""
+  layout = LAYOUTS["slipper_v1"]
+  t = layout.num_taxels
+  lateral = torch.tensor([float(y > 0.01) for _, y in layout.centers])
+  normal = torch.zeros(2, 2, t)
+  normal[0, 0] = 40.0 * lateral
+  normal[0, 1] = 40.0 * lateral
+  normal[1, 0] = 3.0  # below the bit threshold everywhere, 78 N in total
+  f = tac.touch_features(normal, layout).view(2, 2, tac.TOUCH_PER_FOOT)
+  bits, load, cop, area, contact = f[..., :t], f[..., t], f[..., t + 1 : t + 3], f[..., t + 3], f[..., t + 4]
+  assert set(bits.unique().tolist()) <= {0.0, 1.0}
+  torch.testing.assert_close(area, bits.mean(-1))
+  torch.testing.assert_close(f[0, 0], f[0, 1])
+  assert cop[0, 0, 1] > 0.5 and contact[0, 0] == 1
+  assert torch.all(cop[1, 1] == 0) and contact[1, 1] == 0 and load[1, 1] == 0
+  assert bits[1, 0].sum() == 0 and contact[1, 0] == 1
 
 
 def test_leak_guard_fires() -> None:
@@ -156,7 +202,7 @@ def test_projection_on_bent_path() -> None:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("task", [TASK, CURVED_TASK])
+@pytest.mark.parametrize("task", ALL_TASKS)
 def test_env_builds_steps_and_obs_are_finite(task: str) -> None:
   from mjlab.envs import ManagerBasedRlEnv
 
@@ -167,7 +213,7 @@ def test_env_builds_steps_and_obs_are_finite(task: str) -> None:
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
   try:
     obs, _ = env.reset()
-    assert obs["actor"].shape == (8, ACTOR_DIM)
+    assert obs["actor"].shape == (8, _actor_expected(task)[1])
     for _ in range(10):
       obs, rew, *_ = env.step(torch.zeros(8, env.action_manager.total_action_dim, device=env.device))
       assert torch.isfinite(rew).all()
@@ -218,7 +264,7 @@ def _swap_side(name: str) -> str:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("task", [TASK, CURVED_TASK])
+@pytest.mark.parametrize("task", [TASK, CURVED_TASK, TOUCH_TASK])
 def test_mirror_maps_match_g1_kinematics_and_are_involutions(task: str) -> None:
   """Mirrored joint angles must give the mirror-image robot (every body at
   (x, -y, z) of its counterpart), the default pose must be its own mirror,
@@ -264,7 +310,8 @@ def test_mirror_maps_match_g1_kinematics_and_are_involutions(task: str) -> None:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_actor_is_mirror_equivariant() -> None:
+@pytest.mark.parametrize("task", [TASK, TOUCH_TASK])
+def test_actor_is_mirror_equivariant(task: str) -> None:
   """pi(M_o o_1..t) = M_a pi(o_1..t) over a whole observation sequence."""
   from dataclasses import asdict
 
@@ -273,12 +320,12 @@ def test_actor_is_mirror_equivariant() -> None:
 
   from sendg1.common.beam.symmetry import _maps
 
-  cfg = load_env_cfg(TASK)
+  cfg = load_env_cfg(task)
   cfg.scene.num_envs = 4
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
   try:
     wrapped = RslRlVecEnvWrapper(env)
-    rl = asdict(load_rl_cfg(TASK))
+    rl = asdict(load_rl_cfg(task))
     rl["logger"] = "tensorboard"
     runner = MjlabOnPolicyRunner(wrapped, rl, log_dir=None, device="cuda:0")
     actor = runner.alg.actor
@@ -301,5 +348,31 @@ def test_actor_is_mirror_equivariant() -> None:
         am.append(actor(om))
     for x, y in zip(a, am, strict=True):
       torch.testing.assert_close(y, x[:, asrc] * asign, atol=1e-5, rtol=1e-4)
+  finally:
+    env.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_plain_actor_trains_one_iteration(tmp_path) -> None:
+  """The plain-GRU experiment builds rsl_rl's RNNModel and runs a PPO update."""
+  from dataclasses import asdict
+
+  from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+  from rsl_rl.models.rnn_model import RNNModel
+
+  from sendg1.rl.symmetric_rnn import SymmetricRNNModel
+
+  cfg = load_env_cfg(TOUCH_PLAIN_TASK)
+  cfg.scene.num_envs = 8
+  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
+  try:
+    rl = asdict(load_rl_cfg(TOUCH_PLAIN_TASK))
+    rl["logger"] = "tensorboard"
+    runner = MjlabOnPolicyRunner(RslRlVecEnvWrapper(env), rl, log_dir=str(tmp_path), device="cuda:0")
+    actor = runner.alg.actor
+    assert isinstance(actor, RNNModel) and not isinstance(actor, SymmetricRNNModel)
+    runner.learn(num_learning_iterations=1)
+    assert all(torch.isfinite(p).all() for p in actor.parameters())
   finally:
     env.close()

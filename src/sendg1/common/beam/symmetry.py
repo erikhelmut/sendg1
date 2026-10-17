@@ -27,6 +27,9 @@ from functools import lru_cache
 import torch
 
 TACTILE_PER_FOOT = 33
+TOUCH_PER_FOOT = 31
+"""Must match ``tactile.TOUCH_PER_FOOT``."""
+TAXEL_FORCES_PER_FOOT = 26 * 3
 BEAM_AHEAD_DIMS = 4
 """Must match ``mdp.BEAM_AHEAD_M``."""
 
@@ -77,8 +80,14 @@ def term_mirrors(
     "actions": acts,
     "command_vx": _signs(1),
     "tactile_map": tactile,
+    "tactile_touch": _swap_blocks(TOUCH_PER_FOOT),
     # privileged
     "tactile_map_clean": tactile,
+    "tactile_touch_clean": _swap_blocks(TOUCH_PER_FOOT),
+    # canonical frame (+y lateral on both feet): a swap of the feet
+    "taxel_forces_clean": _swap_blocks(TAXEL_FORCES_PER_FOOT),
+    # heading frame (vx, vy) per foot
+    "foot_slip_vel": _swap_blocks(2, (1, -1)),
     "base_lin_vel": _signs(1, -1, 1),
     # lateral, edge margin, height, sin(yaw err), cos(yaw err)
     "feet_beam_pose": _swap_blocks(5, (-1, 1, 1, -1, 1)),

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import Literal
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
@@ -29,7 +30,13 @@ from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 from sendg1.common.beam import mdp
-from sendg1.common.beam.terms import ACTOR_TERMS, PRIVILEGED_TERMS, TERMS
+from sendg1.common.beam.terms import (
+  ACTOR_TERMS,
+  PRIVILEGED_TERMS,
+  TERMS,
+  TOUCH_ACTOR_TERMS,
+  TOUCH_PRIVILEGED_TERMS,
+)
 from sendg1.common.beam.terrain import make_beam_terrain_cfg
 from sendg1.common.rewards import POSE_STD_WALKING
 from sendg1.common.robots.g1 import (
@@ -338,12 +345,25 @@ def build_events() -> dict[str, EventTermCfg]:
 # ---------------------------------------------------------------------------
 
 
-def build_observations(curves: bool = False) -> dict[str, ObservationGroupCfg]:
-  critic_actor = tuple(n for n in ACTOR_TERMS if n != "tactile_map")
-  critic_priv = PRIVILEGED_TERMS + (("beam_ahead",) if curves else ())
+Tactile = Literal["map", "touch"]
+"""Actor tactile input. ``map``: soft per-taxel contact map, load, CoP, area,
+edge loading, contact (``tactile_map``, 33 per foot). ``touch``: binary taxel
+map, load, CoP, area, contact (``tactile_touch``, 31 per foot), with clean
+per-taxel normal/shear forces and foot slip velocity in the critic."""
+
+
+def build_observations(
+  curves: bool = False, tactile: Tactile = "map"
+) -> dict[str, ObservationGroupCfg]:
+  actor_terms, priv_terms, noisy = {
+    "map": (ACTOR_TERMS, PRIVILEGED_TERMS, "tactile_map"),
+    "touch": (TOUCH_ACTOR_TERMS, TOUCH_PRIVILEGED_TERMS, "tactile_touch"),
+  }[tactile]
+  critic_actor = tuple(n for n in actor_terms if n != noisy)
+  critic_priv = priv_terms + (("beam_ahead",) if curves else ())
   return {
     "actor": ObservationGroupCfg(
-      terms={n: TERMS[n].build() for n in ACTOR_TERMS},
+      terms={n: TERMS[n].build() for n in actor_terms},
       concatenate_terms=True,
       enable_corruption=True,
     ),
@@ -358,11 +378,15 @@ def build_observations(curves: bool = False) -> dict[str, ObservationGroupCfg]:
 
 
 def make_beam_env_cfg(
-  *, play: bool = False, num_envs: int | None = None, curves: bool = False
+  *,
+  play: bool = False,
+  num_envs: int | None = None,
+  curves: bool = False,
+  tactile: Tactile = "map",
 ) -> ManagerBasedRlEnvCfg:
   """``curves``: two thirds of the terrain columns are bent beams
   (``terrain.BEND_MAX_TURN_DEG``), and the critic also sees how the beam
-  turns ahead (``beam_ahead``)."""
+  turns ahead (``beam_ahead``). ``tactile``: see ``Tactile``."""
   cfg = make_velocity_env_cfg()
   cfg.episode_length_s = EPISODE_S
 
@@ -384,7 +408,7 @@ def make_beam_env_cfg(
   cfg.sim.contact_sensor_maxmatch = 128
   cfg.sim.nconmax = 70
 
-  cfg.observations = build_observations(curves)
+  cfg.observations = build_observations(curves, tactile)
 
   cfg.actions = {
     "joint_pos": mdp.DelayedJointPositionActionCfg(

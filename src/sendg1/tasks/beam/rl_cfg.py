@@ -2,7 +2,8 @@
 
 Actor: GRU(256) -> MLP (256, 128) over the ``actor`` group, mirror-equivariant
 by construction (``sendg1.rl.symmetric_rnn``; rsl_rl's symmetry augmentation
-does not support recurrent actors). Critic: MLP (512, 256, 128) over the
+does not support recurrent actors), or with ``symmetric=False`` rsl_rl's plain
+``RNNModel`` of the same size, with no symmetry at all. Critic: MLP (512, 256, 128) over the
 ``critic`` group (ground truth). Both normalise their inputs. 32-step
 rollouts: BPTT over 0.64 s.
 """
@@ -20,13 +21,16 @@ collapse training."""
 
 
 def beam_ppo_cfg(
-  seed: int = 0, max_iterations: int = 20_000, experiment_name: str = "beam_e2e"
+  seed: int = 0,
+  max_iterations: int = 20_000,
+  experiment_name: str = "beam_e2e",
+  symmetric: bool = True,
 ) -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(
     seed=seed,
     obs_groups={"actor": ("actor",), "critic": ("critic",)},
     actor=RslRlModelCfg(
-      class_name="sendg1.rl.symmetric_rnn:SymmetricRNNModel",
+      class_name="sendg1.rl.symmetric_rnn:SymmetricRNNModel" if symmetric else "RNNModel",
       rnn_type="gru",
       rnn_hidden_dim=RNN_HIDDEN,
       rnn_num_layers=1,

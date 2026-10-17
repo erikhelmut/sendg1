@@ -331,6 +331,41 @@ def tactile_map_clean(env: ManagerBasedRlEnv) -> torch.Tensor:
   return tac.features_from_normals(tac.canonical_normals(env, TACTILE), layout, contact_map=True)
 
 
+def tactile_touch_noisy(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """The touch-feature actor input (``tactile.touch_features``) from the
+  faulted sensor."""
+  layout = LAYOUTS[TACTILE.layout]
+  normal = tac.canonical_normals(env, TACTILE)
+  noisy = tac.TactileNoiseState.get(env, layout).apply(normal)
+  return tac.touch_features(noisy, layout)
+
+
+def tactile_touch_clean(env: ManagerBasedRlEnv) -> torch.Tensor:
+  layout = LAYOUTS[TACTILE.layout]
+  return tac.touch_features(tac.canonical_normals(env, TACTILE), layout)
+
+
+def taxel_forces_clean(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Per foot, per taxel: clean normal, shear x, shear y, each
+  ``sign(f) * log1p(|f|)`` of newtons (canonical frame). [B, 2 * T * 3]."""
+  f = tac.canonical_forces(env, TACTILE).flatten(start_dim=1)
+  return torch.sign(f) * torch.log1p(f.abs())
+
+
+def foot_slip_vel(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Per foot: planar velocity (m/s) in the base heading frame while the foot
+  is in contact, 0 in the air. [B, 4]."""
+  ep = BeamEpisode.get(env)
+  robot = _robot(env)
+  v = robot.data.site_lin_vel_w[:, ep._foot_sites, :2]  # [B, 2, 2]
+  yaw = robot.data.heading_w[:, None]
+  c, s = torch.cos(yaw), torch.sin(yaw)
+  vx = c * v[..., 0] + s * v[..., 1]
+  vy = -s * v[..., 0] + c * v[..., 1]
+  on = _feet_in_contact(env).float()
+  return (torch.stack([vx, vy], dim=-1) * on[..., None]).flatten(start_dim=1)
+
+
 def feet_beam_pose(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Per foot: lateral offset from the centreline, edge margin (half width minus
   |offset|), height above the top surface, yaw error vs. the beam (sin, cos).
