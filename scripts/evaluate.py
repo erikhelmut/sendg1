@@ -24,113 +24,6 @@ def _write(out: dict, dest: Path, seed: int) -> None:
   print(f"[eval] wrote {path}")
 
 
-def _evaluate_beam(env, wrapped, policy, protocol) -> dict:
-  """Beam protocol: how far each episode got, per (bend type, width) cell.
-
-  Cells are averaged with equal weight (see sendg1.eval.metrics): an env on a
-  hard cell fails fast and would otherwise contribute far more episodes than an
-  env that walks the whole beam.
-  """
-  import statistics
-
-  import torch
-
-  from sendg1.common.beam.mdp import BeamTracker
-  from sendg1.common.beam.terrain import BEAM_ROLES, bend_type
-  from sendg1.eval.metrics import BEAM_PRIMARY_METRIC
-
-  terrain = env.scene.terrain
-  tracker = BeamTracker.get(env)
-  names = list(terrain.cfg.terrain_generator.sub_terrains)
-  types = list(dict.fromkeys(bend_type(n) for n in names))
-  col_type = torch.tensor([types.index(bend_type(n)) for n in names], device=env.device)
-  num_rows = terrain.terrain_origins.shape[0]
-  cells = len(types) * num_rows
-  n_ep, prog, succ, fell = (torch.zeros(cells, device=env.device) for _ in range(4))
-
-  obs, _ = wrapped.reset()
-  steps = int(protocol.episode_length_s / env.step_dt) * protocol.num_episodes
-  print(
-    f"[eval] beam: {steps} steps x {env.num_envs} envs, "
-    f"{len(types)} bend types x {num_rows} widths"
-  )
-  term = env.termination_manager
-  with torch.inference_mode():
-    for _ in range(steps):
-      # The curriculum is frozen so cells never change, but read them before the
-      # step so a reset inside step() cannot shift attribution.
-      cell = col_type[terrain.terrain_types] * num_rows + terrain.terrain_levels
-      obs, _, dones, _ = wrapped.step(policy(obs))
-      done = dones.bool()
-      policy.reset(done)  # a recurrent actor must forget the finished episode
-      if not done.any():
-        continue
-      ids = done.nonzero(as_tuple=False).squeeze(-1)
-      c = cell[ids]
-      # Crossing does not end an episode, so success comes from the tracker's
-      # record; a robot can cross and still fall later, counting as both.
-      n_ep.index_add_(0, c, torch.ones_like(c, dtype=torch.float32))
-      prog.index_add_(0, c, tracker.last_frac[ids])
-      succ.index_add_(0, c, tracker.last_success[ids].float())
-      fell.index_add_(0, c, term.terminated[ids].float())
-
-  def mean(xs: list[float]) -> float | None:
-    return statistics.mean(xs) if xs else None
-
-  shape = (len(types), num_rows)
-  n_ep, prog, succ, fell = (t.view(shape).cpu() for t in (n_ep, prog, succ, fell))
-  widths = tracker.row_widths.cpu().tolist()
-  per_bend: dict[str, dict] = {}
-  all_cells: list[dict] = []
-  for t, name in enumerate(types):
-    per_width = []
-    for r in range(num_rows):
-      k = float(n_ep[t, r])
-      entry: dict = {"width_m": widths[r], "n_episodes": k}
-      if k > 0:
-        entry["progress_frac"] = float(prog[t, r]) / k
-        entry["success_rate"] = float(succ[t, r]) / k
-        entry["fall_rate"] = float(fell[t, r]) / k
-      per_width.append(entry)
-    valid = [e for e in per_width if e["n_episodes"] > 0]
-    all_cells += valid
-    crossed = [e["width_m"] for e in valid if e["success_rate"] >= 0.5]
-    per_bend[name] = {
-      "role": BEAM_ROLES[name].role,
-      "progress_frac": mean([e["progress_frac"] for e in valid]),
-      "success_rate": mean([e["success_rate"] for e in valid]),
-      "fall_rate": mean([e["fall_rate"] for e in valid]),
-      "critical_width_m": min(crossed) if crossed else None,
-      "per_width": per_width,
-    }
-
-  metrics = {
-    BEAM_PRIMARY_METRIC: mean([e["progress_frac"] for e in all_cells]),
-    "success_rate": mean([e["success_rate"] for e in all_cells]),
-    "fall_rate": mean([e["fall_rate"] for e in all_cells]),
-    "n_episodes": float(n_ep.sum()),
-  }
-  return {"metrics": metrics, "per_bend": per_bend}
-
-
-def _print_beam(out: dict) -> None:
-  def fmt(v, spec: str) -> str:
-    return "-" if v is None else format(v, spec)
-
-  for k, v in out["metrics"].items():
-    print(f"  {k:20s} {fmt(v, '.4f')}")
-  print(
-    f"\n  {'bend':15s} {'role':14s} {'progress':>8s} {'success':>8s} "
-    f"{'fall':>7s} {'crit_w':>7s}"
-  )
-  for name, b in out["per_bend"].items():
-    print(
-      f"  {name:15s} {b['role']:14s} {fmt(b['progress_frac'], '8.3f')} "
-      f"{fmt(b['success_rate'], '8.2%')} {fmt(b['fall_rate'], '7.2%')} "
-      f"{fmt(b['critical_width_m'], '7.3f')}"
-    )
-
-
 def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--task", required=True)
@@ -190,15 +83,6 @@ def main() -> None:
     "mjlab_commit": MJLAB_COMMIT,
   }
   dest = Path(args.results_root) / rl_cfg.experiment_name
-
-  from sendg1.common.beam.terrain import BEAM_PATH_PATCH
-
-  if env.scene.terrain is not None and BEAM_PATH_PATCH in env.scene.terrain.flat_patches:
-    out = {**header, **_evaluate_beam(env, wrapped, policy, protocol)}
-    env.close()
-    _write(out, dest, args.seed)
-    _print_beam(out)
-    return
 
   # Pin one command per env, drawn from the protocol grid by env index. Every
   # condition therefore sees the same command on the same env index, with the

@@ -2,7 +2,7 @@
 """Render the terrain curriculum: whole grid plus one tile per sub-terrain.
 
     python scripts/render_terrain.py
-    python scripts/render_terrain.py --terrain-set beam --prefix beam --row 0
+    python scripts/render_terrain.py --terrain-set beam --prefix beam --row 3
 
 Writes media/terrain_grid.png and media/terrain_<name>.png. Offscreen via EGL,
 so it works headless.
@@ -61,10 +61,16 @@ def main() -> None:
   device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
   if args.terrain_set == "beam":
-    from sendg1.common.beam.terrain import BEAM_ROLES, bend_type, make_beam_terrain_cfg
+    from types import SimpleNamespace
 
-    gen = make_beam_terrain_cfg(num_rows=args.rows)
-    roles = {nm: BEAM_ROLES[bend_type(nm)] for nm in gen.sub_terrains}
+    from sendg1.common.beam.terrain import make_beam_terrain_cfg
+
+    # Rows are the beam task's width levels; the curved set includes the
+    # straight columns.
+    gen = make_beam_terrain_cfg(curves=True)
+    args.rows = gen.num_rows
+    kind = lambda nm: next((k for k in ("bend", "turn") if nm.endswith(k)), "straight")  # noqa: E731
+    roles = {nm: SimpleNamespace(role=kind(nm)) for nm in gen.sub_terrains}
   else:
     gen = make_rough_terrain_cfg(num_rows=args.rows)
     roles = TERRAIN_ROLES
@@ -114,7 +120,9 @@ def main() -> None:
     if args.terrain_set == "beam":
       # The spawn origin is the platform at one end; frame the whole beam, and
       # look down steeply enough that the bends read.
-      c.lookat[:] = entity.flat_patches["beam_path"][row, col].mean(dim=0).cpu().numpy()
+      from sendg1.common.beam.terrain import BEAM_PATH_PATCH
+
+      c.lookat[:] = entity.flat_patches[BEAM_PATH_PATCH][row, col].mean(dim=0).cpu().numpy()
       c.elevation = -70.0
     iio.imwrite(out / f"{args.prefix}_{nm}.png", _render(model, data, c, 640, 440))
   print(f"[terrain] wrote {len(names)} close-ups (row {row}/{args.rows - 1})")

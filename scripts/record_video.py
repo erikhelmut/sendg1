@@ -175,7 +175,7 @@ def main() -> None:
   runner.load(str(ckpt), load_cfg={"actor": True}, strict=True, map_location=device)
   policy = runner.get_inference_policy(device=device)
 
-  # Tasks without a command (beam walking) just run for the schedule's length.
+  # Tasks without a velocity command just run for the schedule's length.
   cmd_term = env.command_manager.get_term("twist") if twist_cfg is not None else None
   schedule = SCHEDULE_SHORT if args.short else SCHEDULE
   if cmd_term is None:

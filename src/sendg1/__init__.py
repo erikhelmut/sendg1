@@ -10,7 +10,7 @@ organised so that (task x observation-set x seed) is the unit of work.
 
 import os
 
-# Recurrent PPO (the beam task) splits every rollout into episode fragments, so
+# Recurrent PPO (the beam tasks) splits every rollout into episode fragments, so
 # tensor shapes change on every update. Under PyTorch's default CUDA caching
 # allocator that fragments the cache: measured on the beam task, reserved memory
 # grew from 2.1 to 9.3 GiB in 30 iterations while peak allocation stayed near

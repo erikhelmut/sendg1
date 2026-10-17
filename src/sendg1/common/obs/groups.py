@@ -6,10 +6,9 @@ step regardless of whether a network consumes it.
 
 Group vocabulary
 ----------------
-``proprio``       Deployable proprioception. Actor and critic. 96-dim; 93 on
-                  the beam task, which has no command. On the box-pushing task
-                  it also carries the task's ``perceived`` terms (box pose,
-                  target): 100-dim. The name is kept so every obs set maps the
+``proprio``       Deployable proprioception. Actor and critic. 96-dim. On the
+                  box-pushing task it also carries the task's ``perceived``
+                  terms (box pose, target): 100-dim. The name is kept so every obs set maps the
                   actor exactly as on the other tasks.
 ``privileged``    Simulation state, critic only, permanently. Includes the
                   *idealised* foot contact terms: the critic's contact
@@ -51,14 +50,6 @@ CONTACT_IDEAL_TERMS: tuple[str, ...] = (
 
 TACTILE_ARRAY_TERMS: tuple[str, ...] = ("tactile_array",)
 
-BEAM_PRIVILEGED_TERMS: tuple[str, ...] = (
-  "beam_progress",
-  "beam_lateral_offset",
-  "beam_heading_error",
-  "beam_width",
-)
-
-
 BOX_PUSH_PERCEIVED_TERMS: tuple[str, ...] = ("pilot_command",)
 """What the box-push actor gets beyond proprioception: the scripted pilot's
 walking command. Three dims, like the velocity tasks' operator command."""
@@ -88,7 +79,6 @@ def build_groups(
   *,
   has_terrain_scan: bool,
   with_command: bool = True,
-  beam_privileged: bool = False,
   box_push: bool = False,
   tactile_aggregates: bool = False,
 ) -> dict[str, ObservationGroupCfg]:
@@ -97,17 +87,16 @@ def build_groups(
   Args:
     obs_set: key into :data:`OBS_SETS`.
     has_terrain_scan: whether the scene carries the ``terrain_scan`` raycast
-      sensor. The rough and beam tasks do, and the height scan is critic only --
+      sensor. The rough task does, and the height scan is critic only --
       the actor is blind everywhere.
     with_command: include the operator command in ``proprio``. False for tasks
-      that give the robot no command (beam walking).
-    beam_privileged: add the ground-truth beam terms to the critic.
+      that give the robot no velocity command (box pushing).
     box_push: add the box-pushing task's perceived terms to ``proprio`` and its
       privileged terms to the critic. Implies ``tactile_aggregates``.
     tactile_aggregates: add the per-foot aggregate channels to the
       ``tactile_array`` group. On for box pushing and for the low level trained
       for it, so one policy fits both; off elsewhere, which keeps the flat,
-      rough and beam tactile actors at the size their results were measured at.
+      and rough tactile actors at the size their results were measured at.
   """
   if obs_set not in OBS_SETS:
     raise KeyError(f"unknown obs_set {obs_set!r}; known: {sorted(OBS_SETS)}")
@@ -123,8 +112,6 @@ def build_groups(
   privileged = PRIVILEGED_TERMS_FLAT
   if has_terrain_scan:
     privileged = privileged + ("height_scan",)
-  if beam_privileged:
-    privileged = privileged + BEAM_PRIVILEGED_TERMS
   if box_push:
     proprio = proprio + BOX_PUSH_PERCEIVED_TERMS
     privileged = privileged + BOX_PUSH_PRIVILEGED_TERMS

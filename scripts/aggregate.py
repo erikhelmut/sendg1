@@ -33,8 +33,8 @@ def main() -> None:
   skipped: set[str] = set()
   for path in sorted(root.rglob("seed*.json")):
     data = json.loads(path.read_text())
-    # Task families declare different metrics (velocity: lin_vel_error, beam:
-    # progress_frac); a file without the requested one belongs to another family.
+    # Task families declare different metrics; a file without the requested
+    # one belongs to another family.
     if args.metric not in data["metrics"]:
       skipped.add(path.parent.name)
       continue

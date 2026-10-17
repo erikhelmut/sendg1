@@ -21,8 +21,6 @@ BASE_ACTOR_DIM = {
   "Sendg1-Velocity-Rough-G1": 96,
   # The FALCON-style low level: flat velocity plus a hand-force curriculum.
   "Sendg1-VelocityPush-G1": 96,
-  # No command: the beam task tells the actor nothing about where to go.
-  "Sendg1-Beam-G1": 93,
   # The velocity actor exactly: proprioception + a 3-dim walking command,
   # here the scripted pilot's rather than the operator's.
   "Sendg1-BoxPush-G1": 96,
@@ -40,7 +38,7 @@ EXTRA_ACTOR_DIM = {
 BOX_PUSH_TACTILE_EXTRA = 12
 """The per-foot aggregate channels (normal, shear x/y, CoP x/y, shear/normal
 ratio). Carried by box pushing and by the low level trained for it, so one
-policy fits both; not by flat/rough/beam, whose results predate them."""
+policy fits both; not by flat/rough, whose results predate them."""
 
 AGGREGATE_BASES = ("Sendg1-BoxPush", "Sendg1-VelocityPush")
 
