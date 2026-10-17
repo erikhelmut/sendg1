@@ -24,8 +24,8 @@ ENTRY_POINTS = [
   "from sendg1.eval.protocol import EvalProtocol",
   "from sendg1.fingerprint import fingerprint",
   "from sendg1.tasks.velocity.env_cfg import make_g1_velocity_env_cfg",
-  "from sendg1.common.beam.mdp import BeamTracker",
-  "from sendg1.tasks.beam.env_cfg import make_g1_beam_env_cfg",
+  "from sendg1.common.beam.mdp import BeamEpisode",
+  "from sendg1.tasks.beam.env_cfg import make_beam_env_cfg",
 ]
 
 

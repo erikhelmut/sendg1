@@ -28,15 +28,15 @@ not, and it is the channel least likely to survive contact with real hardware.
 Both feet in one frame. The slipper layout is mirror-symmetric in y, so the
 right foot's taxels are re-indexed into the left foot's mirror image and its
 y features flipped: for both feet +y is lateral. One layer of weights (or one
-encoder, if the student grows one) then serves both feet.
+encoder, if the actor grows one) then serves both feet.
 
 Why hand-designed features rather than a learned encoder: the derived terms are
 physical quantities that are invariant or graceful under the sensor faults we
 randomise (gain, dead taxels, noise), and they are what makes the feature
-vector small enough for a GRU student. The per-taxel shape is kept alongside,
+vector small enough for a GRU actor. The per-taxel shape is kept alongside,
 so a network can still find patterns the derived terms miss.
 
-Sensor model (``real`` group only; the privileged copy is noise-free)
+Sensor model (actor only; the critic's copy is noise-free)
 ---------------------------------------------------------------------
 Per episode: a per-foot gain, a per-taxel gain, dead taxels (read 0). Per step:
 additive Gaussian noise on each taxel, and a frame drop that holds a foot's
@@ -195,7 +195,7 @@ def cop_offset_from_support(env: ManagerBasedRlEnv, params: TactileParams) -> to
 class TactileNoiseState:
   """Per-env sensor faults, resampled at reset by ``reset_tactile_noise``."""
 
-  _ATTR = "_sendg1_beam_ts_tactile_noise"
+  _ATTR = "_sendg1_beam_tactile_noise"
 
   def __init__(self, env: ManagerBasedRlEnv, layout: TaxelLayout) -> None:
     n, t, dev = env.num_envs, layout.num_taxels, env.device

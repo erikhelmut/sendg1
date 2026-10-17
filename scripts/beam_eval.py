@@ -1,13 +1,15 @@
 #!/usr/bin/env python
-"""Evaluate a beam teacher or student policy per beam width.
+"""Evaluate a beam policy per beam width.
 
-    python scripts/beam_ts_eval.py --policy teacher --checkpoint runs/.../model_14999.pt
-    python scripts/beam_ts_eval.py --policy student --checkpoint runs/.../model_2999.pt
+    python scripts/beam_eval.py --checkpoint runs/beam_e2e/<run>/model_14999.pt --out results/beam/e2e_vN.json
+    python scripts/beam_eval.py --task G1-Beam-E2E-Curved --checkpoint <pt> --out results/beam/<name>_curved.json
 
-Protocol (fixed, identical for teacher and student)
+Protocol (fixed)
 ---------------------------------------------------
-- Every width level gets ``--envs-per-level`` envs, spread over the four beam
-  heights; each env runs ``--episodes`` episodes. No curriculum.
+- Every width level gets ``--envs-per-level`` envs, spread over the terrain
+  columns (four beam heights; with ``G1-Beam-E2E-Curved`` also bend and turn
+  columns, reported separately per path kind); each env runs ``--episodes``
+  episodes. No curriculum.
 - Every episode starts on the START PLATFORM, whatever the width, with a
   constant forward command ``--speed`` (default 0.3 m/s), 20 s. Success =
   reaching the end platform with no early termination.
@@ -18,7 +20,7 @@ Protocol (fixed, identical for teacher and student)
   clipped to [0, beam length]), mean |v_cmd - v_along| while walking, and which
   termination fired.
 
-Writes ``results/beam_ts/<policy>_<tag>.json``.
+Writes ``--out`` (default ``results/beam/eval[_<tag>].json``).
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ def build_env(args, task: str):
   from mjlab.managers.curriculum_manager import CurriculumTermCfg
   from mjlab.tasks.registry import load_env_cfg
 
-  from sendg1.common.beam_ts.terrain import BEAM_WIDTHS
+  from sendg1.common.beam.terrain import BEAM_WIDTHS
 
   cfg = load_env_cfg(task)
   n_levels = len(BEAM_WIDTHS)
@@ -62,7 +64,11 @@ def build_env(args, task: str):
   lv = torch.arange(env.num_envs, device=env.device) % n_levels
   t.terrain_levels[:] = lv
   t.env_origins[:] = t.terrain_origins[lv, t.terrain_types]
-  env._beam_ts_records = []  # type: ignore[attr-defined]
+  env._beam_records = []  # type: ignore[attr-defined]
+  subs = cfg.scene.terrain.terrain_generator.sub_terrains
+  env._beam_column_kind = [  # type: ignore[attr-defined]
+    "straight" if c.path_kind == "straight" else f"turn<={c.max_turn_deg:.0f}deg" for c in subs.values()
+  ]
   return env
 
 
@@ -71,7 +77,7 @@ def _record_episodes(env, env_ids):
   episode state, so it sees each finished episode once."""
   import torch
 
-  from sendg1.common.beam_ts.mdp import BeamEpisode
+  from sendg1.common.beam.mdp import BeamEpisode
 
   if env.common_step_counter == 0 or env_ids is None or len(env_ids) == 0:
     return {}
@@ -89,12 +95,13 @@ def _record_episodes(env, env_ids):
     fired = [n for n in tm.active_terms if n != "time_out" and bool(tm.get_term(n)[env_ids[i]])]
     reasons.append(fired[0] if fired else ("success" if bool(reached[i]) else "time_out"))
   for i, e in enumerate(env_ids.tolist()):
-    env._beam_ts_records.append(
+    env._beam_records.append(
       {
         "env": e,
         "level": int(st.level[i]),
         "width": float(ep.geo.widths[st.level[i]]),
         "beam_height": float(ep.geo.top_z()[e]),
+        "path": env._beam_column_kind[int(ep.geo.types[e])],
         "success": bool(reached[i] and not st.terminated[i]),
         "traversed_m": float(traversed[i]),
         "vel_err": float(st.vel_err[i]),
@@ -106,21 +113,15 @@ def _record_episodes(env, env_ids):
 
 
 def load_policy(args, env):
-  import torch
+  """Actor only, so a checkpoint loads into either beam task (their critics
+  differ by the curved task's ``beam_ahead``)."""
   from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
   from mjlab.tasks.registry import load_rl_cfg
 
-  from sendg1.rl.dagger import DistillationRunner
-
   rl_cfg = load_rl_cfg(args.task)
   wrapped = RslRlVecEnvWrapper(env, clip_actions=rl_cfg.clip_actions)
-  if args.policy == "teacher":
-    runner = MjlabOnPolicyRunner(wrapped, asdict(rl_cfg), device="cuda:0")
-    runner.load(args.checkpoint, load_cfg={"actor": True}, strict=True, map_location="cuda:0")
-  else:
-    runner = DistillationRunner(wrapped, asdict(rl_cfg), device="cuda:0")
-    loaded = torch.load(args.checkpoint, map_location="cuda:0", weights_only=False)
-    runner.alg.load(loaded, {"student": True, "teacher": True}, strict=True)
+  runner = MjlabOnPolicyRunner(wrapped, asdict(rl_cfg), device="cuda:0")
+  runner.load(args.checkpoint, load_cfg={"actor": True}, strict=True, map_location="cuda:0")
   return wrapped, runner.get_inference_policy(device="cuda:0")
 
 
@@ -128,6 +129,17 @@ def summarise(records: list[dict]) -> dict:
   by_w: dict[float, list[dict]] = defaultdict(list)
   for r in records:
     by_w[round(r["width"], 3)].append(r)
+  return _per_width(by_w)
+
+
+def summarise_by_path(records: list[dict]) -> dict:
+  by_path: dict[str, list[dict]] = defaultdict(list)
+  for r in records:
+    by_path[r["path"]].append(r)
+  return {p: summarise(rs) for p, rs in sorted(by_path.items())}
+
+
+def _per_width(by_w: dict[float, list[dict]]) -> dict:
   out = {}
   for w in sorted(by_w, reverse=True):
     rs = by_w[w]
@@ -148,13 +160,12 @@ def summarise(records: list[dict]) -> dict:
 
 def main() -> None:
   ap = argparse.ArgumentParser()
-  ap.add_argument("--policy", choices=["teacher", "student"], required=True)
   ap.add_argument("--checkpoint", required=True)
   ap.add_argument("--envs-per-level", type=int, default=128)
   ap.add_argument("--episodes", type=int, default=2)
   ap.add_argument("--speed", type=float, default=0.3)
   ap.add_argument("--pushes", action="store_true")
-  ap.add_argument("--task", default=None, help="default: G1-Beam-Teacher / G1-Beam-Student")
+  ap.add_argument("--task", default="G1-Beam-E2E")
   ap.add_argument("--start-lateral", type=float, default=0.08, help="platform start offset (+/- m)")
   ap.add_argument("--start-yaw", type=float, default=0.08, help="start yaw offset (+/- rad)")
   ap.add_argument("--seed", type=int, default=12345)
@@ -165,13 +176,10 @@ def main() -> None:
   import torch
 
   import sendg1.tasks  # noqa: F401
-  from sendg1.tasks.beam_ts import STUDENT_TASK, TEACHER_TASK
-
-  args.task = args.task or (TEACHER_TASK if args.policy == "teacher" else STUDENT_TASK)
   env = build_env(args, args.task)
   wrapped, policy = load_policy(args, env)
   obs, _ = wrapped.reset()
-  env._beam_ts_records.clear()
+  env._beam_records.clear()
   # Run until every env has finished ``episodes`` episodes (envs that fail fast
   # must not fill the quota for slow ones).
   done_per_env = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
@@ -182,16 +190,16 @@ def main() -> None:
       done_per_env += dones.long()
   # Keep exactly the first ``episodes`` per env, so every width is weighted the same.
   kept, seen = [], defaultdict(int)
-  for r in env._beam_ts_records:
+  for r in env._beam_records:
     if seen[r["env"]] < args.episodes:
       kept.append(r)
       seen[r["env"]] += 1
   summary = summarise(kept)
-  out = Path(args.out or REPO / "results" / "beam_ts" / f"{args.policy}{('_' + args.tag) if args.tag else ''}.json")
+  by_path = summarise_by_path(kept)
+  out = Path(args.out or REPO / "results" / "beam" / f"eval{('_' + args.tag) if args.tag else ''}.json")
   out.parent.mkdir(parents=True, exist_ok=True)
   json.dump(
     {
-      "policy": args.policy,
       "task": args.task,
       "checkpoint": str(Path(args.checkpoint).resolve()),
       "protocol": {
@@ -205,6 +213,7 @@ def main() -> None:
         "start_yaw": args.start_yaw,
       },
       "per_width": summary,
+      "per_path": by_path,
       "episodes": kept,
     },
     open(out, "w"),
@@ -216,6 +225,9 @@ def main() -> None:
       f"  width {w}  n={s['n']:4d}  success {s['success_rate']:.3f}  "
       f"traversed {s['traversed_m']:.2f} m  vel_err {s['vel_err']:.3f}  {s['ends']}"
     )
+  if len(by_path) > 1:
+    for p, per_w in by_path.items():
+      print(f"  {p:14s} " + " ".join(f"{w}:{s['success_rate']:.2f}" for w, s in per_w.items()))
   env.close()
 
 

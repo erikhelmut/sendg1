@@ -1,7 +1,7 @@
 """A recurrent actor that is left-right symmetric by construction.
 
 rsl_rl refuses symmetry augmentation for recurrent policies, and without it
-the beam teachers settled into lopsided gaits. Instead of augmenting data,
+the early beam policies settled into lopsided gaits. Instead of augmenting data,
 this actor runs one GRU on two streams, the observation and its mirror image,
 each with its own hidden state, and averages:
 
@@ -15,7 +15,7 @@ so rsl_rl's rollout storage and recurrent mini-batches handle it like a plain
 GRU's. The observation normaliser is updated with both streams, which keeps
 its statistics mirror-symmetric.
 
-The mirror maps come from the env (``sendg1.common.beam_ts.symmetry``) and are
+The mirror maps come from the env (``sendg1.common.beam.symmetry``) and are
 registered by a startup event (``mdp.register_actor_mirror``), because rsl_rl
 builds models from tensors only.
 """

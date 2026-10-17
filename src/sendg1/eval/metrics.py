@@ -9,17 +9,6 @@ degenerates into a search for a metric where tactile wins. Declared here:
 
 Reporting all of them is fine. Promoting a secondary to primary after seeing
 results is not.
-
-Beam task, declared before its first training run:
-
-  primary   : progress fraction -- how far along the beam a foot landed before
-              the robot fell or timed out, in [0, 1], higher is better. Measured
-              at footholds, not the base, so toppling forward earns nothing.
-              Averaged within each (bend type, width) cell first, then over
-              cells, so hard cells cannot dominate by failing fast and
-              producing more episodes.
-  secondary : success rate (>= 95% of the beam), fall rate, and per bend type
-              the critical width -- the narrowest width with >= 50% success.
 """
 
 from __future__ import annotations
@@ -29,11 +18,8 @@ from dataclasses import asdict, dataclass, field
 import torch
 
 PRIMARY_METRIC = "lin_vel_error"
-BEAM_PRIMARY_METRIC = "progress_frac"
 LOWER_IS_BETTER = {
-  "progress_frac": False,
   "success_rate": False,
-  "critical_width_m": True,
   "lin_vel_error": True,
   "ang_vel_error": True,
   "fall_rate": True,

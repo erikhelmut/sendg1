@@ -1,141 +1,161 @@
-"""Beam-walking environment config for the blind Unitree G1.
+"""Beam walking env config: ``G1-Beam-E2E`` (straight beams) and
+``G1-Beam-E2E-Curved`` (straight and bent beams).
 
-The robot starts on a 0.6 m platform facing a narrow beam over a pit and must
-get as far along it as it can. The beam bends at random joints (how sharply is
-set by the terrain column) and narrows with the curriculum (by row); see
-``sendg1/common/beam/terrain.py``.
+Plain PPO: a GRU actor on what the robot measures (``actor`` group: IMU,
+joints, previous action, forward command, tactile contact map) and an MLP
+critic on that plus simulation ground truth (``critic`` group).
+``tasks/beam/__init__.py`` refuses to register an actor group with anything
+but ``onboard`` / ``sensor`` terms.
 
-There is NO command. Nothing tells the actor where the beam goes, so the only
-way to follow a bend is to sense where the support is -- the capability the
-tactile study is about. Everything the task knows about the beam (progress,
-offset, width) is ground truth and reaches only rewards, terminations, the
-curriculum and the critic.
+Every reward term, weight and termination is in this file, in one table each.
 """
 
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
-from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.envs.mdp import dr
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.observation_manager import ObservationGroupCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
+from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
-from sendg1.common.beam import mdp as beam_mdp
+from sendg1.common.beam import mdp
+from sendg1.common.beam.terms import ACTOR_TERMS, PRIVILEGED_TERMS, TERMS
 from sendg1.common.beam.terrain import make_beam_terrain_cfg
-from sendg1.common.events import build_events
-from sendg1.common.obs.groups import build_groups
-from sendg1.common.obs.obs_sets import uses_tactile_array
-from sendg1.common.rewards import POSE_STD_WALKING, build_rewards
+from sendg1.common.rewards import POSE_STD_WALKING
 from sendg1.common.robots.g1 import (
-  DofSet,
+  G1_FOOT_GEOMS,
   G1_FOOT_SITES,
   G1_TORSO_BODY,
-  actuator_patterns,
   get_g1_cfg,
   resolve_action_scale,
 )
-from sendg1.common.sensors import (
-  feet_ground_contact_sensor,
-  foot_height_sensor,
-  self_collision_sensor,
-  terrain_scan_sensor,
-)
+from sendg1.common.sensors import feet_ground_contact_sensor, self_collision_sensor
 from sendg1.common.tactile.sensing import tactile_scene_sensors
 
-DEFAULT_NUM_ENVS = 2048
-"""Measured on an RTX 5070 (12 GB): 2,048 envs use 2.8 GiB at 86k steps/s;
-4,096 use 6.3 GiB at 97k steps/s -- 13% more throughput for twice the batch and
-the memory. Retune with scripts/tune_num_envs.py."""
+DEFAULT_NUM_ENVS = 4096
+EPISODE_S = 20.0
+MAX_FORWARD_SPEED = 0.3
+"""A careful, probing step on an unseen beam is easier to learn at walking
+pace, and evaluation runs at 0.3 m/s anyway."""
 
-POSE_STD_SCALE = 3.0
-"""Posture tolerances are the flat-ground walking ones times this.
+SPAWN = {
+  "platform_from_level": 0,
+  "platform_arc_range": (-0.3, 0.2),
+  "platform_lateral_range": (-0.15, 0.15),
+  "yaw_range": (-0.25, 0.25),
+}
+"""Every episode starts on the start platform, 0.3-0.8 m before the beam, up to
+15 cm off the centreline and 14 deg off heading. The actor never sees where the
+beam is, so it has to find and follow it by touch."""
 
-mjlab's posture reward is exp(-mean(err^2 / std^2)), which is flat zero once a
-gait strays far from the default pose -- it then shapes nothing. A 3,000-iteration
-run learned a deep lunging gait (pelvis 0.47 m above the beam against ~0.73 m
-standing) on which the walking-std posture reward had median 0.000. Measured on
-that gait, x2 still gives only 0.08; x3 gives 0.32, a usable gradient back
-toward the default pose. It also covers the hip adduction a narrow stance needs,
-which previously had its own override."""
+CENTRELINE_SIGMA = 0.035
+"""Fixed stance-foot / CoM centreline reward width (m), all levels. Run 2
+stalled at mean level ~2.2 and shuffled with its feet ~10-17 cm apart: the
+level-coupled widths (``mdp.CENTRELINE_SIGMA``, 12 cm at level 0) never asked
+for more. A foot (and the CoM) now pays only over the beam, which the actor can
+only find by touch."""
+SUCCESS_BEAM_M = 1.0
+"""Metres of beam that promote a walking episode at any pace."""
+STATE_BANK = Path(__file__).resolve().parents[4] / "results" / "beam" / "v4_beam_states.pt"
+"""Mid-beam states recorded from an earlier privileged policy that walked
+heel-to-toe on 0.05-0.10 m beams (``mdp.spawn_from_bank``)."""
+BANK_SHARE = 0.25
+"""Share of resets restarted mid-beam from the bank."""
+SHOULDER_ROLL_STD = 1.2
+"""Posture tolerance (rad) of shoulder roll: arms may go out sideways, as a
+person balances. Shoulder pitch / yaw, elbows and wrists keep their pull, which
+rules out odd arm configurations; self-collisions are still penalised."""
 
 POSE_STD_BEAM: dict[str, float] = {
-  pattern: POSE_STD_SCALE * std for pattern, std in POSE_STD_WALKING.items()
+  **{
+    k: (v if any(j in k for j in ("hip_pitch", "knee", "ankle_pitch")) else 1.5 * v)
+    for k, v in POSE_STD_WALKING.items()
+  },
+  r".*shoulder_roll.*": SHOULDER_ROLL_STD,
 }
-
-BASE_HEIGHT_TARGET = 0.70
-"""Base height above the beam top below which the base_height penalty applies.
-Just under the ~0.73 m of a relaxed stance, so normal knee bend costs nothing."""
-
-STEPS_PER_ITERATION = 48
-"""PPO rollout length (``num_steps_per_env``). 0.96 s at 50 Hz, about one gait
-cycle: truncated backpropagation through time has to span a probing step and
-what it revealed. Defined here because the penalty ramp is scheduled in env
-steps."""
-
-PENALTY_TERMS: tuple[str, ...] = (
-  "body_ang_vel",
-  "angular_momentum",
-  "dof_pos_limits",
-  "action_rate_l2",
-  "foot_clearance",
-  "self_collisions",
-  "base_height",
-)
-
-PENALTY_RAMP: tuple[tuple[int, float], ...] = tuple(
-  (300 * k, round(0.1 * (k + 1), 1)) for k in range(10)
-)
-"""(PPO iteration, fraction of full weight) for every term in PENALTY_TERMS:
-+10% every 300 iterations, full weight at iteration 2,700.
-
-At full weight a random policy (action std 1.0) pays ~8.7 per second alive in
-penalties -- action_rate_l2 alone ~7 -- against ~1.7 from the positive terms. On
-a 0.6 m platform the cheapest way to stop paying is to step off it, and two
-smoke runs learned exactly that: mean episode length fell from 51 to 34 steps
-in 25 iterations. So penalties start at 10%.
-
-The ramp is gradual because an earlier one jumped 10% -> 40% -> 100% at
-iterations 1,000 and 2,000, and in two runs each jump collapsed training (reward
-to -6, episodes from ~100 to 15 steps) before the policy recovered."""
+"""Walking tolerances x1.5 for the lateral/yaw joints a tandem stance needs,
+for standing and walking alike (mjlab's tight standing std, 0.05 rad, would
+punish exactly the posture the task requires). Sagittal leg joints keep the
+walking tolerance: at x1.5 an early policy settled into a deep crouch."""
+ARM_JOINTS = (".*shoulder.*", ".*elbow.*", ".*wrist.*")
+LEG_JOINTS = (".*hip.*", ".*knee.*", ".*ankle.*")
+ARM_POSE_STD: dict[str, float] = {
+  r".*shoulder_pitch.*": 0.3,
+  r".*shoulder_roll.*": SHOULDER_ROLL_STD,
+  r".*shoulder_yaw.*": 0.15,
+  r".*elbow.*": 0.3,
+  r".*wrist.*": 0.1,
+}
+"""Light pull toward the default arm pose: wrists held near neutral (an early
+policy bent them by ~60 deg for nothing), shoulder yaw moderately, elbows
+freer, shoulder roll nearly free so the arms can work as a balance pole."""
 
 
-def build_beam_rewards() -> dict[str, RewardTermCfg]:
-  """Progress along the beam, plus the velocity task's regularisers.
-
-  Velocity tracking is gone (there is no command), and so are the terms that
-  require a command to gate them (foot_swing_height, foot_slip) or were inert
-  anyway (air_time, soft_landing).
-
-  upright and posture keep their velocity-task weights, and the penalties are
-  ramped in (see PENALTY_RAMP). Both address one failure: before the robot has
-  made any progress these are its only positive rewards, and with the penalties
-  at full weight every living step was net-negative, so smoke runs learned to
-  step off the platform to end the episode. Standing still is countered by the
-  curriculum instead, which demotes an env that makes no progress to a wider,
-  nearly riskless beam.
-
-  Three terms counter the deep lunging gait a 3,000-iteration run converged to:
-  posture tolerances widened so the term keeps a gradient far from the default
-  pose (POSE_STD_SCALE), a base_height penalty against the crouch, and a lower
-  progress speed cap (0.4 m/s, was 0.6) so lunging forward pays less.
-  """
-  shared = build_rewards()
-  return {
-    "beam_progress": RewardTermCfg(
-      func=beam_mdp.beam_progress, weight=2.0, params={"max_speed": 0.4}
+def nonfoot_contact_sensor() -> ContactSensorCfg:
+  """Any robot body other than the two feet touching the terrain."""
+  return ContactSensorCfg(
+    name=mdp.NONFOOT_CONTACT_SENSOR,
+    primary=ContactMatch(
+      mode="body", pattern=r".*", entity="robot", exclude=(r".*_ankle_roll_link",)
     ),
-    "beam_success": RewardTermCfg(func=beam_mdp.beam_success_bonus, weight=20.0),
-    "beam_centreline": RewardTermCfg(func=beam_mdp.beam_centreline, weight=0.5),
+    secondary=ContactMatch(mode="body", pattern="terrain"),
+    fields=("found",),
+    reduce="maxforce",
+    num_slots=1,
+  )
+
+
+# ---------------------------------------------------------------------------
+# Reward table
+# ---------------------------------------------------------------------------
+
+
+def build_rewards() -> dict[str, RewardTermCfg]:
+  feet = SceneEntityCfg("robot", site_names=G1_FOOT_SITES)
+  return {
+    # -- task ------------------------------------------------------------------
+    # Forward progress with slack: a pause to feel for the beam only forgoes
+    # reward (exact speed tracking punished it).
+    "track_forward_progress": RewardTermCfg(func=mdp.track_forward_progress, weight=2.0),
+    "alive": RewardTermCfg(func=mdp.alive, weight=0.5),
+    "reach_end": RewardTermCfg(func=mdp.reach_end_bonus, weight=10.0),
+    # -- beam shaping ------------------------------------------------------------
+    "foot_centreline": RewardTermCfg(
+      func=mdp.stance_foot_centreline,
+      weight=1.0,
+      params={"sigmas": (CENTRELINE_SIGMA,)},
+    ),
+    "foot_yaw": RewardTermCfg(func=mdp.stance_foot_yaw, weight=0.5, params={"std": 0.25}),
+    "cop_centred": RewardTermCfg(func=mdp.cop_centred, weight=0.5, params={"std": 0.015}),
+    "com_over_beam": RewardTermCfg(
+      func=mdp.com_over_beam, weight=1.0, params={"sigmas": (CENTRELINE_SIGMA,)}
+    ),
+    "base_lateral_vel": RewardTermCfg(func=mdp.base_lateral_velocity, weight=-1.0),
+    "base_roll": RewardTermCfg(func=mdp.base_roll, weight=-2.0),
+    # -- gait shape -------------------------------------------------------------
+    "passing_step": RewardTermCfg(func=mdp.passing_step, weight=1.0),
+    "foot_flat": RewardTermCfg(func=mdp.stance_foot_flat, weight=1.0),
+    "swing_foot_speed": RewardTermCfg(func=mdp.swing_foot_speed, weight=-1.0),
+    "touchdown_force_rate": RewardTermCfg(func=mdp.touchdown_force_rate, weight=-5.0),
+    "arm_posture": RewardTermCfg(
+      func=mdp.pose_l2,
+      weight=-0.02,
+      params={"std": ARM_POSE_STD, "asset_cfg": SceneEntityCfg("robot", joint_names=ARM_JOINTS)},
+    ),
+    # -- posture (from the walking reward) -------------------------------------
     "upright": RewardTermCfg(
       func=vel_mdp.upright,
-      weight=1.0,
+      weight=0.5,
       params={
         "std": math.sqrt(0.2),
         "asset_cfg": SceneEntityCfg("robot", body_names=(G1_TORSO_BODY,)),
@@ -143,178 +163,268 @@ def build_beam_rewards() -> dict[str, RewardTermCfg]:
     ),
     "posture": RewardTermCfg(
       func=envs_mdp.posture,
-      weight=1.0,
+      weight=0.5,
+      params={"std": POSE_STD_BEAM, "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+    ),
+    "feet_air_time": RewardTermCfg(
+      func=vel_mdp.feet_air_time,
+      weight=0.25,
       params={
-        "std": POSE_STD_BEAM,
+        "sensor_name": mdp.FOOT_CONTACT_SENSOR,
+        "threshold_min": 0.05,
+        "threshold_max": 0.4,
+        "command_name": "twist",
+        "command_threshold": 0.05,
+      },
+    ),
+    # -- regularisers (from the walking reward) ----------------------------------
+    "action_rate_l2": RewardTermCfg(func=vel_mdp.action_rate_l2, weight=-0.05),
+    "leg_joint_acc": RewardTermCfg(
+      func=envs_mdp.joint_acc_l2,
+      weight=-1e-6,
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=LEG_JOINTS)},
+    ),
+    "arm_joint_vel": RewardTermCfg(
+      func=envs_mdp.joint_vel_l2,
+      weight=-0.02,
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=ARM_JOINTS)},
+    ),
+    "joint_torques_l2": RewardTermCfg(func=envs_mdp.joint_torques_l2, weight=-1e-5),
+    "dof_pos_limits": RewardTermCfg(func=vel_mdp.joint_pos_limits, weight=-1.0),
+    "body_ang_vel": RewardTermCfg(
+      func=vel_mdp.body_angular_velocity_penalty,
+      weight=-0.05,
+      params={"asset_cfg": SceneEntityCfg("robot", body_names=(G1_TORSO_BODY,))},
+    ),
+    "angular_momentum": RewardTermCfg(
+      func=vel_mdp.angular_momentum_penalty,
+      weight=-0.02,
+      params={"sensor_name": "robot/root_angmom"},
+    ),
+    "foot_slip": RewardTermCfg(
+      func=vel_mdp.feet_slip,
+      weight=-0.1,
+      params={
+        "sensor_name": mdp.FOOT_CONTACT_SENSOR,
+        "command_name": "twist",
+        "command_threshold": 0.05,
+        "asset_cfg": feet,
+      },
+    ),
+    "self_collisions": RewardTermCfg(
+      func=vel_mdp.self_collision_cost,
+      weight=-1.0,
+      params={"sensor_name": "self_collision", "force_threshold": 10.0},
+    ),
+    # -- touch: step onto an unseen beam lightly, feel, then commit weight -------
+    "load_off_support": RewardTermCfg(func=mdp.load_off_support, weight=-1.0),
+    "early_contact_overload": RewardTermCfg(func=mdp.early_contact_overload, weight=-3.0),
+    # One-off -2 on an early termination (weights are scaled by the 0.02 s
+    # step). Without it, the random initial policy's regulariser costs made
+    # falling over at once the best return and episodes collapsed to 7 steps.
+    "termination": RewardTermCfg(func=envs_mdp.is_terminated, weight=-100.0),
+    # Heel-to-toe, paid per metre gained; cheaper forms were farmed (see
+    # mdp.feet_in_line).
+    "feet_in_line": RewardTermCfg(func=mdp.feet_in_line, weight=3.0),
+  }
+
+
+# ---------------------------------------------------------------------------
+# Terminations
+# ---------------------------------------------------------------------------
+
+
+def build_terminations() -> dict[str, TerminationTermCfg]:
+  return {
+    "time_out": TerminationTermCfg(func=vel_mdp.time_out, time_out=True),
+    "nonfoot_contact": TerminationTermCfg(
+      func=vel_mdp.illegal_contact, params={"sensor_name": mdp.NONFOOT_CONTACT_SENSOR}
+    ),
+    "foot_off_beam": TerminationTermCfg(func=mdp.foot_off_support),
+    "base_too_low": TerminationTermCfg(func=mdp.base_too_low, params={"min_height": 0.5}),
+    "tilt": TerminationTermCfg(
+      func=vel_mdp.bad_orientation, params={"limit_angle": math.radians(40.0)}
+    ),
+    "nan_detection": TerminationTermCfg(func=envs_mdp.nan_detection),
+  }
+
+
+# ---------------------------------------------------------------------------
+# Events and domain randomisation
+# ---------------------------------------------------------------------------
+
+
+def build_events() -> dict[str, EventTermCfg]:
+  robot = SceneEntityCfg("robot")
+  foot_geoms = SceneEntityCfg("robot", geom_names=G1_FOOT_GEOMS)
+  return {
+    # -- reset -----------------------------------------------------------------
+    "spawn": EventTermCfg(func=mdp.spawn_on_beam, mode="reset", params=dict(SPAWN)),
+    "reset_joints": EventTermCfg(
+      func=envs_mdp.reset_joints_by_offset,
+      mode="reset",
+      params={
+        "position_range": (-0.03, 0.03),
+        "velocity_range": (0.0, 0.0),
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
       },
     ),
-    "body_ang_vel": shared["body_ang_vel"],
-    "angular_momentum": shared["angular_momentum"],
-    "dof_pos_limits": shared["dof_pos_limits"],
-    "action_rate_l2": shared["action_rate_l2"],
-    "foot_clearance": RewardTermCfg(
-      func=vel_mdp.feet_clearance,
-      weight=-2.0,
+    "tactile_faults": EventTermCfg(func=mdp.reset_tactile_noise, mode="reset"),
+    # Reference-state initialisation: a share of episodes restarts mid-beam in
+    # a heel-to-toe stance that fits a narrow beam. Training only.
+    "spawn_from_bank": EventTermCfg(
+      func=mdp.spawn_from_bank,
+      mode="reset",
+      params={"bank_path": str(STATE_BANK), "share": BANK_SHARE},
+    ),
+    # -- interval --------------------------------------------------------------
+    "push": EventTermCfg(
+      func=mdp.push_by_level,
+      mode="interval",
+      interval_range_s=(2.0, 4.0),
+      params={"max_velocity": {"x": 0.3, "y": 0.25, "roll": 0.3, "pitch": 0.3, "yaw": 0.3}},
+    ),
+    # -- startup DR --------------------------------------------------------------
+    "foot_friction": EventTermCfg(
+      mode="startup",
+      func=dr.geom_friction,
+      params={"asset_cfg": foot_geoms, "operation": "abs", "ranges": (0.4, 1.2), "shared_random": True},
+    ),
+    "foot_softness": EventTermCfg(
+      mode="startup",
+      func=mdp.foot_contact_softness,
+      params={"asset_cfg": foot_geoms, "timeconst_range": (0.02, 0.035)},
+    ),
+    "torso_mass": EventTermCfg(
+      mode="startup",
+      func=dr.body_mass,
       params={
-        "target_height": 0.1,
-        "height_sensor_name": "foot_height_scan",
-        # Ungated: with no command there is no "standing" to exempt. The cost is
-        # weighted by foot speed, so a still foot costs nothing anyway.
-        "command_name": None,
-        "asset_cfg": SceneEntityCfg("robot", site_names=G1_FOOT_SITES),
+        "asset_cfg": SceneEntityCfg("robot", body_names=(G1_TORSO_BODY,)),
+        "operation": "add",
+        "ranges": (-1.0, 3.0),
       },
     ),
-    "self_collisions": shared["self_collisions"],
-    "base_height": RewardTermCfg(
-      func=beam_mdp.base_height_shortfall,
-      # At the measured lunge (0.47 m) this costs ~1 per second at full weight;
-      # a relaxed stance costs nothing.
-      weight=-20.0,
-      params={"target": BASE_HEIGHT_TARGET},
+    "base_com": EventTermCfg(
+      mode="startup",
+      func=dr.body_com_offset,
+      params={
+        "asset_cfg": SceneEntityCfg("robot", body_names=(G1_TORSO_BODY,)),
+        "operation": "add",
+        "ranges": {0: (-0.025, 0.025), 1: (-0.025, 0.025), 2: (-0.03, 0.03)},
+      },
     ),
+    "motor_gains": EventTermCfg(
+      mode="startup",
+      func=dr.pd_gains,
+      params={"asset_cfg": robot, "kp_range": (0.9, 1.1), "kd_range": (0.9, 1.1)},
+    ),
+    "motor_strength": EventTermCfg(
+      mode="startup",
+      func=dr.effort_limits,
+      params={"asset_cfg": robot, "effort_limit_range": (0.85, 1.0)},
+    ),
+    "encoder_bias": EventTermCfg(
+      mode="startup",
+      func=dr.encoder_bias,
+      params={"asset_cfg": robot, "bias_range": (-0.015, 0.015)},
+    ),
+    # -- startup -----------------------------------------------------------------
+    "register_actor_mirror": EventTermCfg(func=mdp.register_actor_mirror, mode="startup"),
   }
 
 
-def build_beam_events() -> dict[str, EventTermCfg]:
-  events = build_events()
-  # Spawn at the platform centre facing the beam, with just enough noise that the
-  # first steps cannot be replayed open-loop.
-  events["reset_base"].params["pose_range"] = {
-    "x": (-0.05, 0.05),
-    "y": (-0.05, 0.05),
-    "z": (0.01, 0.05),
-    "yaw": (-math.radians(10.0), math.radians(10.0)),
-  }
-  # No pushes. The beam is the disturbance: on a 0.15 m beam a 0.5 m/s shove is
-  # an unrecoverable fall for any policy, which would floor the narrow rows for
-  # both conditions and hide exactly the effect being measured.
-  events.pop("push_robot")
-  events["reset_beam_tracker"] = EventTermCfg(
-    func=beam_mdp.reset_beam_tracker, mode="reset"
-  )
-  return events
+# ---------------------------------------------------------------------------
+# Assembly
+# ---------------------------------------------------------------------------
 
 
-def build_penalty_ramp(rewards: dict[str, RewardTermCfg]) -> dict[str, CurriculumTermCfg]:
-  """Scale each penalty in from a fraction of its full weight; see PENALTY_RAMP."""
+def build_observations(curves: bool = False) -> dict[str, ObservationGroupCfg]:
+  critic_actor = tuple(n for n in ACTOR_TERMS if n != "tactile_map")
+  critic_priv = PRIVILEGED_TERMS + (("beam_ahead",) if curves else ())
   return {
-    f"ramp_{name}": CurriculumTermCfg(
-      func=envs_mdp.reward_curriculum,
-      params={
-        "reward_name": name,
-        "stages": [
-          {"step": iteration * STEPS_PER_ITERATION, "weight": frac * rewards[name].weight}
-          for iteration, frac in PENALTY_RAMP
-        ],
-      },
-    )
-    for name in PENALTY_TERMS
+    "actor": ObservationGroupCfg(
+      terms={n: TERMS[n].build() for n in ACTOR_TERMS},
+      concatenate_terms=True,
+      enable_corruption=True,
+    ),
+    # The faulted tactile term is stateful (frame drops), so it is computed
+    # once, for the actor; the critic reads the clean map.
+    "critic": ObservationGroupCfg(
+      terms={n: TERMS[n].build() for n in critic_actor + critic_priv},
+      concatenate_terms=True,
+      enable_corruption=False,
+    ),
   }
 
 
-def make_g1_beam_env_cfg(
-  obs_set: str,
-  *,
-  dof_set: DofSet = "full29",
-  play: bool = False,
-  num_envs: int | None = None,
+def make_beam_env_cfg(
+  *, play: bool = False, num_envs: int | None = None, curves: bool = False
 ) -> ManagerBasedRlEnvCfg:
-  """Build a G1 beam-walking config for one observation set."""
+  """``curves``: two thirds of the terrain columns are bent beams
+  (``terrain.BEND_MAX_TURN_DEG``), and the critic also sees how the beam
+  turns ahead (``beam_ahead``)."""
   cfg = make_velocity_env_cfg()
+  cfg.episode_length_s = EPISODE_S
 
-  # -- robot ---------------------------------------------------------------
   cfg.scene.entities = {"robot": get_g1_cfg()}
   cfg.scene.num_envs = num_envs or DEFAULT_NUM_ENVS
-
-  # -- sensors -------------------------------------------------------------
-  # The terrain scan serves the critic (it sees the beam); the foot height scan
-  # feeds foot_clearance. Neither reaches the actor.
   cfg.scene.sensors = (
-    terrain_scan_sensor(),
-    foot_height_sensor(),
     feet_ground_contact_sensor(),
     self_collision_sensor(),
+    nonfoot_contact_sensor(),
+    *tactile_scene_sensors(),
   )
-  if uses_tactile_array(obs_set):
-    cfg.scene.sensors += tactile_scene_sensors()
 
-  # -- terrain -------------------------------------------------------------
   assert cfg.scene.terrain is not None
   cfg.scene.terrain.terrain_type = "generator"
-  cfg.scene.terrain.terrain_generator = make_beam_terrain_cfg()
+  cfg.scene.terrain.terrain_generator = make_beam_terrain_cfg(curves=curves)
   cfg.scene.terrain.max_init_terrain_level = 0  # everyone starts on the widest beam
 
-  # -- solver budgets ------------------------------------------------------
-  # Contact budgets as on rough: at a bend a foot can touch a box and a cylinder
-  # at once. CCD iterations as on flat, NOT rough's 500: measured on the 5070,
-  # 500 made this scene memory-bound at 1,024 envs (5.6 GiB, 67k steps/s; 2,048
-  # failed to allocate), while 50 runs 2,048 envs in 2.8 GiB at 86k steps/s.
   cfg.sim.mujoco.ccd_iterations = 50
-  cfg.sim.contact_sensor_maxmatch = 500
+  cfg.sim.contact_sensor_maxmatch = 128
   cfg.sim.nconmax = 70
 
-  # -- observations --------------------------------------------------------
-  cfg.observations = build_groups(
-    obs_set, has_terrain_scan=True, with_command=False, beam_privileged=True
-  )
+  cfg.observations = build_observations(curves)
 
-  # -- actions / commands --------------------------------------------------
   cfg.actions = {
-    "joint_pos": JointPositionActionCfg(
+    "joint_pos": mdp.DelayedJointPositionActionCfg(
       entity_name="robot",
-      actuator_names=actuator_patterns(dof_set),
-      scale=resolve_action_scale(dof_set),
+      actuator_names=(".*",),
+      scale=resolve_action_scale("full29"),
       use_default_offset=True,
+      max_lag_substeps=4,
     )
   }
-  cfg.commands = {}
 
-  # -- rewards / events ----------------------------------------------------
-  cfg.rewards = build_beam_rewards()
-  cfg.events = build_beam_events()
-
-  # -- terminations --------------------------------------------------------
-  cfg.terminations = {
-    "time_out": TerminationTermCfg(func=vel_mdp.time_out, time_out=True),
-    "fell_over": TerminationTermCfg(
-      func=vel_mdp.bad_orientation,
-      params={"limit_angle": math.radians(70.0)},
-    ),
-    "fell_off": TerminationTermCfg(
-      func=beam_mdp.fell_off_beam, params={"margin": beam_mdp.FALL_MARGIN}
-    ),
-    # Resets an env whose physics state went NaN/Inf instead of letting it
-    # poison the batch: a full run died at iteration 1,916 when NaN reached the
-    # critic's observations. A real termination, not a time-out, so the critic
-    # never bootstraps from the corrupted state.
-    "nan_detection": TerminationTermCfg(func=envs_mdp.nan_detection),
+  cfg.commands = {
+    "twist": mdp.BeamForwardCommandCfg(
+      entity_name="robot",
+      resampling_time_range=(6.0, 12.0),
+      rel_standing_envs=mdp.STANDING_SHARE[0],
+      rel_heading_envs=0.0,
+      heading_command=False,
+      ranges=mdp.BeamForwardCommandCfg.Ranges(
+        lin_vel_x=(0.1, MAX_FORWARD_SPEED), lin_vel_y=(0.0, 0.0), ang_vel_z=(0.0, 0.0)
+      ),
+    )
   }
-  # Crossing the beam does NOT end the episode. The robot keeps collecting
-  # upright and posture at the far end, so crossing early forfeits nothing that
-  # standing on the platform would have earned.
 
-  # -- curriculum ----------------------------------------------------------
+  cfg.rewards = build_rewards()
+  cfg.events = build_events()
+  cfg.terminations = build_terminations()
+  # Only walking episodes promote (the first run rose to level 3 on standing
+  # commands alone), and a walking episode also promotes once it has covered
+  # SUCCESS_BEAM_M of beam without falling, at any pace.
   cfg.curriculum = {
     "beam_levels": CurriculumTermCfg(
-      func=beam_mdp.beam_levels,
-      params={"promote_frac": 0.8, "demote_frac": 0.3},
-    ),
-    **build_penalty_ramp(cfg.rewards),
+      func=mdp.beam_levels,
+      params={"standing_promotes": False, "success_beam_m": SUCCESS_BEAM_M},
+    )
   }
 
   cfg.viewer.body_name = G1_TORSO_BODY
-
   if play:
-    _apply_play_overrides(cfg)
-
+    cfg.curriculum = {}
+    cfg.events.pop("spawn_from_bank")
+    cfg.scene.terrain.max_init_terrain_level = None
   return cfg
-
-
-def _apply_play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
-  """For looking at a policy, not measuring it -- see sendg1.eval."""
-  cfg.observations["proprio"].enable_corruption = False
-  cfg.curriculum = {}
-  assert cfg.scene.terrain is not None
-  # Spread viewing envs over every width, not just the widest row.
-  cfg.scene.terrain.max_init_terrain_level = None

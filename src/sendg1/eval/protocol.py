@@ -116,7 +116,7 @@ def build_eval_env_cfg(
   # subsampling. Commands are assigned from the grid by env index in
   # scripts/evaluate.py, so every condition sees the same command on the same
   # env index with the same terrain and the same DR draw. Tasks without a
-  # command (beam walking) have nothing to pin.
+  # velocity command have nothing to pin.
   twist = cfg.commands.get("twist")
   if twist is not None:
     assert isinstance(twist, UniformVelocityCommandCfg)

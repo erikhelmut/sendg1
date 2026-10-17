@@ -13,7 +13,7 @@ locomotion usually benefits from memory. A cheaper first step than an RNN is
 per-term ``history_length`` on the proprio group (frame stacking), which is a
 config change rather than a new model.
 
-Recurrent variant (``recurrent=True``, used by the beam task): the actor becomes
+Recurrent variant (``recurrent=True``, used by the retired first beam task): the actor becomes
 GRU(256) -> MLP (256, 128); the critic stays the same MLP, since it reads
 privileged state and has nothing to remember.
 """

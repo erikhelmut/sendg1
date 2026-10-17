@@ -46,8 +46,6 @@ _BOX_PUSH_ACTOR = (_VELOCITY_ACTOR - {"command"}) | {
 EXPECTED_DEPLOYABLE = {
   "Sendg1-Velocity-Flat-G1": _VELOCITY_ACTOR,
   "Sendg1-Velocity-Rough-G1": _VELOCITY_ACTOR,
-  # Beam walking gives the robot no command at all.
-  "Sendg1-Beam-G1": _VELOCITY_ACTOR - {"command"},
   "Sendg1-BoxPush-G1": _BOX_PUSH_ACTOR,
   "Sendg1-BoxPushCurriculum-G1": _BOX_PUSH_ACTOR,
   "Sendg1-BoxPushPatches-G1": _BOX_PUSH_ACTOR,

@@ -1,10 +1,11 @@
 #!/usr/bin/env python
-"""Render beam episodes of the teacher or student, headless.
+"""Render beam episodes of a policy, headless.
 
-    python scripts/beam_ts_video.py --policy student --checkpoint <pt> --width 0.10 --want success
-    python scripts/beam_ts_video.py --policy student --checkpoint <pt> --width 0.05 --want failure
+    python scripts/beam_video.py --checkpoint <pt> --width 0.10 --want success
+    python scripts/beam_video.py --checkpoint <pt> --width 0.05 --want failure
+    python scripts/beam_video.py --task G1-Beam-E2E-Curved --path bend --checkpoint <pt> --width 0.20
 
-Runs one env per try (same protocol as ``beam_ts_eval.py``: start platform,
+Runs one env per try (same protocol as ``beam_eval.py``: start platform,
 constant forward command) until an episode with the wanted outcome turns up,
 then writes that episode as an MP4 with a small caption. A failure clip ends
 on the terminating step and its caption names the termination.
@@ -43,9 +44,11 @@ def caption(frame, lines):
 
 def main() -> None:
   ap = argparse.ArgumentParser()
-  ap.add_argument("--policy", choices=["teacher", "student"], required=True)
+  ap.add_argument("--label", default="", help="caption prefix, e.g. the run name")
+  ap.add_argument("--path", choices=["straight", "bend", "turn"], default="straight",
+                  help="beam shape (bend / turn need G1-Beam-E2E-Curved)")
   ap.add_argument("--checkpoint", required=True)
-  ap.add_argument("--task", default=None, help="default: G1-Beam-Teacher / G1-Beam-Student")
+  ap.add_argument("--task", default="G1-Beam-E2E")
   ap.add_argument("--start-lateral", type=float, default=0.08, help="platform start offset (+/- m)")
   ap.add_argument("--start-yaw", type=float, default=0.08, help="start yaw offset (+/- rad)")
   ap.add_argument("--width", type=float, required=True)
@@ -65,14 +68,17 @@ def main() -> None:
   from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
   import sendg1.tasks  # noqa: F401
-  from sendg1.common.beam_ts.mdp import BeamEpisode
-  from sendg1.common.beam_ts.terrain import BEAM_WIDTHS
-  from sendg1.rl.dagger import DistillationRunner
-  from sendg1.tasks.beam_ts import STUDENT_TASK, TEACHER_TASK
+  from sendg1.common.beam.mdp import BeamEpisode
+  from sendg1.common.beam.terrain import BEAM_WIDTHS
 
   level = min(range(len(BEAM_WIDTHS)), key=lambda i: abs(BEAM_WIDTHS[i] - args.width))
-  task = args.task or (TEACHER_TASK if args.policy == "teacher" else STUDENT_TASK)
+  task = args.task
   cfg = load_env_cfg(task)
+  columns = list(cfg.scene.terrain.terrain_generator.sub_terrains)
+  kind = lambda n: next((k for k in ("bend", "turn") if n.endswith(k)), "straight")  # noqa: E731
+  same_kind = [i for i, n in enumerate(columns) if kind(n) == args.path]
+  if not same_kind:
+    raise SystemExit(f"{task} has no {args.path} beams (use G1-Beam-E2E-Curved)")
   cfg.scene.num_envs = 1
   cfg.seed = args.seed
   cfg.curriculum = {}
@@ -94,17 +100,13 @@ def main() -> None:
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0", render_mode="rgb_array")
   t = env.scene.terrain
   t.terrain_levels[:] = level
+  t.terrain_types[:] = same_kind[args.seed % len(same_kind)]
   t.env_origins[:] = t.terrain_origins[level, t.terrain_types]
 
   rl_cfg = load_rl_cfg(task)
   wrapped = RslRlVecEnvWrapper(env, clip_actions=rl_cfg.clip_actions)
-  if args.policy == "teacher":
-    runner = MjlabOnPolicyRunner(wrapped, asdict(rl_cfg), device="cuda:0")
-    runner.load(args.checkpoint, load_cfg={"actor": True}, strict=True, map_location="cuda:0")
-  else:
-    runner = DistillationRunner(wrapped, asdict(rl_cfg), device="cuda:0")
-    loaded = torch.load(args.checkpoint, map_location="cuda:0", weights_only=False)
-    runner.alg.load(loaded, {"student": True, "teacher": True}, strict=True)
+  runner = MjlabOnPolicyRunner(wrapped, asdict(rl_cfg), device="cuda:0")
+  runner.load(args.checkpoint, load_cfg={"actor": True}, strict=True, map_location="cuda:0")
   policy = runner.get_inference_policy(device="cuda:0")
   ep = BeamEpisode.get(env)
   tm = env.termination_manager
@@ -130,7 +132,7 @@ def main() -> None:
           stand_after = step
         progress = float(ep.max_progress[0])
         lines = [
-          (f"{args.policy}   beam {BEAM_WIDTHS[level]:.2f} m", True),
+          (f"{args.label + '   ' if args.label else ''}{args.path} beam {BEAM_WIDTHS[level]:.2f} m", True),
           (f"command {args.speed:.2f} m/s   progress {max(progress, 0):.2f} m", False),
         ]
         if stand_after is not None:
@@ -157,7 +159,7 @@ def main() -> None:
   frames, outcome, reason = chosen
   out = Path(
     args.out
-    or REPO / "media" / "beam_ts" / f"{args.policy}_w{BEAM_WIDTHS[level]:.2f}_{outcome}.mp4"
+    or REPO / "media" / "beam" / f"{args.path}_w{BEAM_WIDTHS[level]:.2f}_{outcome}.mp4"
   )
   out.parent.mkdir(parents=True, exist_ok=True)
   mediapy.write_video(str(out), frames, fps=int(round(1 / env.step_dt)), qp=28)

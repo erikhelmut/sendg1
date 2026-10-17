@@ -1,8 +1,8 @@
-"""Observation terms of the beam teacher-student task, each with its availability.
+"""Observation terms of the beam task, each with its availability.
 
 Same contract as ``sendg1.common.obs.terms``: every term declares whether the
-real robot can measure it, and ``tasks/beam_ts`` refuses to register a student
-that observes anything else (``assert_student_is_deployable``).
+real robot can measure it, and ``tasks/beam`` refuses to register an actor
+that observes anything else (``assert_actor_is_deployable``).
 
 ``onboard``   on the G1 itself. Checked against the unitree_sdk2 low-level state
               (``unitree_hg::msg::dds_::LowState_``): ``imu_state`` carries the
@@ -11,23 +11,8 @@ that observes anything else (``assert_student_is_deployable``).
               velocity, no foot contact and no terrain information in it.
 ``sensor``    the tactile slipper: hardware the robot will carry, but not part of
               the stock G1. Modelled with gain error, dead taxels, noise and
-              frame drops. Legal in the student.
-``privileged`` simulation ground truth. Teacher actor and critics only.
-
-``real`` group (student, teacher, critic): base_ang_vel, projected_gravity,
-joint_pos, joint_vel, actions, command_vx, tactile.
-``privileged`` group (teacher, critic): everything else.
-
-``student_real`` group (student): ``real`` without ``actions``. Behaviour
-cloning with the previous action as input lets the student learn "repeat the
-last action": while the teacher drives, that input is the teacher's own last
-action, and the first students copied it (error 0.004 with the teacher's last
-action as input, 0.34 with their own) and fell as soon as they drove. The
-teacher keeps it.
-
-Probing variant (``make_beam_ts_env_cfg(probe=True)``) adds two groups:
-``privileged_touch`` (probing teacher's actor: beam geometry masked until a foot
-has felt a beam edge) and ``student_blind`` (``student_real`` without tactile).
+              frame drops. Legal in the actor.
+``privileged`` simulation ground truth. Critic only.
 """
 
 from __future__ import annotations
@@ -40,7 +25,7 @@ from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.utils.noise.noise_cfg import NoiseModelWithAdditiveBiasCfg
 
-from sendg1.common.beam_ts import mdp
+from sendg1.common.beam import mdp
 from sendg1.common.obs.terms import TermSpec
 
 Availability = Literal["onboard", "sensor", "privileged"]
@@ -87,18 +72,14 @@ def _plain(func, noise=None) -> Callable[[], ObservationTermCfg]:
   return lambda: ObservationTermCfg(func=func, noise=noise)
 
 
-def _tactile_noisy() -> ObservationTermCfg:
+def _tactile_map_noisy() -> ObservationTermCfg:
   # Sensor faults live inside the term (they are per-taxel and stateful); one
   # step of latency on top, as for a sensor read over a bus.
-  return ObservationTermCfg(func=mdp.tactile_features_noisy, delay_min_lag=0, delay_max_lag=1)
-
-
-def _tactile_map_noisy() -> ObservationTermCfg:
   return ObservationTermCfg(func=mdp.tactile_map_noisy, delay_min_lag=0, delay_max_lag=1)
 
 
 TERMS: dict[str, TermSpec] = {
-  # -- real ------------------------------------------------------------------
+  # -- actor -------------------------------------------------------------------
   "base_ang_vel": TermSpec(
     _ang_vel, "onboard", "LowState_.imu_state.gyroscope; noise and a per-episode bias."
   ),
@@ -115,12 +96,6 @@ TERMS: dict[str, TermSpec] = {
   "actions": TermSpec(_plain(envs_mdp.last_action), "onboard", "The policy's previous output."),
   "command_vx": TermSpec(
     _plain(mdp.command_vx), "onboard", "Operator forward-speed command (joystick)."
-  ),
-  "tactile": TermSpec(
-    _tactile_noisy,
-    "sensor",
-    "Tactile slipper, per-foot features (sendg1.common.beam_ts.tactile) from the "
-    "faulted taxel readings, 0-1 step latency.",
   ),
   "tactile_map": TermSpec(
     _tactile_map_noisy,
@@ -155,8 +130,10 @@ TERMS: dict[str, TermSpec] = {
   "beam_params": TermSpec(
     _plain(mdp.beam_params_obs), "privileged", "Beam width and height, contact friction."
   ),
-  "tactile_clean": TermSpec(
-    _plain(mdp.tactile_features_clean), "privileged", "Noise-free tactile features."
+  "beam_ahead": TermSpec(
+    _plain(mdp.beam_ahead_obs),
+    "privileged",
+    "How far the beam turns ahead of the base (curved beams).",
   ),
   "foot_contact_forces": TermSpec(
     lambda: ObservationTermCfg(
@@ -168,87 +145,31 @@ TERMS: dict[str, TermSpec] = {
   "action_lag": TermSpec(
     _plain(mdp.action_lag_obs), "privileged", "This episode's actuation latency."
   ),
-  # -- privileged, touch-revealed (probing teacher's actor) ---------------------
-  "feet_beam_pose_touch": TermSpec(
-    _plain(mdp.feet_beam_pose_touch),
-    "privileged",
-    "feet_beam_pose, zero until a loaded foot has felt a beam edge (mdp.beam_revealed).",
-  ),
-  "base_beam_pose_touch": TermSpec(
-    _plain(mdp.base_beam_pose_touch), "privileged", "base_beam_pose, zero until revealed by touch."
-  ),
-  "feet_beam_pose_felt": TermSpec(
-    _plain(mdp.feet_beam_pose_felt),
-    "privileged",
-    "Per foot: lateral offset and edge margin only while loaded with a beam edge "
-    "under the taxels (what the tactile image shows); height and yaw once revealed.",
-  ),
-  "base_beam_pose_felt": TermSpec(
-    _plain(mdp.base_beam_pose_felt),
-    "privileged",
-    "base_beam_pose with the base and CoM lateral offsets zeroed (no sensor measures "
-    "them); heading and height once revealed.",
-  ),
-  "beam_progress_touch": TermSpec(
-    _plain(mdp.beam_progress_touch), "privileged", "beam_progress, zero until revealed by touch."
-  ),
-  "beam_params_touch": TermSpec(
-    _plain(mdp.beam_params_touch), "privileged", "beam_params, zero until revealed by touch."
-  ),
-  "beam_revealed": TermSpec(
-    _plain(mdp.beam_revealed_obs),
-    "privileged",
-    "Whether a foot has felt a beam edge this episode. Derivable from tactile in "
-    "principle, but the threshold uses the true geometry.",
-  ),
 }
 
-REAL_TERMS: tuple[str, ...] = (
+ACTOR_TERMS: tuple[str, ...] = (
   "base_ang_vel",
   "projected_gravity",
   "joint_pos",
   "joint_vel",
   "actions",
   "command_vx",
-  "tactile",
+  "tactile_map",
 )
+"""The GRU actor: everything the robot measures, including its previous
+action, with the contact-map tactile features."""
 PRIVILEGED_TERMS: tuple[str, ...] = (
   "base_lin_vel",
   "feet_beam_pose",
   "base_beam_pose",
   "beam_progress",
   "beam_params",
-  "tactile_clean",
+  "tactile_map_clean",
   "foot_contact_forces",
   "action_lag",
 )
-PROBE_PRIVILEGED_TERMS: tuple[str, ...] = (
-  "base_lin_vel",
-  "feet_beam_pose_felt",
-  "base_beam_pose_felt",
-  "beam_progress_touch",
-  "beam_params_touch",
-  "beam_revealed",
-  "tactile_clean",
-  "foot_contact_forces",
-  "action_lag",
-)
-"""The probing teacher's actor: beam geometry only as far as touch tells it.
-The first probing teacher used ``feet_beam_pose_touch`` / ``base_beam_pose_touch``
-(full pose, live, after the first felt edge) and could not be distilled."""
-STUDENT_TERMS: tuple[str, ...] = tuple(n for n in REAL_TERMS if n != "actions")
-"""The student: ``real`` without the previous action (see the module docstring)."""
-BLIND_TERMS: tuple[str, ...] = tuple(n for n in STUDENT_TERMS if n != "tactile")
-"""The blind student: the stock G1's signals, no tactile slipper."""
-E2E_ACTOR_TERMS: tuple[str, ...] = tuple(
-  "tactile_map" if n == "tactile" else n for n in REAL_TERMS
-)
-"""End-to-end PPO actor (``G1-Beam-E2E``): everything the robot measures,
-including its previous action, with the contact-map tactile features."""
-E2E_PRIVILEGED_TERMS: tuple[str, ...] = tuple(
-  "tactile_map_clean" if n == "tactile_clean" else n for n in PRIVILEGED_TERMS
-)
-"""End-to-end critic, on top of the actor's terms: full ground truth."""
-STUDENT_LEGAL: frozenset[str] = frozenset(
+"""The critic, on top of the actor's terms (the clean tactile map replacing the
+faulted one): full ground truth. The curved task adds ``beam_ahead``."""
+DEPLOYABLE: frozenset[str] = frozenset(
   n for n, s in TERMS.items() if s.availability in ("onboard", "sensor")
 )

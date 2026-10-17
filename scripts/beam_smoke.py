@@ -1,8 +1,9 @@
 #!/usr/bin/env python
-"""Smoke test of the beam teacher-student env: builds, obs shapes, finite
-rewards, terminations, curriculum movement.
+"""Smoke test of the beam env: builds, obs shapes, finite rewards,
+terminations, curriculum movement.
 
-    python scripts/beam_ts_smoke.py --num-envs 16 --steps 300
+    python scripts/beam_smoke.py --num-envs 16 --steps 300
+    python scripts/beam_smoke.py --task G1-Beam-E2E-Curved
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import argparse
 
 def main() -> None:
   ap = argparse.ArgumentParser()
+  ap.add_argument("--task", default="G1-Beam-E2E")
   ap.add_argument("--num-envs", type=int, default=16)
   ap.add_argument("--steps", type=int, default=300)
   ap.add_argument("--zero-actions", action="store_true")
@@ -22,17 +24,17 @@ def main() -> None:
   from mjlab.tasks.registry import load_env_cfg
 
   import sendg1.tasks  # noqa: F401
-  from sendg1.common.beam_ts.geometry import BeamGeometry
-  from sendg1.common.beam_ts.mdp import BeamEpisode
+  from sendg1.common.beam.geometry import BeamGeometry
+  from sendg1.common.beam.mdp import BeamEpisode
 
-  cfg = load_env_cfg("G1-Beam-Teacher")
+  cfg = load_env_cfg(args.task)
   cfg.scene.num_envs = args.num_envs
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
   obs, _ = env.reset()
   for k, v in obs.items():
     print(f"obs[{k}] {tuple(v.shape)}")
   om = env.observation_manager
-  for g in ("real", "privileged"):
+  for g in ("actor", "critic"):
     print(g, dict(zip(om.active_terms[g], om.group_obs_term_dim[g])))
 
   geo = BeamGeometry.get(env)

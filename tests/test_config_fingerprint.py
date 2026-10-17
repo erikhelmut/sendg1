@@ -22,9 +22,6 @@ from sendg1.tasks._register import variants
 # Regenerate with: python scripts/show_fingerprints.py
 EXPECTED: dict[str, tuple[str, str]] = {
   # task_id: (env_fingerprint, rl_fingerprint)
-  "Sendg1-Beam-G1-Blind": ("75e0eb08d6580e25", "0c2b4d917e7cad8a"),
-  "Sendg1-Beam-G1-ContactOracle": ("f45a6debc2e8e90b", "8b480392886bedce"),
-  "Sendg1-Beam-G1-TactileArray": ("431abce03559626b", "6e81b2cd00f2f549"),
   "Sendg1-BoxPush-G1-Blind": ("5cd2a8179c495a06", "98bf70d84bc5f8f4"),
   "Sendg1-BoxPush-G1-ContactOracle": ("a05153b15c365621", "d93f5da5e7ba6f3f"),
   "Sendg1-BoxPush-G1-TactileArray": ("473446104e027d37", "6db095ff927a2deb"),
