@@ -28,6 +28,7 @@ from sendg1.common.box_push.params import (
   GRAVITY,
   BoxPushRanges,
   curriculum_ranges,
+  mass_from_margin,
   tips_before_sliding,
   traction_margin,
 )
@@ -40,7 +41,7 @@ def main() -> None:
   ap.add_argument("--samples", type=int, default=1_000_000)
   ap.add_argument("--seed", type=int, default=0)
   ap.add_argument("--alpha", type=float, default=1.0, help="curriculum level; 1 = full ranges")
-  ap.add_argument("--push-heights", type=float, nargs="+", default=[0.3, 0.5, 0.7])
+  ap.add_argument("--push-heights", type=float, nargs="+", default=[0.35, 0.45, 0.55])
   args = ap.parse_args()
 
   r = BoxPushRanges()
@@ -48,31 +49,33 @@ def main() -> None:
   rng = np.random.default_rng(args.seed)
   n = args.samples
   floor_mu = rng.uniform(*cur["floor_mu"], n)
-  box_mass = rng.uniform(*cur["box_mass"], n)
   box_mu = rng.uniform(*cur["box_mu"], n)
+  wanted = rng.uniform(*cur["traction_margin"], n)
+  box_mass = mass_from_margin(wanted, floor_mu, box_mu, r.box_mass)
   depth = rng.uniform(*r.box_depth, n)
   height = rng.uniform(*r.box_height, n)
 
   print(f"robot mass {G1_MASS_KG:.2f} kg, g {GRAVITY}, alpha {args.alpha}")
-  print(
-    f"floor mu {cur['floor_mu']}, box mass {cur['box_mass']} kg, box mu {cur['box_mu']}\n"
-  )
-
-  print("Traction: mu_foot * m_robot * g  vs  mu_box * m_box * g  [N]")
-  print(f"  available: {G1_MASS_KG * GRAVITY * cur['floor_mu'][0]:.0f}"
-        f" .. {G1_MASS_KG * GRAVITY * cur['floor_mu'][1]:.0f}")
-  print(f"  required:  {GRAVITY * cur['box_mu'][0] * cur['box_mass'][0]:.0f}"
-        f" .. {GRAVITY * cur['box_mu'][1] * cur['box_mass'][1]:.0f}")
+  print(f"margin drawn from {cur['traction_margin']}, floor mu {cur['floor_mu']}, "
+        f"box mu {cur['box_mu']}, mass clipped to {r.box_mass} kg\n")
 
   m = traction_margin(floor_mu, box_mass, box_mu)
+  clipped = np.mean(
+    (box_mass <= r.box_mass[0] + 1e-9) | (box_mass >= r.box_mass[1] - 1e-9)
+  )
   infeasible = m < 0
   near = (m >= 0) & (m < NEAR_LIMIT)
-  print(f"\nmargin = 1 - required/available, over {n:,} sampled episodes")
-  print(f"  infeasible (margin < 0):      {infeasible.mean():6.1%}")
+  print(f"margin = 1 - required/available, over {n:,} sampled episodes")
+  print(f"  infeasible (margin < 0):       {infeasible.mean():6.1%}")
   print(f"  near the limit (0 <= m < 20%): {near.mean():6.1%}")
   print(f"  comfortable (m >= 20%):        {(m >= NEAR_LIMIT).mean():6.1%}")
+  print(f"  mass hit a clip:               {clipped:6.1%}")
   q = np.percentile(m, [10, 25, 50, 75, 90])
-  print("  percentiles 10/25/50/75/90:   " + " ".join(f"{v:+.2f}" for v in q))
+  print("  margin percentiles 10/25/50/75/90: " + " ".join(f"{v:+.2f}" for v in q))
+  q = np.percentile(box_mass, [5, 50, 95])
+  print(f"  box mass p5/50/95: {q.round(1)} kg")
+  print(f"  required push force, median: {np.median(box_mu * box_mass * GRAVITY):.0f} N"
+        f"  ({np.median(box_mu * box_mass) / G1_MASS_KG:.0%} of the robot's weight)")
 
   print("\nInfeasible share by floor mu (rows) and box mass (cols):")
   mass_edges = np.linspace(*r.box_mass, 5)

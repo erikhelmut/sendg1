@@ -18,23 +18,32 @@ from sendg1.tasks._register import register_variants
 from sendg1.tasks.box_push.env_cfg import make_g1_box_push_env_cfg
 from sendg1.tasks.velocity.rl_cfg import build_ppo_cfg
 
+BOX_PUSH_ENTROPY_COEF = 0.005
+"""Half the velocity tasks' 0.01, as on the beam task and for the same reason:
+at 0.01 the action std drifts up (1.0 -> 1.19 by iteration 4,000 in an
+overnight run), the policy stops being able to stay upright, and training
+collapses into falling immediately -- 100% of episodes ended as falls before
+the robot ever touched the box."""
+
+_ppo = partial(build_ppo_cfg, entropy_coef=BOX_PUSH_ENTROPY_COEF)
+
 register_variants(
   "Sendg1-BoxPush-G1",
   make_g1_box_push_env_cfg,
-  build_ppo_cfg,
+  _ppo,
   experiment_prefix="box_push",
 )
 
 register_variants(
   "Sendg1-BoxPushCurriculum-G1",
   partial(make_g1_box_push_env_cfg, curriculum=True),
-  build_ppo_cfg,
+  _ppo,
   experiment_prefix="box_push_curriculum",
 )
 
 register_variants(
   "Sendg1-BoxPushPatches-G1",
   partial(make_g1_box_push_env_cfg, low_friction_patches=True),
-  build_ppo_cfg,
+  _ppo,
   experiment_prefix="box_push_patches",
 )

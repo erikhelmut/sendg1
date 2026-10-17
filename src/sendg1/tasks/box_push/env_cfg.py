@@ -40,11 +40,14 @@ from sendg1.common.box_push.scene import (
 from sendg1.common.events import build_events
 from sendg1.common.obs.groups import build_groups
 from sendg1.common.obs.obs_sets import uses_tactile_array
-from sendg1.common.rewards import build_rewards
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+
+from sendg1.common.rewards import POSE_STD_WALKING, build_rewards
 from sendg1.common.robots.g1 import (
   DofSet,
   G1_TORSO_BODY,
   actuator_patterns,
+  get_g1_ball_hands_cfg,
   get_g1_cfg,
   resolve_action_scale,
 )
@@ -64,6 +67,9 @@ LOW_FRICTION_PATCHES = False
 """Default for the optional 1-3 low-friction floor patches on the path."""
 CURRICULUM = False
 """Default for the light-box / high-friction curriculum."""
+BALL_HANDS = True
+"""Ball end-effectors instead of the stock rubber hands (see
+``sendg1.common.robots.g1``): one contact per hand, with its own friction."""
 
 FALL_TILT = math.radians(70.0)
 """Torso tilt that ends the episode as a fall (the velocity task's value)."""
@@ -82,50 +88,80 @@ BOX_TIP_ANGLE = math.radians(45.0)
 #
 # | term              | weight | value                                       |
 # |-------------------|--------|---------------------------------------------|
-# | box_progress      |  +4.0  | box speed toward target, /0.5 m/s, in [-1,1] |
-# | success           | +20.0  | once, when the box centre enters the disc    |
+# | upright           |  +1.0  | the velocity task's term, unchanged          |
+# | posture           |  +1.0  | the velocity task's walking tolerances       |
+# | box_progress      |  +4.0  | box speed toward the target, /0.4 m/s        |
+# | track_lin_vel     |  +1.0  | exp(-|v_cmd - v|^2 / 0.5^2), pilot command   |
+# | track_ang_vel     |  +1.0  | exp(-(wz_cmd - wz)^2 / 0.7^2)                |
+# | box_to_target     |  +2.5  | exp(-d_box_target^2 / 2.5^2)                 |
+# | success           | +20.0  | once, box in the disc for 2 s                |
 # | hand_contact      |  +0.5  | 1 while a hand/forearm is on the push face   |
-# | stay_near_box     |  -1.0  | m of pelvis distance beyond 1.5 m from box   |
 # | foot_slip         |  -2.0  | sum_feet in_contact * |v_sole_xy|^2 (m2/s2)  |
 # | fall              | -10.0  | once, on a fall termination                  |
+# | box_tipped        | -10.0  | once, when the box tips over                 |
+# | box_tilt          |  -5.0  | sin^2(box tilt)                              |
+# | feet_box_contact  |  -1.0  | number of feet touching the box              |
 # | joint_torques     | -1e-5  | sum of squared actuator torques (N2m2)       |
 # | action_rate_l2    |  -0.1  | the velocity task's term, unchanged          |
-# | feet_box_contact  |  -1.0  | number of feet touching the box              |
-# | box_tilt          |  -5.0  | sin^2(box tilt)                              |
-# | box_tipped        | -10.0  | once, when the box-tipped termination fires  |
 #
-# None of these were tuned. Orders of magnitude, per second: progress pays up to
-# 4; a full push of 3 m pays 24 + 20 success; a foot sliding at 0.3 m/s costs
-# 0.18; torques at a typical standing load (~2e4 N2m2) cost 0.2; a box tilted
-# 10 degrees costs 0.15.
+# The three positive dense terms come from VOFA (arXiv:2605.01518), whose
+# push/reach/alignment rewards are all exponential kernels: the robot earns
+# reward every step it is doing roughly the right thing. The first version of
+# this task had no positive per-step term, so the return was negative
+# everywhere and both 2,000-iteration checks converged to ENDING the episode --
+# first by tipping the box over, then by falling immediately. Tracking rewards
+# replace VOFA's reach and alignment terms, which the scripted pilot
+# (common/box_push/pilot.py) now handles geometrically.
 #
-# There is no positive per-step "alive" reward (no upright/posture terms), so
-# ending the episode early by succeeding never forfeits anything. The flip side:
-# the per-step return is net negative, so EVERY non-success termination must
-# carry a one-off penalty, or ending the episode becomes the goal. The first
-# version had none on box_tipped, and the 2,000-iteration check converged to
-# shoving the box over within 0.8 s (99% of episodes; success peaked at 10%
-# around iteration 450, then collapsed). box_tipped was added for that, at the
-# fall penalty's size.
+# upright and posture are the velocity task's positive terms, and they are what
+# make staying alive worth more than the -10 fall penalty REGARDLESS of how the
+# task is going. Without them the only per-step income was command tracking,
+# whose exp kernel pays ~0 while the error is large, so early in training a
+# policy that dove at the floor in 0.3 s beat one that kept walking: a run
+# without them collapsed to 99.97% falls-before-contact by iteration 1,000.
+#
+# Command tracking is SHAPING, not the objective, and is weighted below the
+# box terms on purpose: the pilot's command is a function of the robot's own
+# position, so tracking it is gameable -- a run with tracking at 2.0 and no
+# progress term circled the box forever (reward 33, success 0%, box untouched
+# at iteration 5,000). Progress is measured on the box and cannot be faked.
+#
+# Weights are not tuned. Per second, roughly: perfect tracking pays 2, a box
+# at the target 2.5, a foot sliding at 0.3 m/s costs 0.18, a 10-degree box tilt
+# 0.15.
 
 REWARD_WEIGHTS: dict[str, float] = {
+  "upright": 1.0,
+  "posture": 1.0,
   "box_progress": 4.0,
+  "track_lin_vel": 1.0,
+  "track_ang_vel": 1.0,
+  "box_to_target": 2.5,
   "success": 20.0,
   "hand_contact": 0.5,
-  "stay_near_box": -1.0,
   "foot_slip": -2.0,
   "fall": -10.0,
+  "box_tipped": -10.0,
+  "box_tilt": -5.0,
+  "feet_box_contact": -1.0,
   "joint_torques": -1e-5,
   "action_rate_l2": -0.1,
-  "feet_box_contact": -1.0,
-  "box_tilt": -5.0,
-  "box_tipped": -10.0,
 }
+
+TRACK_LIN_STD = 0.5
+"""m/s. The velocity task uses sqrt(0.25); the same tolerance."""
+TRACK_ANG_STD = 0.7
+"""rad/s. The velocity task uses sqrt(0.5)."""
+BOX_PROGRESS_MAX_SPEED = 0.4
+"""m/s of box motion toward the target above which box_progress pays no more.
+Below the pilot's 0.5 m/s push command: a heavy box does not move that fast,
+and rewarding speed the floor cannot deliver just asks the feet to slip."""
+BOX_TO_TARGET_STD = 2.5
+"""m. VOFA uses 10 m for a 3 m task, i.e. an almost flat potential. 2.5 m over
+our 2-4 m keeps a usable gradient toward the target."""
 
 BOX_PROGRESS_MAX_SPEED = 0.5
 """m/s. Box speed toward the target above which box_progress pays no more."""
-STAY_NEAR_BOX_DISTANCE = 1.5
-"""m, pelvis to box centre. The farthest spawn is 1.0 m + 0.3 m half-depth."""
 PUSH_FACE_ANGLE = 45.0
 """deg. A side face counts as the push face when its outward normal is within
 this of the direction pointing away from the target."""
@@ -136,22 +172,42 @@ def build_box_push_rewards() -> dict[str, RewardTermCfg]:
   shared = build_rewards()
   action_rate = shared["action_rate_l2"]
   assert action_rate.weight == w["action_rate_l2"]
+  assert shared["upright"].weight == w["upright"]
   return {
+    "upright": shared["upright"],
+    "posture": RewardTermCfg(
+      func=envs_mdp.posture,
+      weight=w["posture"],
+      params={
+        "std": POSE_STD_WALKING,
+        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+      },
+    ),
     "box_progress": RewardTermCfg(
       func=box_mdp.box_progress,
       weight=w["box_progress"],
       params={"max_speed": BOX_PROGRESS_MAX_SPEED},
+    ),
+    "track_lin_vel": RewardTermCfg(
+      func=box_mdp.track_linear_velocity,
+      weight=w["track_lin_vel"],
+      params={"std": TRACK_LIN_STD},
+    ),
+    "track_ang_vel": RewardTermCfg(
+      func=box_mdp.track_angular_velocity,
+      weight=w["track_ang_vel"],
+      params={"std": TRACK_ANG_STD},
+    ),
+    "box_to_target": RewardTermCfg(
+      func=box_mdp.box_to_target,
+      weight=w["box_to_target"],
+      params={"std": BOX_TO_TARGET_STD},
     ),
     "success": RewardTermCfg(func=box_mdp.box_success_bonus, weight=w["success"]),
     "hand_contact": RewardTermCfg(
       func=box_mdp.hand_contact_on_push_face,
       weight=w["hand_contact"],
       params={"max_angle_deg": PUSH_FACE_ANGLE},
-    ),
-    "stay_near_box": RewardTermCfg(
-      func=box_mdp.stay_near_box,
-      weight=w["stay_near_box"],
-      params={"max_distance": STAY_NEAR_BOX_DISTANCE},
     ),
     "foot_slip": RewardTermCfg(func=box_mdp.feet_slip, weight=w["foot_slip"]),
     "fall": RewardTermCfg(func=box_mdp.fell, weight=w["fall"]),
@@ -209,6 +265,10 @@ def build_box_push_metrics() -> dict[str, MetricsTermCfg]:
     "time_to_target": box_mdp.metric_time_to_target,
     "slip_events": box_mdp.metric_slip_events,
     "fell": box_mdp.metric_fell,
+    "fell_before_contact": box_mdp.metric_fell_before_contact,
+    "fell_after_contact": box_mdp.metric_fell_after_contact,
+    "command_error": box_mdp.metric_command_error,
+    "traction_margin": box_mdp.metric_traction_margin,
     "box_tipped": box_mdp.metric_box_tipped,
     "mean_push_force": box_mdp.metric_mean_push_force,
     "double_support_impulse_frac": box_mdp.metric_double_support_impulse_frac,
@@ -228,6 +288,7 @@ def make_g1_box_push_env_cfg(
   num_envs: int | None = None,
   low_friction_patches: bool = LOW_FRICTION_PATCHES,
   curriculum: bool = CURRICULUM,
+  ball_hands: bool = BALL_HANDS,
   ranges: BoxPushRanges = BoxPushRanges(),
 ) -> ManagerBasedRlEnvCfg:
   """Build a G1 box-pushing config for one observation set."""
@@ -236,7 +297,8 @@ def make_g1_box_push_env_cfg(
   curriculum_cfg = CurriculumCfg() if curriculum else None
 
   # -- scene ---------------------------------------------------------------
-  cfg.scene.entities = {"robot": get_g1_cfg(), **box_entities()}
+  robot = get_g1_ball_hands_cfg() if ball_hands else get_g1_cfg()
+  cfg.scene.entities = {"robot": robot, **box_entities()}
   cfg.scene.num_envs = num_envs or DEFAULT_NUM_ENVS
   # Worlds do not interact; the spacing only matters for the viewer.
   cfg.scene.env_spacing = 8.0
@@ -264,6 +326,9 @@ def make_g1_box_push_env_cfg(
   cfg.sim.njmax = 400
 
   # -- observations --------------------------------------------------------
+  # The actor's task input is the pilot's twist, exactly like the velocity
+  # tasks' operator command: the box pose it would need to plan the approach is
+  # the scripted high level's business, and stays with the critic.
   cfg.observations = build_groups(
     obs_set, has_terrain_scan=False, with_command=False, box_push=True
   )

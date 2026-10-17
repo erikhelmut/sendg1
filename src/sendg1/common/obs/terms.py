@@ -35,7 +35,11 @@ from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
 from sendg1.common.beam import mdp as beam_mdp
 from sendg1.common.box_push import mdp as box_mdp
-from sendg1.common.tactile.sensing import TactileParams, tactile_array_obs
+from sendg1.common.tactile.sensing import (
+  TactileParams,
+  tactile_aggregate_obs,
+  tactile_array_obs,
+)
 
 Availability = Literal["onboard", "oracle", "perceived", "privileged"]
 
@@ -130,6 +134,18 @@ def _tactile_array() -> ObservationTermCfg:
   p = TactileParams()
   return ObservationTermCfg(
     func=tactile_array_obs,
+    params={
+      "layout": p.layout,
+      "rays_per_axis": p.rays_per_axis,
+      "compliance_depth": p.compliance_depth,
+    },
+  )
+
+
+def _tactile_aggregate() -> ObservationTermCfg:
+  p = TactileParams()
+  return ObservationTermCfg(
+    func=tactile_aggregate_obs,
     params={
       "layout": p.layout,
       "rays_per_axis": p.rays_per_axis,
@@ -266,6 +282,14 @@ TERMS: dict[str, TermSpec] = {
     "a load cell, not a tactile array: no spatial distribution over the sole, "
     "so no centre of pressure and no heel-vs-toe discrimination.",
   ),
+  "tactile_aggregate": TermSpec(
+    _tactile_aggregate,
+    "oracle",
+    "Per-foot net normal force, shear, centre of pressure and shear/normal "
+    "ratio, from the same sole reading as tactile_array. Implied by the array, "
+    "but the ratio -- the foot's distance from its friction cone -- is the "
+    "quantity a slip-aware policy needs, so it is given explicitly.",
+  ),
   "tactile_array": TermSpec(
     _tactile_array,
     "oracle",
@@ -328,37 +352,32 @@ TERMS: dict[str, TermSpec] = {
     "measurement.",
   ),
   # -- box pushing: perceived (actor) -----------------------------------------
-  "box_pos_b": TermSpec(
-    _box_term(box_mdp.box_pos_b, BOX_POS_NOISE),
+  "pilot_command": TermSpec(
+    _box_term(box_mdp.pilot_twist),
     "perceived",
-    "Box centre in the pelvis frame. " + _PERCEPTION_ASSUMPTION,
-  ),
-  "box_yaw_b": TermSpec(
-    _box_term(box_mdp.box_yaw_b, BOX_YAW_NOISE),
-    "perceived",
-    "Box yaw relative to the pelvis heading, (sin, cos). " + _PERCEPTION_ASSUMPTION,
-  ),
-  "target_rel_box": TermSpec(
-    _box_term(box_mdp.target_rel_box, BOX_POS_NOISE),
-    "perceived",
-    "Target centre minus box centre, xy in the pelvis yaw frame. "
-    + _PERCEPTION_ASSUMPTION,
+    "The scripted high level's (vx, vy, wz) walking command, in the robot's "
+    "yaw frame -- the same shape as the velocity tasks' operator command. It "
+    "is computed from the box and target poses, which the task assumes an "
+    "external perception stack provides, and it is IDENTICAL across obs sets "
+    "(sendg1.common.box_push.pilot), so it cannot account for a difference "
+    "between them.",
   ),
   # -- box pushing: privileged (critic) ---------------------------------------
   "box_pos_b_true": TermSpec(
     _box_term(box_mdp.box_pos_b),
     "privileged",
-    "Noise-free box_pos_b.",
+    "Box centre in the pelvis frame. Critic only: the actor is told where to "
+    "walk by the pilot, not where the box is.",
   ),
   "box_yaw_b_true": TermSpec(
     _box_term(box_mdp.box_yaw_b),
     "privileged",
-    "Noise-free box_yaw_b.",
+    "Box yaw relative to the pelvis heading, (sin, cos).",
   ),
   "target_rel_box_true": TermSpec(
     _box_term(box_mdp.target_rel_box),
     "privileged",
-    "Noise-free target_rel_box.",
+    "Target centre minus box centre, xy in the pelvis yaw frame.",
   ),
   "floor_mu_under_feet": TermSpec(
     _box_term(box_mdp.floor_mu_under_feet),

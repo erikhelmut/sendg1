@@ -59,11 +59,9 @@ BEAM_PRIVILEGED_TERMS: tuple[str, ...] = (
 )
 
 
-BOX_PUSH_PERCEIVED_TERMS: tuple[str, ...] = (
-  "box_pos_b",
-  "box_yaw_b",
-  "target_rel_box",
-)
+BOX_PUSH_PERCEIVED_TERMS: tuple[str, ...] = ("pilot_command",)
+"""What the box-push actor gets beyond proprioception: the scripted pilot's
+walking command. Three dims, like the velocity tasks' operator command."""
 
 BOX_PUSH_PRIVILEGED_TERMS: tuple[str, ...] = (
   "box_pos_b_true",
@@ -92,6 +90,7 @@ def build_groups(
   with_command: bool = True,
   beam_privileged: bool = False,
   box_push: bool = False,
+  tactile_aggregates: bool = False,
 ) -> dict[str, ObservationGroupCfg]:
   """Build exactly the groups ``obs_set`` needs.
 
@@ -104,12 +103,19 @@ def build_groups(
       that give the robot no command (beam walking).
     beam_privileged: add the ground-truth beam terms to the critic.
     box_push: add the box-pushing task's perceived terms to ``proprio`` and its
-      privileged terms to the critic.
+      privileged terms to the critic. Implies ``tactile_aggregates``.
+    tactile_aggregates: add the per-foot aggregate channels to the
+      ``tactile_array`` group. On for box pushing and for the low level trained
+      for it, so one policy fits both; off elsewhere, which keeps the flat,
+      rough and beam tactile actors at the size their results were measured at.
   """
   if obs_set not in OBS_SETS:
     raise KeyError(f"unknown obs_set {obs_set!r}; known: {sorted(OBS_SETS)}")
   wanted = set(OBS_SETS[obs_set].group_names)
 
+  tactile_terms = TACTILE_ARRAY_TERMS
+  if tactile_aggregates:
+    tactile_terms = tactile_terms + ("tactile_aggregate",)
   proprio = PROPRIO_TERMS
   if not with_command:
     proprio = tuple(t for t in proprio if t != "command")
@@ -122,6 +128,8 @@ def build_groups(
   if box_push:
     proprio = proprio + BOX_PUSH_PERCEIVED_TERMS
     privileged = privileged + BOX_PUSH_PRIVILEGED_TERMS
+    if "tactile_aggregate" not in tactile_terms:
+      tactile_terms = tactile_terms + ("tactile_aggregate",)
 
   builders = {
     "proprio": lambda: ObservationGroupCfg(
@@ -140,7 +148,7 @@ def build_groups(
       enable_corruption=False,
     ),
     "tactile_array": lambda: ObservationGroupCfg(
-      terms=_terms(TACTILE_ARRAY_TERMS),
+      terms=_terms(tactile_terms),
       concatenate_terms=True,
       enable_corruption=False,
     ),
