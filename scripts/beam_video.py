@@ -7,44 +7,26 @@
 
 Runs one env per try (same protocol as ``beam_eval.py``: start platform,
 constant forward command) until an episode with the wanted outcome turns up,
-then writes that episode as an MP4 with a small caption. A failure clip ends
-on the terminating step and its caption names the termination.
+then writes that episode as an MP4 (``sendg1.video.EvalVideo``: studio theme,
+caption, foot-tactile card). A failure clip ends on the terminating step and
+its caption names the termination.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-
-
-def caption(frame, lines):
-  import numpy as np
-  from PIL import Image, ImageDraw, ImageFont
-
-  img = Image.fromarray(frame)
-  d = ImageDraw.Draw(img, "RGBA")
-  try:
-    import matplotlib
-
-    ttf = matplotlib.get_data_path() + "/fonts/ttf/"
-    big = ImageFont.truetype(ttf + "DejaVuSans-Bold.ttf", 18)
-    small = ImageFont.truetype(ttf + "DejaVuSans.ttf", 14)
-  except Exception:
-    big = small = ImageFont.load_default()
-  h = 14 + 22 * len(lines)
-  d.rectangle([0, 0, 360, h], fill=(6, 12, 18, 190))
-  for i, (txt, bold) in enumerate(lines):
-    d.text((12, 8 + 22 * i), txt, font=big if bold else small, fill=(235, 244, 250, 255))
-  return np.asarray(img)
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 
 def main() -> None:
   ap = argparse.ArgumentParser()
-  ap.add_argument("--label", default="", help="caption prefix, e.g. the run name")
+  ap.add_argument("--label", default="", help="caption title, e.g. the run name (default: the task)")
   ap.add_argument("--path", choices=["straight", "bend", "turn"], default="straight",
                   help="beam shape (bend / turn need G1-Beam-E2E-Curved)")
   ap.add_argument("--checkpoint", required=True)
@@ -57,11 +39,11 @@ def main() -> None:
   ap.add_argument("--tries", type=int, default=20)
   ap.add_argument("--seed", type=int, default=0)
   ap.add_argument("--out", default=None)
-  ap.add_argument("--width-px", type=int, default=960)
-  ap.add_argument("--height-px", type=int, default=540)
+  ap.add_argument("--width-px", type=int, default=1280)
+  ap.add_argument("--height-px", type=int, default=720)
+  ap.add_argument("--theme", default="studio", help="studio | gray | mujoco")
   args = ap.parse_args()
 
-  import mediapy
   import torch
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
@@ -70,6 +52,7 @@ def main() -> None:
   import sendg1.tasks  # noqa: F401
   from sendg1.common.beam.mdp import BeamEpisode
   from sendg1.common.beam.terrain import BEAM_WIDTHS
+  from sendg1.video import EvalVideo, prepare_video_cfg
 
   level = min(range(len(BEAM_WIDTHS)), key=lambda i: abs(BEAM_WIDTHS[i] - args.width))
   task = args.task
@@ -93,7 +76,7 @@ def main() -> None:
   twist.ranges.lin_vel_x = (args.speed, args.speed)
   twist.rel_standing_envs = 0.0
   twist.resampling_time_range = (1e6, 1e6)
-  cfg.viewer.width, cfg.viewer.height = args.width_px, args.height_px
+  prepare_video_cfg(cfg, args.width_px, args.height_px, args.theme)
   cfg.viewer.distance = 3.2
   cfg.viewer.elevation = -18.0
   cfg.viewer.azimuth = 135.0
@@ -108,12 +91,15 @@ def main() -> None:
   runner = MjlabOnPolicyRunner(wrapped, asdict(rl_cfg), device="cuda:0")
   runner.load(args.checkpoint, load_cfg={"actor": True}, strict=True, map_location="cuda:0")
   policy = runner.get_inference_policy(device="cuda:0")
+  video = EvalVideo(env, rl_cfg, title=args.label or task, theme=args.theme)
   ep = BeamEpisode.get(env)
   tm = env.termination_manager
 
   chosen = None
   for attempt in range(args.tries):
-    frames, outcome, reason = [], None, ""
+    video.take()
+    video.new_episode()
+    outcome, reason = None, ""
     stand_after = None
     # Reset inside inference mode too: buffers first written during a step
     # are inference tensors and cannot be reset in-place outside it.
@@ -132,25 +118,23 @@ def main() -> None:
           stand_after = step
         progress = float(ep.max_progress[0])
         lines = [
-          (f"{args.label + '   ' if args.label else ''}{args.path} beam {BEAM_WIDTHS[level]:.2f} m", True),
-          (f"command {args.speed:.2f} m/s   progress {max(progress, 0):.2f} m", False),
+          f"{args.path} beam {BEAM_WIDTHS[level]:.2f} m",
+          f"command {args.speed:.2f} m/s   progress {max(progress, 0):.2f} m",
         ]
         if stand_after is not None:
-          lines.append(("end platform reached - command 0", False))
-        frame = env.render()
-        if frame is not None:
-          frames.append(caption(frame, lines))
+          lines.append("end platform reached - command 0")
+        video.capture(lines)
         # Stop 2 s after reaching the end: the rest is standing still.
         if stand_after is not None and step - stand_after > 100:
           outcome = "success"
           break
     if outcome is None:
       outcome = "success" if stand_after is not None else "timeout"
-    print(f"[video] try {attempt}: {outcome} {reason} ({len(frames)} frames)")
+    print(f"[video] try {attempt}: {outcome} {reason} ({len(video.frames)} frames)")
     if args.want == "any" or outcome == args.want:
-      if outcome == "failure" and frames:
-        frames += [caption(frames[-1], [(f"FAILED: {reason}", True)])] * 40
-      chosen = (frames, outcome, reason)
+      if outcome == "failure":
+        video.hold(0.8, [f"{args.path} beam {BEAM_WIDTHS[level]:.2f} m", f"FAILED: {reason}"])
+      chosen = (video.take(), outcome, reason)
       break
 
   env.close()
@@ -162,7 +146,7 @@ def main() -> None:
     or REPO / "media" / "beam" / f"{args.path}_w{BEAM_WIDTHS[level]:.2f}_{outcome}.mp4"
   )
   out.parent.mkdir(parents=True, exist_ok=True)
-  mediapy.write_video(str(out), frames, fps=int(round(1 / env.step_dt)), qp=28)
+  video.save(out, frames, qp=28)
   meta = out.with_suffix(".json")
   meta.write_text(json.dumps({"outcome": outcome, "reason": reason, "width": BEAM_WIDTHS[level]}))
   print(f"[video] wrote {out} ({outcome} {reason})")

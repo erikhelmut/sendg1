@@ -7,6 +7,9 @@ mjlab's `play --video` also records, but it always constructs an interactive
 viewer, which needs a display and hangs on a headless box. This drives the env
 directly with render_mode="rgb_array".
 
+Frames go through ``sendg1.video.EvalVideo``: the dark studio theme, a caption
+with the current command, and the foot-tactile card (zero for blind policies).
+
 Commands follow a scripted schedule so the clip shows the behaviours worth
 seeing (stand, walk, turn, strafe) instead of whatever the sampler happened to
 draw.
@@ -14,13 +17,13 @@ draw.
 
 from __future__ import annotations
 
-import numpy as np
-
 import argparse
+import os
 from dataclasses import asdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 # (seconds, vx, vy, wz, label)
 SCHEDULE = [
@@ -40,32 +43,6 @@ SCHEDULE_SHORT = [
 ]
 
 
-def _overlay(frame, vx, vy, wz, label):
-  """Burn the current command into the frame.
-
-  The scene already draws the command as a 3D arrow above the robot, but the
-  arrow alone does not give magnitudes and is easy to lose against the sky.
-  """
-  from PIL import Image, ImageDraw, ImageFont
-
-  img = Image.fromarray(frame)
-  d = ImageDraw.Draw(img, "RGBA")
-  try:
-    import matplotlib
-    ttf = matplotlib.get_data_path() + "/fonts/ttf/"
-    big = ImageFont.truetype(ttf + "DejaVuSansMono-Bold.ttf", 21)
-    small = ImageFont.truetype(ttf + "DejaVuSans.ttf", 13)
-  except Exception:
-    big = small = ImageFont.load_default()
-
-  d.rectangle([0, 0, 250, 84], fill=(6, 12, 18, 205))
-  d.text((14, 9), "COMMAND", font=small, fill=(150, 170, 185, 255))
-  d.text((14, 27), f"vx {vx:+.1f}  vy {vy:+.1f}", font=big, fill=(235, 244, 250, 255))
-  d.text((14, 51), f"wz {wz:+.1f} rad/s", font=big, fill=(235, 244, 250, 255))
-  d.text((150, 9), label, font=small, fill=(255, 120, 180, 255))
-  return np.asarray(img)
-
-
 def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--task", required=True)
@@ -73,8 +50,8 @@ def main() -> None:
   ap.add_argument("--checkpoint", default=None)
   ap.add_argument("--log-root", default=str(REPO / "runs"))
   ap.add_argument("--out", default=None)
-  ap.add_argument("--width", type=int, default=960)
-  ap.add_argument("--height", type=int, default=600)
+  ap.add_argument("--width", type=int, default=1280)
+  ap.add_argument("--height", type=int, default=720)
   ap.add_argument("--fps", type=int, default=50)
   ap.add_argument("--distance", type=float, default=4.2)
   ap.add_argument("--terrain", default=None,
@@ -87,11 +64,11 @@ def main() -> None:
                   help="keep every Nth frame and divide fps to match")
   ap.add_argument("--short", action="store_true",
                   help="8 s clip instead of the full 18 s schedule")
-  ap.add_argument("--no-overlay", action="store_true")
+  ap.add_argument("--no-overlay", action="store_true", help="no caption lines")
+  ap.add_argument("--theme", default="studio", help="studio | gray | mujoco")
+  ap.add_argument("--no-tactile-card", action="store_true")
   args = ap.parse_args()
 
-  import mediapy
-  import numpy as np  # noqa: F401  (used by _overlay)
   import torch
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
@@ -100,6 +77,7 @@ def main() -> None:
   from mjlab.utils.torch import configure_torch_backends
 
   import sendg1.tasks  # noqa: F401
+  from sendg1.video import EvalVideo, prepare_video_cfg
 
   configure_torch_backends()
   device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -128,14 +106,7 @@ def main() -> None:
     for _g in env_cfg.observations.values():
       _g.enable_corruption = False
 
-  # Turn off sensor debug overlays. The terrain height scan and the per-foot
-  # ray casts are CRITIC-only inputs; drawing them in a clip about a blind
-  # policy implies the actor can see them, which it cannot.
-  for sensor in env_cfg.scene.sensors or ():
-    if hasattr(sensor, "debug_vis"):
-      sensor.debug_vis = False
-  env_cfg.viewer.width = args.width
-  env_cfg.viewer.height = args.height
+  prepare_video_cfg(env_cfg, args.width, args.height, args.theme)
   # Default distance 3.0 with the torso as origin puts the head and the command
   # arrow drawn above it right at the top edge. Pull back and raise the eye line.
   env_cfg.viewer.distance = args.distance
@@ -170,6 +141,9 @@ def main() -> None:
     print(f"[video] pinned to {args.terrain} (col {col}) at level {row}")
   wrapped = RslRlVecEnvWrapper(env, clip_actions=rl_cfg.clip_actions)
 
+  video = EvalVideo(env, rl_cfg, title=args.task, theme=args.theme,
+                    show_tactile=not args.no_tactile_card)
+
   runner_cls = load_runner_cls(args.task) or MjlabOnPolicyRunner
   runner = runner_cls(wrapped, asdict(rl_cfg), device=device)
   runner.load(str(ckpt), load_cfg={"actor": True}, strict=True, map_location=device)
@@ -180,7 +154,6 @@ def main() -> None:
   schedule = SCHEDULE_SHORT if args.short else SCHEDULE
   if cmd_term is None:
     schedule = [(sum(s[0] for s in schedule), 0.0, 0.0, 0.0, "")]
-  frames = []
   obs, _ = wrapped.reset()
 
   with torch.inference_mode():
@@ -194,26 +167,19 @@ def main() -> None:
         policy.reset(dones.bool())
         if cmd_term is not None:
           cmd_term.vel_command_b[:] = cmd
-        frame = env.render()
-        if frame is not None:
-          if cmd_term is not None and not args.no_overlay:
-            frame = _overlay(frame, vx, vy, wz, label)
-          frames.append(frame)
+        if bool(dones[0]):
+          video.new_episode()
+        lines = []
+        if cmd_term is not None and not args.no_overlay:
+          lines = [f"command  vx {vx:+.1f}  vy {vy:+.1f}  wz {wz:+.1f}   {label}"]
+        video.capture(lines)
 
   env.close()
 
   out = Path(args.out or REPO / "media" / f"{rl_cfg.experiment_name}_seed{args.seed}.mp4")
-  out.parent.mkdir(parents=True, exist_ok=True)
-  fps = args.fps
-  if args.subsample > 1:
-    frames = frames[:: args.subsample]
-    fps = args.fps // args.subsample
-  kw = {"fps": fps}
-  if args.qp is not None:
-    kw["qp"] = args.qp
-  mediapy.write_video(str(out), frames, **kw)
+  video.save(out, subsample=args.subsample, fps=args.fps, qp=args.qp)
   size_mb = out.stat().st_size / 1e6
-  print(f"[video] wrote {out}  ({len(frames)} frames, {size_mb:.1f} MB)")
+  print(f"[video] wrote {out}  ({len(video.frames)} frames, {size_mb:.1f} MB)")
 
 
 if __name__ == "__main__":

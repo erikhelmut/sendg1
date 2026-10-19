@@ -15,10 +15,12 @@ initialised policy (init_std 1.0) emits around a zero mean.
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import asdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 
 def main() -> None:
@@ -37,11 +39,11 @@ def main() -> None:
   ap.add_argument("--box-height", type=float, default=None)
   ap.add_argument("--patches", action="store_true", help="enable low-friction patches")
   ap.add_argument("--out", default=None)
-  ap.add_argument("--width", type=int, default=960)
-  ap.add_argument("--height", type=int, default=600)
+  ap.add_argument("--width", type=int, default=1280)
+  ap.add_argument("--height", type=int, default=720)
+  ap.add_argument("--theme", default="studio", help="studio | gray | mujoco")
   args = ap.parse_args()
 
-  import mediapy
   import torch
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
@@ -54,6 +56,7 @@ def main() -> None:
   from sendg1.eval.box_push import configure_video_view, roll_out_video
   from sendg1.tasks._register import variants
   from sendg1.tasks.box_push.env_cfg import make_g1_box_push_env_cfg
+  from sendg1.video import EvalVideo
 
   configure_torch_backends()
   device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -64,10 +67,11 @@ def main() -> None:
   )
   env_cfg.seed = args.env_seed
   env_cfg.observations["proprio"].enable_corruption = False
-  configure_video_view(env_cfg, args.width, args.height)
+  configure_video_view(env_cfg, args.width, args.height, args.theme)
   env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode="rgb_array")
   rl_cfg = load_rl_cfg(args.task)
   wrapped = RslRlVecEnvWrapper(env, clip_actions=rl_cfg.clip_actions)
+  video = EvalVideo(env, rl_cfg, title=args.task, theme=args.theme)
 
   st = BoxPushState.get(env)
   if args.floor_mu is not None:
@@ -104,7 +108,7 @@ def main() -> None:
   for ep in range(args.episodes):
     f, rec, obs = roll_out_video(
       wrapped, act, obs, max_steps=env.max_episode_length + 1,
-      label=f"{label}  ep {ep}", reset_policy=reset_policy,
+      label=f"{label}  ep {ep}", video=video, reset_policy=reset_policy,
     )
     frames += f
     print(f"[video] episode {ep}: " + ", ".join(f"{k}={v:.3g}" for k, v in rec.items()))
@@ -113,7 +117,7 @@ def main() -> None:
     REPO / "videos" / f"box_push_{'random' if args.random else obs_set}.mp4"
   )
   out.parent.mkdir(parents=True, exist_ok=True)
-  mediapy.write_video(str(out), frames, fps=int(round(1 / env.step_dt)))
+  video.save(out, frames)
   print(f"[video] wrote {out} ({len(frames)} frames)")
   env.close()
 

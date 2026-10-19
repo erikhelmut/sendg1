@@ -141,23 +141,6 @@ def record_row(env: ManagerBasedRlEnv, env_id: int) -> dict[str, float]:
   return {name: float(getattr(rec, name)[env_id]) for name in EPISODE_FIELDS}
 
 
-def overlay(frame: np.ndarray, lines: list[str]) -> np.ndarray:
-  from PIL import Image, ImageDraw, ImageFont
-
-  img = Image.fromarray(frame)
-  draw = ImageDraw.Draw(img)
-  try:
-    font = ImageFont.truetype("DejaVuSansMono.ttf", 18)
-  except OSError:
-    font = ImageFont.load_default()
-  y = 10
-  for line in lines:
-    draw.text((12, y), line, fill=(255, 255, 255), font=font, stroke_width=2,
-              stroke_fill=(0, 0, 0))
-    y += 24
-  return np.asarray(img)
-
-
 def status_lines(env: ManagerBasedRlEnv, t: float, label: str = "") -> list[str]:
   st = BoxPushState.get(env)
   lines = [label] if label else []
@@ -174,12 +157,12 @@ def to_dict(protocol: BoxPushProtocol) -> dict:
   return asdict(protocol)
 
 
-def configure_video_view(cfg: ManagerBasedRlEnvCfg, width: int, height: int) -> None:
-  for sensor in cfg.scene.sensors or ():
-    if hasattr(sensor, "debug_vis"):
-      sensor.debug_vis = False
-  cfg.viewer.width = width
-  cfg.viewer.height = height
+def configure_video_view(
+  cfg: ManagerBasedRlEnvCfg, width: int, height: int, theme: str = "studio"
+) -> None:
+  from sendg1.video import prepare_video_cfg
+
+  prepare_video_cfg(cfg, width, height, theme)
 
 
 def roll_out_video(
@@ -189,6 +172,7 @@ def roll_out_video(
   *,
   max_steps: int,
   label: str,
+  video,  # sendg1.video.EvalVideo on the same env
   reset_policy=None,
 ) -> tuple[list[np.ndarray], dict[str, float], object]:
   """Run env 0 for one episode, rendering every step. Returns the frames, the
@@ -200,7 +184,8 @@ def roll_out_video(
   import torch
 
   env = wrapped.unwrapped
-  frames = []
+  video.take()
+  video.new_episode()
   record: dict[str, float] = {}
   with torch.inference_mode():
     for step in range(max_steps):
@@ -210,8 +195,5 @@ def roll_out_video(
           reset_policy(dones.bool())
         record = record_row(env, 0)
         break
-      frame = env.render()
-      if frame is not None:
-        t = (step + 1) * env.step_dt
-        frames.append(overlay(frame, status_lines(env, t, label)))
-  return frames, record, obs
+      video.capture(status_lines(env, (step + 1) * env.step_dt, label))
+  return video.take(), record, obs

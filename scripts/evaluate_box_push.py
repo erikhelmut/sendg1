@@ -22,12 +22,14 @@ import argparse
 import csv
 import json
 import math
+import os
 from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 RAMP = ["#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"]
 """Single-hue sequential ramp (blue, light -> dark): more is darker."""
@@ -240,12 +242,13 @@ def main() -> None:
     return
 
   # -- videos: the first episodes of the lowest- and highest-mu cells ---------
-  import mediapy
+  from sendg1.video import EvalVideo
 
   vcfg = build_eval_env_cfg(args.task, protocol, 1)
-  configure_video_view(vcfg, 960, 600)
+  configure_video_view(vcfg, 1280, 720)
   venv = ManagerBasedRlEnv(cfg=vcfg, device=device, render_mode="rgb_array")
   vwrapped = RslRlVecEnvWrapper(venv, clip_actions=rl_cfg.clip_actions)
+  video = EvalVideo(venv, rl_cfg, title=args.task)
   vpolicy = load_policy(vwrapped)
   vdir = Path(args.video_root) / rl_cfg.experiment_name / f"seed{args.seed}"
   vdir.mkdir(parents=True, exist_ok=True)
@@ -262,9 +265,10 @@ def main() -> None:
         frames, rec, _ = roll_out_video(
           vwrapped, vpolicy, obs, max_steps=venv.max_episode_length + 1,
           label=f"{obs_set} seed {args.seed}  mu {mu:.1f}  {mass:.0f} kg  episode {ep}",
+          video=video,
         )
         path = vdir / f"mu{mu:.1f}_m{mass:.0f}_ep{ep}.mp4"
-        mediapy.write_video(str(path), frames, fps=int(round(1 / venv.step_dt)))
+        video.save(path, frames)
         print(f"[eval] video {path}  success={rec.get('success')}")
   venv.close()
 
