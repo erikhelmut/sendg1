@@ -56,6 +56,16 @@ def _badge(env_cfg, rl_cfg) -> str:
   return "BLIND"
 
 
+def _robot_weight(env) -> float | None:
+  """Weight of env 0's robot in N (its masses as randomised), the reference
+  line on the force trace: two feet together should carry about this."""
+  try:
+    ids = env.scene["robot"].indexing.body_ids
+    return float(env.sim.model.body_mass[0, ids].sum()) * 9.81
+  except Exception:
+    return None
+
+
 class EvalVideo:
   """Frames of env 0 of a rendering env, styled and annotated the same way for
   every task.
@@ -90,7 +100,8 @@ class EvalVideo:
     h, w = env.cfg.viewer.height, env.cfg.viewer.width
     self.card = (
       hud.TactileCard(LAYOUTS[self.params.layout], (h, w), live=self.tactile, vmax=vmax,
-                      history=max(1, int(history_s / env.step_dt)), history_s=history_s)
+                      history=max(1, int(history_s / env.step_dt)), history_s=history_s,
+                      weight=_robot_weight(env))
       if show_tactile
       else None
     )

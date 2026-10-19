@@ -303,7 +303,8 @@ paired policies look the same:
 - **Caption**, top left: a badge (`TACTILE`, `BLIND`, `CONTACT ORACLE`, read
   off the actor's observation terms), the task, and the script's lines.
 - **Tactile feet card**, bottom right: both soles from above, toe up, with
-  per-taxel normal force, the centre of pressure, per-foot load and a 3 s trace.
+  per-taxel normal force, the centre of pressure, per-foot load and a 3 s trace
+  of the load on a newton axis, with the robot's body weight as a dashed reference.
   It is live when the actor reads the tactile sole and all zero otherwise:
   a blind policy gets nothing from it, and the clip shows that.
 

@@ -100,6 +100,7 @@ class TactileCard:
     vmax: float,
     history: int,
     history_s: float,
+    weight: float | None = None,
   ):
     self.layout = layout
     self.live = live
@@ -114,14 +115,25 @@ class TactileCard:
     self.pad = int(16 * u)
     self.gap = int(40 * u)
     self.header = int(46 * u)
-    self.footer = int(130 * u)
+    self.footer = int(170 * u)
     self.w = 2 * sole.size[0] + self.gap + 2 * self.pad + int(70 * u)
     self.h = self.header + sole.size[1] + self.footer
     self.trace = np.zeros((2, history))
     self.history_s = history_s
+    self.weight = weight
+    self.reset()
 
   def reset(self) -> None:
     self.trace[:] = 0.0
+    self.ymax, self.ystep = _nice_axis(max(400.0, 1.3 * (self.weight or 0.0)))
+
+  def _axis(self) -> tuple[float, float]:
+    """Trace y range: only ever grows within an episode, in round steps, so the
+    gridlines do not jump around while the robot walks."""
+    peak = float(self.trace.max()) * 1.1
+    if peak > self.ymax:
+      self.ymax, self.ystep = _nice_axis(peak)
+    return self.ymax, self.ystep
 
   def draw(self, frame: np.ndarray, normal: np.ndarray) -> np.ndarray:
     """``normal`` [2, T] newtons, feet (left, right)."""
@@ -205,23 +217,47 @@ class TactileCard:
            anchor="ma")
     d.text((x1, y + int(9 * u)), f"{self.vmax:.0f} N", font=small, fill=INK_2, anchor="ra")
 
-    # force trace
-    t0 = y + int(32 * u)
+    # force trace, with a newton axis and the robot's weight for reference
+    t0 = y + int(48 * u)
     t1 = self.h - self.pad
-    ymax = max(400.0, float(self.trace.max()) * 1.1)
-    d.line([x0, t1, x1, t1], fill=(255, 255, 255, 40), width=max(1, int(u)))
+    ymax, ystep = self._axis()
+    d.text((x0, y + int(26 * u)), f"total load per foot [N], last {self.history_s:g} s",
+           font=small, fill=INK_2)
+    gx0 = x0 + int(30 * u)  # tick-label gutter
+    to_y = lambda v: t1 - (v / ymax) * (t1 - t0)  # noqa: E731
+    for v in np.arange(0.0, ymax + 1e-6, ystep):
+      yy = to_y(v)
+      d.line([gx0, yy, x1, yy], fill=(255, 255, 255, 60 if v == 0 else 22), width=max(1, int(u)))
+      d.text((gx0 - int(6 * u), yy), f"{v:.0f}", font=small, fill=INK_2, anchor="rm")
+    if self.weight:
+      yy = to_y(self.weight)
+      dash = 6 * u
+      for xa in np.arange(gx0, x1, 2 * dash):
+        d.line([xa, yy, min(xa + dash, x1), yy], fill=(*INK[:3], 150), width=max(1, int(u)))
+      label = f"body weight {self.weight:.0f} N"
+      bx = d.textbbox((x1, yy - int(3 * u)), label, font=small, anchor="rd")
+      d.rectangle([bx[0] - int(4 * u), bx[1] - int(2 * u), bx[2], bx[3] + int(1 * u)],
+                  fill=CARD[:3] + (255,))
+      d.text((x1, yy - int(3 * u)), label, font=small, fill=INK, anchor="rd")
     n = self.trace.shape[1]
-    xs = np.linspace(x0, x1, n)
+    xs = np.linspace(gx0, x1, n)
     for f_idx in range(2):
-      ys = t1 - (self.trace[f_idx] / ymax) * (t1 - t0)
+      ys = to_y(self.trace[f_idx])
       d.line(list(zip(xs, ys)), fill=FOOT_COLORS[f_idx], width=int(2 * u), joint="curve")
-    d.text((x0, t0 - int(4 * u)), f"total load per foot, last {self.history_s:g} s", font=small, fill=INK_2)
 
     card = card.resize((self.w // SS, self.h // SS), Image.LANCZOS)
     img = Image.fromarray(frame).convert("RGBA")
     pos = (img.width - card.width - self.margin, img.height - card.height - self.margin)
     img.alpha_composite(card, pos)
     return np.asarray(img.convert("RGB"))
+
+
+def _nice_axis(peak: float) -> tuple[float, float]:
+  """A round axis top >= ``peak`` and a step giving 2-4 gridlines."""
+  for step in (100.0, 200.0, 250.0, 500.0, 1000.0, 2000.0):
+    if peak / step <= 4:
+      break
+  return float(np.ceil(peak / step) * step), step
 
 
 def caption(frame: np.ndarray, title: str, badge: str, live: bool, lines) -> np.ndarray:
