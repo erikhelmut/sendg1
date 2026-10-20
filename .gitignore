@@ -7,3 +7,5 @@ wandb/
 *.log
 media/
 videos/
+.venv/
+slurm/
