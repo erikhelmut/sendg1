@@ -24,6 +24,7 @@ purpose, with `uv lock --upgrade-package <name>`, and commit `uv.lock`
 together with a note on which baselines the change can move. The
 `--extra cad` extra adds `ezdxf` for `scripts/export_foot_cad.py`.
 
+For the IAS cluster setup and workflow see [cluster.md](cluster.md).
 On a cluster node: the NVIDIA driver must support CUDA 12.8 (driver >= 570),
 and headless rendering needs the driver's EGL library on the node.
 

@@ -57,6 +57,7 @@ uv run python scripts/sweep.py --dry-run
 ## Docs
 
 - [Install](docs/install.md): environment, first runs, known issues
+- [Cluster](docs/cluster.md): training on the IAS cluster, results back here
 - [Tasks](docs/tasks.md): registered tasks and observation sets
 - [Tactile sole](docs/tactile.md): layout, sensor model, the contact oracle
 - [Beam walking](docs/experiments/beam.md),

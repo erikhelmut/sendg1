@@ -8,3 +8,4 @@ wandb/
 media/
 videos/
 .venv/
+slurm/
