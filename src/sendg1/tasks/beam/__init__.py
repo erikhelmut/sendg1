@@ -4,7 +4,13 @@
 Touch-feature experiments, both on curved beams: ``G1-Beam-Touch-Curved``
 (symmetric GRU) and ``G1-Beam-Touch-Curved-Plain`` (plain GRU), with the
 ``touch`` tactile input (``env_cfg.Tactile``). Same rewards, curriculum and
-PPO settings as ``G1-Beam-E2E-Curved``.
+PPO settings as ``G1-Beam-E2E-Curved``. Their blind baseline,
+``G1-Beam-Curved-Blind``, is ``G1-Beam-Touch-Curved-Plain`` without the
+tactile actor input.
+
+Every task has an evaluation-only twin, ``<task>-Eval``: held-out beams and
+35 s episodes (``make_beam_env_cfg(evaluation=True)``), same observations, so
+its training checkpoints load. Not for training.
 
 A GRU actor on the robot's own signals and the tactile slipper, a privileged
 critic. Trained with mjlab's ``train``; evaluated with
@@ -23,6 +29,7 @@ TASK = "G1-Beam-E2E"
 CURVED_TASK = "G1-Beam-E2E-Curved"
 TOUCH_TASK = "G1-Beam-Touch-Curved"
 TOUCH_PLAIN_TASK = "G1-Beam-Touch-Curved-Plain"
+BLIND_TASK = "G1-Beam-Curved-Blind"
 
 
 def assert_actor_is_deployable(observations: dict, groups: tuple[str, ...] = ("actor",)) -> None:
@@ -44,6 +51,7 @@ _TASKS = (
   (CURVED_TASK, True, "map", True, "beam_e2e_curved"),
   (TOUCH_TASK, True, "touch", True, "beam_touch_curved"),
   (TOUCH_PLAIN_TASK, True, "touch", False, "beam_touch_curved_plain"),
+  (BLIND_TASK, True, "none", False, "beam_curved_blind"),
 )
 for _task, _curves, _tactile, _symmetric, _experiment in _TASKS:
   _env = make_beam_env_cfg(curves=_curves, tactile=_tactile)
@@ -52,5 +60,13 @@ for _task, _curves, _tactile, _symmetric, _experiment in _TASKS:
     task_id=_task,
     env_cfg=_env,
     play_env_cfg=make_beam_env_cfg(play=True, curves=_curves, tactile=_tactile),
+    rl_cfg=beam_ppo_cfg(experiment_name=_experiment, symmetric=_symmetric),
+  )
+  _eval = make_beam_env_cfg(curves=_curves, tactile=_tactile, evaluation=True)
+  assert_actor_is_deployable(_eval.observations)
+  register_mjlab_task(
+    task_id=f"{_task}-Eval",
+    env_cfg=_eval,
+    play_env_cfg=make_beam_env_cfg(play=True, curves=_curves, tactile=_tactile, evaluation=True),
     rl_cfg=beam_ppo_cfg(experiment_name=_experiment, symmetric=_symmetric),
   )

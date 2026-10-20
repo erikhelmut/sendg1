@@ -201,6 +201,10 @@ TOUCH_PRIVILEGED_TERMS: tuple[str, ...] = tuple(
 ) + ("taxel_forces_clean", "foot_slip_vel")
 """Its critic adds the clean per-taxel normal and shear forces and the foot
 slip velocity. Friction is in ``beam_params``."""
+BLIND_ACTOR_TERMS: tuple[str, ...] = tuple(n for n in TOUCH_ACTOR_TERMS if n != "tactile_touch")
+"""The blind baseline: the touch actor without its tactile sole, so
+proprioception only. Its critic is the touch critic, so the two differ in the
+actor's input alone."""
 DEPLOYABLE: frozenset[str] = frozenset(
   n for n, s in TERMS.items() if s.availability in ("onboard", "sensor")
 )

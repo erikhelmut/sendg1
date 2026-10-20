@@ -34,10 +34,11 @@ from sendg1.common.beam.terms import (
   ACTOR_TERMS,
   PRIVILEGED_TERMS,
   TERMS,
+  BLIND_ACTOR_TERMS,
   TOUCH_ACTOR_TERMS,
   TOUCH_PRIVILEGED_TERMS,
 )
-from sendg1.common.beam.terrain import make_beam_terrain_cfg
+from sendg1.common.beam.terrain import EVAL_TERRAIN_SEED, make_beam_terrain_cfg
 from sendg1.common.rewards import POSE_STD_WALKING
 from sendg1.common.robots.g1 import (
   G1_FOOT_GEOMS,
@@ -51,6 +52,10 @@ from sendg1.common.tactile.sensing import tactile_scene_sensors
 
 DEFAULT_NUM_ENVS = 4096
 EPISODE_S = 20.0
+EVAL_EPISODE_S = 35.0
+"""Episode length of the ``-Eval`` tasks. A crossing from the start platform is
+~4.65 m, 15.5 s at a perfect 0.3 m/s; 35 s lets a policy that keeps walking at
+half that pace finish, so a time-out means it stalled, not that it was careful."""
 MAX_FORWARD_SPEED = 0.3
 """A careful, probing step on an unseen beam is easier to learn at walking
 pace, and evaluation runs at 0.3 m/s anyway."""
@@ -345,11 +350,12 @@ def build_events() -> dict[str, EventTermCfg]:
 # ---------------------------------------------------------------------------
 
 
-Tactile = Literal["map", "touch"]
+Tactile = Literal["map", "touch", "none"]
 """Actor tactile input. ``map``: soft per-taxel contact map, load, CoP, area,
 edge loading, contact (``tactile_map``, 33 per foot). ``touch``: binary taxel
 map, load, CoP, area, contact (``tactile_touch``, 31 per foot), with clean
-per-taxel normal/shear forces and foot slip velocity in the critic."""
+per-taxel normal/shear forces and foot slip velocity in the critic. ``none``:
+blind, no tactile actor term, with the ``touch`` critic."""
 
 
 def build_observations(
@@ -358,6 +364,7 @@ def build_observations(
   actor_terms, priv_terms, noisy = {
     "map": (ACTOR_TERMS, PRIVILEGED_TERMS, "tactile_map"),
     "touch": (TOUCH_ACTOR_TERMS, TOUCH_PRIVILEGED_TERMS, "tactile_touch"),
+    "none": (BLIND_ACTOR_TERMS, TOUCH_PRIVILEGED_TERMS, None),
   }[tactile]
   critic_actor = tuple(n for n in actor_terms if n != noisy)
   critic_priv = priv_terms + (("beam_ahead",) if curves else ())
@@ -383,12 +390,15 @@ def make_beam_env_cfg(
   num_envs: int | None = None,
   curves: bool = False,
   tactile: Tactile = "map",
+  evaluation: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """``curves``: two thirds of the terrain columns are bent beams
   (``terrain.BEND_MAX_TURN_DEG``), and the critic also sees how the beam
-  turns ahead (``beam_ahead``). ``tactile``: see ``Tactile``."""
+  turns ahead (``beam_ahead``). ``tactile``: see ``Tactile``. ``evaluation``:
+  held-out terrain (``EVAL_TERRAIN_SEED``) and ``EVAL_EPISODE_S`` episodes,
+  observations unchanged so training checkpoints load."""
   cfg = make_velocity_env_cfg()
-  cfg.episode_length_s = EPISODE_S
+  cfg.episode_length_s = EVAL_EPISODE_S if evaluation else EPISODE_S
 
   cfg.scene.entities = {"robot": get_g1_cfg()}
   cfg.scene.num_envs = num_envs or DEFAULT_NUM_ENVS
@@ -401,7 +411,9 @@ def make_beam_env_cfg(
 
   assert cfg.scene.terrain is not None
   cfg.scene.terrain.terrain_type = "generator"
-  cfg.scene.terrain.terrain_generator = make_beam_terrain_cfg(curves=curves)
+  cfg.scene.terrain.terrain_generator = make_beam_terrain_cfg(
+    curves=curves, **({"seed": EVAL_TERRAIN_SEED} if evaluation else {})
+  )
   cfg.scene.terrain.max_init_terrain_level = 0  # everyone starts on the widest beam
 
   cfg.sim.mujoco.ccd_iterations = 50

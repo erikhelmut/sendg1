@@ -97,6 +97,8 @@ PPO (`tasks/beam`, `common/beam`): four registered tasks, not obs-set variants.
 ```bash
 train G1-Beam-E2E --env.scene.num-envs 3072 --agent.logger tensorboard
 train G1-Beam-Touch-Curved-Plain --env.scene.num-envs 3072 --agent.run-name touch_plain_s0
+train G1-Beam-Curved-Blind --env.scene.num-envs 3072 --agent.run-name blind_s0
+python scripts/beam_eval.py --task G1-Beam-Touch-Curved-Plain-Eval --checkpoint <pt> --out results/beam/<name>_eval.json
 python scripts/beam_eval.py --checkpoint runs/beam_e2e/<run>/model_X.pt --out results/beam/<name>.json
 python scripts/beam_eval.py --task G1-Beam-E2E-Curved --checkpoint <pt> --out results/beam/<name>_curved.json
 python scripts/beam_video.py --task G1-Beam-E2E-Curved --path bend --checkpoint <pt> --width 0.20

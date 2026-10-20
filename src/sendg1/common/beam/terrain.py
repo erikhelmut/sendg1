@@ -81,6 +81,9 @@ CURVED_TILE_SIZE = (8.0, 6.0)
 sideways (straight tiles are 8 x 2 m)."""
 
 TERRAIN_SEED = 20261011
+EVAL_TERRAIN_SEED = 20261018
+"""Held-out terrain of the ``-Eval`` tasks: same widths, heights and path
+kinds, but bend and turn shapes the policy never trained on."""
 
 _GROUND_RGBA = (0.18, 0.20, 0.22, 1.0)
 _PLATFORM_RGBA = (0.85, 0.55, 0.20, 1.0)

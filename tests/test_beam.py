@@ -23,6 +23,7 @@ from sendg1.common.beam.terrain import (
 )
 from sendg1.common.tactile.layout import LAYOUTS
 from sendg1.tasks.beam import (
+  BLIND_TASK,
   CURVED_TASK,
   TASK,
   TOUCH_PLAIN_TASK,
@@ -41,11 +42,15 @@ ACTOR_EXPECTED = {
 }
 ACTOR_DIM = 3 + 3 + 29 + 29 + 29 + 1 + 2 * 33
 TOUCH_ACTOR_DIM = ACTOR_DIM - 2 * 33 + 2 * 31
-ALL_TASKS = [TASK, CURVED_TASK, TOUCH_TASK, TOUCH_PLAIN_TASK]
+BLIND_ACTOR_DIM = ACTOR_DIM - 2 * 33
+ALL_TASKS = [TASK, CURVED_TASK, TOUCH_TASK, TOUCH_PLAIN_TASK, BLIND_TASK]
 TOUCH_TASKS = (TOUCH_TASK, TOUCH_PLAIN_TASK)
+TOUCH_CRITIC_TASKS = (*TOUCH_TASKS, BLIND_TASK)
 
 
 def _actor_expected(task: str) -> tuple[set[str], int]:
+  if task == BLIND_TASK:
+    return ACTOR_EXPECTED - {"tactile_map"}, BLIND_ACTOR_DIM
   if task in TOUCH_TASKS:
     return (ACTOR_EXPECTED - {"tactile_map"}) | {"tactile_touch"}, TOUCH_ACTOR_DIM
   return ACTOR_EXPECTED, ACTOR_DIM
@@ -62,7 +67,16 @@ def test_actor_sees_only_deployable_signals(task: str) -> None:
   assert {"base_beam_pose", "feet_beam_pose", "base_lin_vel"} <= critic
   assert ("beam_ahead" in critic) == (task != TASK)
   touch_critic = {"tactile_touch_clean", "taxel_forces_clean", "foot_slip_vel", "beam_params"}
-  assert (touch_critic <= critic) == (task in TOUCH_TASKS)
+  assert (touch_critic <= critic) == (task in TOUCH_CRITIC_TASKS)
+
+
+def test_blind_task_differs_from_touch_plain_only_in_the_actor_input() -> None:
+  touch, blind = load_env_cfg(TOUCH_PLAIN_TASK), load_env_cfg(BLIND_TASK)
+  assert set(touch.observations["actor"].terms) - set(blind.observations["actor"].terms) == {"tactile_touch"}
+  assert touch.observations["critic"].terms.keys() == blind.observations["critic"].terms.keys()
+  assert touch.rewards.keys() == blind.rewards.keys()
+  t_rl, b_rl = load_rl_cfg(TOUCH_PLAIN_TASK), load_rl_cfg(BLIND_TASK)
+  assert t_rl.actor == b_rl.actor and t_rl.critic == b_rl.critic and t_rl.algorithm == b_rl.algorithm
 
 
 def test_touch_tasks_differ_only_in_the_actor_model() -> None:

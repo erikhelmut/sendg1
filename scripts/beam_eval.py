@@ -3,6 +3,7 @@
 
     python scripts/beam_eval.py --checkpoint runs/beam_e2e/<run>/model_14999.pt --out results/beam/e2e_vN.json
     python scripts/beam_eval.py --task G1-Beam-E2E-Curved --checkpoint <pt> --out results/beam/<name>_curved.json
+    python scripts/beam_eval.py --task G1-Beam-Touch-Curved-Plain-Eval --checkpoint <pt> --out results/beam/<name>_eval.json
 
 Protocol (fixed)
 ---------------------------------------------------
@@ -11,7 +12,8 @@ Protocol (fixed)
   columns, reported separately per path kind); each env runs ``--episodes``
   episodes. No curriculum.
 - Every episode starts on the START PLATFORM, whatever the width, with a
-  constant forward command ``--speed`` (default 0.3 m/s), 20 s. Success =
+  constant forward command ``--speed`` (default 0.3 m/s), for the task's
+  episode length (20 s; 35 s on held-out beams with a ``-Eval`` task). Success =
   reaching the end platform with no early termination.
 - Training DR stays on (friction, mass, CoM, motor gains/strength, latency,
   IMU noise/bias, tactile faults at the level's strength). Pushes off by
@@ -209,6 +211,8 @@ def main() -> None:
         "pushes": args.pushes,
         "seed": args.seed,
         "spawn": "start platform at every width",
+        "episode_s": env.cfg.episode_length_s,
+        "terrain_seed": env.cfg.scene.terrain.terrain_generator.seed,
         "start_lateral": args.start_lateral,
         "start_yaw": args.start_yaw,
       },
