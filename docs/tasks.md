@@ -17,9 +17,10 @@ Because the height scan is gone, flat and rough share a 96-dim actor input
 space: one architecture serves both, and flat->rough transfer stays a
 meaningful experiment.
 
-Beam walking and box pushing have their own pages:
+Beam walking, box pushing and rolling-cylinder balance have their own pages:
 [experiments/beam.md](experiments/beam.md),
-[experiments/box-push.md](experiments/box-push.md).
+[experiments/box-push.md](experiments/box-push.md),
+[experiments/rolling-cylinder.md](experiments/rolling-cylinder.md).
 
 ## Observation sets
 
