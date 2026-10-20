@@ -13,12 +13,14 @@ from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import torch
+from mjlab.sensor import ContactMatch
 from mjlab.utils.lab_api.math import matrix_from_quat
 
 from sendg1.common.sensors import (
   SOLE_CONTACT_SENSOR,
   SOLE_CONTACT_SLOTS,
   TAXEL_RAY_LIFT,
+  TERRAIN_MATCH,
   tactile_sensors,
   taxel_ray_sensor_name,
 )
@@ -42,9 +44,12 @@ class TactileParams:
   the give of the slipper and sensor. Linear fall-off to zero."""
 
 
-def tactile_scene_sensors(params: TactileParams = TactileParams()) -> tuple:
-  """The scene sensors ``read_tactile`` needs, configured for ``params``."""
-  return tactile_sensors(LAYOUTS[params.layout], params.rays_per_axis)
+def tactile_scene_sensors(
+  params: TactileParams = TactileParams(), secondary: ContactMatch = TERRAIN_MATCH
+) -> tuple:
+  """The scene sensors ``read_tactile`` needs, configured for ``params``.
+  ``secondary``: what the soles stand on (default: the terrain)."""
+  return tactile_sensors(LAYOUTS[params.layout], params.rays_per_axis, secondary)
 
 
 @lru_cache(maxsize=8)
