@@ -17,6 +17,9 @@ dependencies = [
   # so installs the broken version; mjlab's main branch has since added the same
   # upper bound we set here.
   "wandb>=0.22.3,<0.29",
+  # Direct only so uv can take it from the CUDA 12.8 index ([tool.uv.sources]);
+  # the RTX 50 series (sm_120) needs a cu128 build. uv.lock fixes the version.
+  "torch",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +31,18 @@ cad = ["ezdxf>=1.4"]
 # mjlab/__init__.py::_import_registered_packages loads this group at import time.
 [project.entry-points."mjlab.tasks"]
 sendg1 = "sendg1.tasks"
+
+# uv: `uv sync --extra dev` builds .venv from uv.lock (see docs/install.md).
+[tool.uv]
+environments = ["sys_platform == 'linux'"]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
 
 [build-system]
 requires = ["hatchling"]
