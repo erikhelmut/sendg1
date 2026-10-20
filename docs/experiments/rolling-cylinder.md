@@ -67,11 +67,14 @@ scripts/cluster/submit.sh ~/sendg1-rolling-cylinder G1-RollingCylinder-Touch \
 ```
 
 Seeds 0-4 for anything reported. Picture of the spawn pose:
-`python scripts/rolling_cylinder_render.py`.
+`python scripts/rolling_cylinder_render.py`. One episode of a policy as a
+video (EvalVideo, rendered on the workstation, never on the cluster):
+`python scripts/rolling_cylinder_video.py --task G1-RollingCylinder-Touch
+--checkpoint <pt>`.
 
 ## Status
 
-Not trained yet.
+Seed 0 of both conditions training on the cluster since 2026-10-20.
 
 Known limitation: MuJoCo makes one contact per capsule-cylinder pair, so each
 sole capsule touches the cylinder at one point.
