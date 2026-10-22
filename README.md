@@ -64,4 +64,5 @@ uv run python scripts/sweep.py --dry-run
   [box pushing](docs/experiments/box-push.md)
 - [Evaluation videos](docs/videos.md): one renderer for every clip
 - [Design](docs/design.md): the three rules, decisions on record, open items
+- [Poster figures](docs/poster.md): prosthesis user vs G1 (retreat poster)
 - [CLAUDE.md](CLAUDE.md): working notes for coding agents
