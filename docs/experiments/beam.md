@@ -2,7 +2,7 @@
 
 A blind G1 with the tactile slipper walks along a narrow beam it cannot see,
 from a start platform to an end platform, at a joystick forward speed. Plain
-PPO (`tasks/beam`, `common/beam`): five registered tasks, not obs-set variants,
+PPO (`tasks/beam`, `common/beam`): ten registered tasks, not obs-set variants,
 each with an evaluation-only `<task>-Eval` twin (held-out beams, 35 s episodes;
 same observations, so its checkpoints load).
 
@@ -13,6 +13,11 @@ same observations, so its checkpoints load).
 | `G1-Beam-Touch-Curved` | as `-Curved` | same, tactile as touch features; symmetric GRU | 156 |
 | `G1-Beam-Touch-Curved-Plain` | as `-Curved` | same as `Touch-Curved`; plain GRU (no symmetry) | 156 |
 | `G1-Beam-Curved-Blind` | as `-Curved` | as `Touch-Curved-Plain` without tactile input (blind baseline) | 94 |
+| `G1-Beam-Curved-Blind-Sym` | as `-Curved` | as `Curved-Blind`; symmetric GRU (blind `Touch-Curved`) | 94 |
+| `G1-Beam-Touch-Curved-MLP-Sym` | as `-Curved` | touch features; symmetric MLP, no memory | 156 |
+| `G1-Beam-Touch-Curved-MLP-Plain` | as `-Curved` | touch features; plain MLP, no memory | 156 |
+| `G1-Beam-Curved-Blind-MLP-Sym` | as `-Curved` | no tactile; symmetric MLP, no memory | 94 |
+| `G1-Beam-Curved-Blind-MLP-Plain` | as `-Curved` | no tactile; plain MLP, no memory | 94 |
 
 - **Terrain** (`common/beam/terrain.py`): a 4 m beam between two 1 m platforms,
   0.15-0.30 m above the ground (one height per column). Rows are width levels:
@@ -28,7 +33,9 @@ same observations, so its checkpoints load).
   above 3 N" map, load / body weight, CoP (+-1, 0 in the air), contact area
   and a contact flag, under the same sensor faults. `Touch-Curved-Plain` uses
   rsl_rl's plain `RNNModel` of the same size, to test whether the symmetric
-  actor helps.
+  actor helps. The `-MLP-*` tasks drop the memory: an MLP(512, 256, 128) on the
+  current observation only (joints, previous action, IMU, command, tactile),
+  mirror-equivariant by construction (`rl/symmetric_mlp.py`) or plain.
 - **Critic**: MLP on the actor's terms plus ground truth: base velocity, feet
   and base pose relative to the beam, beam progress, width, height and friction,
   the clean tactile map, contact forces, actuation lag; on curved beams also

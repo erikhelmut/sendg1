@@ -23,9 +23,14 @@ from sendg1.common.beam.terrain import (
 )
 from sendg1.common.tactile.layout import LAYOUTS
 from sendg1.tasks.beam import (
+  BLIND_MLP_PLAIN_TASK,
+  BLIND_MLP_SYM_TASK,
+  BLIND_SYM_TASK,
   BLIND_TASK,
   CURVED_TASK,
   TASK,
+  TOUCH_MLP_PLAIN_TASK,
+  TOUCH_MLP_SYM_TASK,
   TOUCH_PLAIN_TASK,
   TOUCH_TASK,
   assert_actor_is_deployable,
@@ -43,13 +48,14 @@ ACTOR_EXPECTED = {
 ACTOR_DIM = 3 + 3 + 29 + 29 + 29 + 1 + 2 * 33
 TOUCH_ACTOR_DIM = ACTOR_DIM - 2 * 33 + 2 * 31
 BLIND_ACTOR_DIM = ACTOR_DIM - 2 * 33
-ALL_TASKS = [TASK, CURVED_TASK, TOUCH_TASK, TOUCH_PLAIN_TASK, BLIND_TASK]
-TOUCH_TASKS = (TOUCH_TASK, TOUCH_PLAIN_TASK)
-TOUCH_CRITIC_TASKS = (*TOUCH_TASKS, BLIND_TASK)
+BLIND_TASKS = (BLIND_TASK, BLIND_SYM_TASK, BLIND_MLP_SYM_TASK, BLIND_MLP_PLAIN_TASK)
+TOUCH_TASKS = (TOUCH_TASK, TOUCH_PLAIN_TASK, TOUCH_MLP_SYM_TASK, TOUCH_MLP_PLAIN_TASK)
+ALL_TASKS = [TASK, CURVED_TASK, *TOUCH_TASKS, *BLIND_TASKS]
+TOUCH_CRITIC_TASKS = (*TOUCH_TASKS, *BLIND_TASKS)
 
 
 def _actor_expected(task: str) -> tuple[set[str], int]:
-  if task == BLIND_TASK:
+  if task in BLIND_TASKS:
     return ACTOR_EXPECTED - {"tactile_map"}, BLIND_ACTOR_DIM
   if task in TOUCH_TASKS:
     return (ACTOR_EXPECTED - {"tactile_map"}) | {"tactile_touch"}, TOUCH_ACTOR_DIM
@@ -68,15 +74,6 @@ def test_actor_sees_only_deployable_signals(task: str) -> None:
   assert ("beam_ahead" in critic) == (task != TASK)
   touch_critic = {"tactile_touch_clean", "taxel_forces_clean", "foot_slip_vel", "beam_params"}
   assert (touch_critic <= critic) == (task in TOUCH_CRITIC_TASKS)
-
-
-def test_blind_task_differs_from_touch_plain_only_in_the_actor_input() -> None:
-  touch, blind = load_env_cfg(TOUCH_PLAIN_TASK), load_env_cfg(BLIND_TASK)
-  assert set(touch.observations["actor"].terms) - set(blind.observations["actor"].terms) == {"tactile_touch"}
-  assert touch.observations["critic"].terms.keys() == blind.observations["critic"].terms.keys()
-  assert touch.rewards.keys() == blind.rewards.keys()
-  t_rl, b_rl = load_rl_cfg(TOUCH_PLAIN_TASK), load_rl_cfg(BLIND_TASK)
-  assert t_rl.actor == b_rl.actor and t_rl.critic == b_rl.critic and t_rl.algorithm == b_rl.algorithm
 
 
 def test_touch_tasks_differ_only_in_the_actor_model() -> None:
@@ -324,7 +321,7 @@ def test_mirror_maps_match_g1_kinematics_and_are_involutions(task: str) -> None:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("task", [TASK, TOUCH_TASK])
+@pytest.mark.parametrize("task", [TASK, TOUCH_TASK, BLIND_SYM_TASK, TOUCH_MLP_SYM_TASK, BLIND_MLP_SYM_TASK])
 def test_actor_is_mirror_equivariant(task: str) -> None:
   """pi(M_o o_1..t) = M_a pi(o_1..t) over a whole observation sequence."""
   from dataclasses import asdict
@@ -386,6 +383,53 @@ def test_plain_actor_trains_one_iteration(tmp_path) -> None:
     runner = MjlabOnPolicyRunner(RslRlVecEnvWrapper(env), rl, log_dir=str(tmp_path), device="cuda:0")
     actor = runner.alg.actor
     assert isinstance(actor, RNNModel) and not isinstance(actor, SymmetricRNNModel)
+    runner.learn(num_learning_iterations=1)
+    assert all(torch.isfinite(p).all() for p in actor.parameters())
+  finally:
+    env.close()
+
+
+@pytest.mark.parametrize(
+  ("touch", "blind"),
+  [
+    (TOUCH_PLAIN_TASK, BLIND_TASK),
+    (TOUCH_TASK, BLIND_SYM_TASK),
+    (TOUCH_MLP_SYM_TASK, BLIND_MLP_SYM_TASK),
+    (TOUCH_MLP_PLAIN_TASK, BLIND_MLP_PLAIN_TASK),
+  ],
+)
+def test_blind_twin_differs_only_in_the_tactile_input(touch: str, blind: str) -> None:
+  t, b = load_env_cfg(touch), load_env_cfg(blind)
+  assert set(t.observations["actor"].terms) - set(b.observations["actor"].terms) == {"tactile_touch"}
+  assert t.observations["critic"].terms.keys() == b.observations["critic"].terms.keys()
+  assert t.rewards.keys() == b.rewards.keys()
+  t_rl, b_rl = load_rl_cfg(touch), load_rl_cfg(blind)
+  assert t_rl.actor == b_rl.actor and t_rl.critic == b_rl.critic and t_rl.algorithm == b_rl.algorithm
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("task", [TOUCH_MLP_SYM_TASK, TOUCH_MLP_PLAIN_TASK])
+def test_mlp_actor_trains_one_iteration(task: str, tmp_path) -> None:
+  """The memoryless experiments build their MLP actor and run a PPO update."""
+  from dataclasses import asdict
+
+  from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+
+  from rsl_rl.models.mlp_model import MLPModel
+
+  from sendg1.rl.symmetric_mlp import SymmetricMLPModel
+
+  cfg = load_env_cfg(task)
+  cfg.scene.num_envs = 8
+  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
+  try:
+    rl = asdict(load_rl_cfg(task))
+    rl["logger"] = "tensorboard"
+    runner = MjlabOnPolicyRunner(RslRlVecEnvWrapper(env), rl, log_dir=str(tmp_path), device="cuda:0")
+    actor = runner.alg.actor
+    assert isinstance(actor, MLPModel) and not actor.is_recurrent
+    assert isinstance(actor, SymmetricMLPModel) == (task == TOUCH_MLP_SYM_TASK)
     runner.learn(num_learning_iterations=1)
     assert all(torch.isfinite(p).all() for p in actor.parameters())
   finally:

@@ -6,7 +6,12 @@ Touch-feature experiments, both on curved beams: ``G1-Beam-Touch-Curved``
 ``touch`` tactile input (``env_cfg.Tactile``). Same rewards, curriculum and
 PPO settings as ``G1-Beam-E2E-Curved``. Their blind baseline,
 ``G1-Beam-Curved-Blind``, is ``G1-Beam-Touch-Curved-Plain`` without the
-tactile actor input.
+tactile actor input; ``G1-Beam-Curved-Blind-Sym`` is the same with the
+symmetric GRU (blind ``G1-Beam-Touch-Curved``).
+
+Memoryless actors, an MLP on the current observation only (``rl_cfg.ActorKind``),
+symmetric or plain, touch or blind: ``G1-Beam-Touch-Curved-MLP-{Sym,Plain}``,
+``G1-Beam-Curved-Blind-MLP-{Sym,Plain}``.
 
 Every task has an evaluation-only twin, ``<task>-Eval``: held-out beams and
 35 s episodes (``make_beam_env_cfg(evaluation=True)``), same observations, so
@@ -30,6 +35,11 @@ CURVED_TASK = "G1-Beam-E2E-Curved"
 TOUCH_TASK = "G1-Beam-Touch-Curved"
 TOUCH_PLAIN_TASK = "G1-Beam-Touch-Curved-Plain"
 BLIND_TASK = "G1-Beam-Curved-Blind"
+BLIND_SYM_TASK = "G1-Beam-Curved-Blind-Sym"
+TOUCH_MLP_SYM_TASK = "G1-Beam-Touch-Curved-MLP-Sym"
+TOUCH_MLP_PLAIN_TASK = "G1-Beam-Touch-Curved-MLP-Plain"
+BLIND_MLP_SYM_TASK = "G1-Beam-Curved-Blind-MLP-Sym"
+BLIND_MLP_PLAIN_TASK = "G1-Beam-Curved-Blind-MLP-Plain"
 
 
 def assert_actor_is_deployable(observations: dict, groups: tuple[str, ...] = ("actor",)) -> None:
@@ -46,21 +56,26 @@ def assert_actor_is_deployable(observations: dict, groups: tuple[str, ...] = ("a
 
 
 _TASKS = (
-  # task, curves, tactile, symmetric actor, experiment
-  (TASK, False, "map", True, "beam_e2e"),
-  (CURVED_TASK, True, "map", True, "beam_e2e_curved"),
-  (TOUCH_TASK, True, "touch", True, "beam_touch_curved"),
-  (TOUCH_PLAIN_TASK, True, "touch", False, "beam_touch_curved_plain"),
-  (BLIND_TASK, True, "none", False, "beam_curved_blind"),
+  # task, curves, tactile, actor, experiment
+  (TASK, False, "map", "sym_gru", "beam_e2e"),
+  (CURVED_TASK, True, "map", "sym_gru", "beam_e2e_curved"),
+  (TOUCH_TASK, True, "touch", "sym_gru", "beam_touch_curved"),
+  (TOUCH_PLAIN_TASK, True, "touch", "gru", "beam_touch_curved_plain"),
+  (BLIND_TASK, True, "none", "gru", "beam_curved_blind"),
+  (BLIND_SYM_TASK, True, "none", "sym_gru", "beam_curved_blind_sym"),
+  (TOUCH_MLP_SYM_TASK, True, "touch", "sym_mlp", "beam_touch_curved_mlp_sym"),
+  (TOUCH_MLP_PLAIN_TASK, True, "touch", "mlp", "beam_touch_curved_mlp_plain"),
+  (BLIND_MLP_SYM_TASK, True, "none", "sym_mlp", "beam_curved_blind_mlp_sym"),
+  (BLIND_MLP_PLAIN_TASK, True, "none", "mlp", "beam_curved_blind_mlp_plain"),
 )
-for _task, _curves, _tactile, _symmetric, _experiment in _TASKS:
+for _task, _curves, _tactile, _actor, _experiment in _TASKS:
   _env = make_beam_env_cfg(curves=_curves, tactile=_tactile)
   assert_actor_is_deployable(_env.observations)
   register_mjlab_task(
     task_id=_task,
     env_cfg=_env,
     play_env_cfg=make_beam_env_cfg(play=True, curves=_curves, tactile=_tactile),
-    rl_cfg=beam_ppo_cfg(experiment_name=_experiment, symmetric=_symmetric),
+    rl_cfg=beam_ppo_cfg(experiment_name=_experiment, actor=_actor),
   )
   _eval = make_beam_env_cfg(curves=_curves, tactile=_tactile, evaluation=True)
   assert_actor_is_deployable(_eval.observations)
@@ -68,5 +83,5 @@ for _task, _curves, _tactile, _symmetric, _experiment in _TASKS:
     task_id=f"{_task}-Eval",
     env_cfg=_eval,
     play_env_cfg=make_beam_env_cfg(play=True, curves=_curves, tactile=_tactile, evaluation=True),
-    rl_cfg=beam_ppo_cfg(experiment_name=_experiment, symmetric=_symmetric),
+    rl_cfg=beam_ppo_cfg(experiment_name=_experiment, actor=_actor),
   )
