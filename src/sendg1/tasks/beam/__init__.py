@@ -13,6 +13,10 @@ Memoryless actors, an MLP on the current observation only (``rl_cfg.ActorKind``)
 symmetric or plain, touch or blind: ``G1-Beam-Touch-Curved-MLP-{Sym,Plain}``,
 ``G1-Beam-Curved-Blind-MLP-{Sym,Plain}``.
 
+Reward study on the touch plain MLP: ``G1-Beam-Touch-Curved-MLP-Plain-R-<Variant>``,
+one per ``env_cfg.REWARD_VARIANTS`` entry (``R-Base`` is the unchanged reward),
+everything else as ``G1-Beam-Touch-Curved-MLP-Plain``.
+
 Every task has an evaluation-only twin, ``<task>-Eval``: held-out beams and
 35 s episodes (``make_beam_env_cfg(evaluation=True)``), same observations, so
 its training checkpoints load. Not for training.
@@ -27,7 +31,7 @@ from __future__ import annotations
 from mjlab.tasks.registry import register_mjlab_task
 
 from sendg1.common.beam.terms import DEPLOYABLE, TERMS
-from sendg1.tasks.beam.env_cfg import make_beam_env_cfg
+from sendg1.tasks.beam.env_cfg import REWARD_VARIANTS, make_beam_env_cfg
 from sendg1.tasks.beam.rl_cfg import beam_ppo_cfg
 
 TASK = "G1-Beam-E2E"
@@ -68,20 +72,33 @@ _TASKS = (
   (BLIND_MLP_SYM_TASK, True, "none", "sym_mlp", "beam_curved_blind_mlp_sym"),
   (BLIND_MLP_PLAIN_TASK, True, "none", "mlp", "beam_curved_blind_mlp_plain"),
 )
-for _task, _curves, _tactile, _actor, _experiment in _TASKS:
-  _env = make_beam_env_cfg(curves=_curves, tactile=_tactile)
+
+def reward_task(variant: str) -> str:
+  return f"{TOUCH_MLP_PLAIN_TASK}-R-" + "-".join(w.title() for w in variant.split("_"))
+
+
+_REWARD_TASKS = tuple(
+  (reward_task(v), True, "touch", "mlp", f"beam_touch_mlp_plain_r_{v}", v) for v in REWARD_VARIANTS
+)
+for _task, _curves, _tactile, _actor, _experiment, _reward in (
+  *((*t, "base") for t in _TASKS),
+  *_REWARD_TASKS,
+):
+  _env = make_beam_env_cfg(curves=_curves, tactile=_tactile, reward=_reward)
   assert_actor_is_deployable(_env.observations)
   register_mjlab_task(
     task_id=_task,
     env_cfg=_env,
-    play_env_cfg=make_beam_env_cfg(play=True, curves=_curves, tactile=_tactile),
+    play_env_cfg=make_beam_env_cfg(play=True, curves=_curves, tactile=_tactile, reward=_reward),
     rl_cfg=beam_ppo_cfg(experiment_name=_experiment, actor=_actor),
   )
-  _eval = make_beam_env_cfg(curves=_curves, tactile=_tactile, evaluation=True)
+  _eval = make_beam_env_cfg(curves=_curves, tactile=_tactile, evaluation=True, reward=_reward)
   assert_actor_is_deployable(_eval.observations)
   register_mjlab_task(
     task_id=f"{_task}-Eval",
     env_cfg=_eval,
-    play_env_cfg=make_beam_env_cfg(play=True, curves=_curves, tactile=_tactile, evaluation=True),
+    play_env_cfg=make_beam_env_cfg(
+      play=True, curves=_curves, tactile=_tactile, evaluation=True, reward=_reward
+    ),
     rl_cfg=beam_ppo_cfg(experiment_name=_experiment, actor=_actor),
   )

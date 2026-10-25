@@ -62,5 +62,32 @@ python scripts/beam_video.py --task G1-Beam-E2E-Curved --path bend --checkpoint 
 python scripts/render_terrain.py --terrain-set beam --prefix beam --row 2
 ```
 
+`beam_eval.py` also reports the gait per width: real swings (air phases of at
+least 0.1 s) per metre, their median and p90 apex, the share of lift-offs that
+are contact chatter, and stance slide in cm per metre travelled. Success alone
+hides a skating gait (no swings, high slide), and such a gait depends on
+friction on hardware, so read both.
+
+## Reward study (touch plain MLP)
+
+The first touch-MLP run skated: almost no swings, 1.3-2 m of foot slide per
+metre walked. `G1-Beam-Touch-Curved-MLP-Plain-R-<Variant>` changes only the
+reward (`env_cfg.REWARD_VARIANTS`, test-enforced), built from six parts:
+
+| part | change |
+|---|---|
+| `slip` | `foot_slip` (-0.1, \|v\|^2) -> `stance_slip` (-1.0, \|v\| of feet in contact) |
+| `clear` | `swing_clearance` +5 per metre gained by steps with >= 5 cm apex |
+| `air` | `feet_air_time` 0.25 -> 1.0 |
+| `soft` | `touchdown_force_rate` -5 -> -2, swing-foot speed cap 1.2 -> 1.6 m/s |
+| `arms` | posture on legs + waist only, `arm_posture` / `arm_joint_vel` -0.02 -> -0.005 |
+| `tandem` | `feet_in_line` gap std 8 -> 15 cm (partial credit for a narrower stance) |
+
+Variants: `base`, `slip`, `clear`, `step` (slip + clear), `step_air`,
+`step_soft`, `arms`, `tandem`, `step_arms`, `step_tandem`, `all`. Seed 0 runs
+on the normal QoS, seed 1 on `--qos=scavenger`. A preempted scavenger job is
+requeued and resumes from its newest checkpoint (`train.sbatch`), so it
+saves every 250 iterations.
+
 Best straight-beam policy so far (`e2e_v3b`, `results/beam/e2e_v3b*.json`):
 success 79/69/56/52/0/0/0 % from 0.40 to 0.05 m.

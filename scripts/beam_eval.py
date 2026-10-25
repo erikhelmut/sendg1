@@ -21,6 +21,14 @@ Protocol (fixed)
 - Per episode: success, distance traversed along the beam (from the beam start,
   clipped to [0, beam length]), mean |v_cmd - v_along| while walking, and which
   termination fired.
+- Gait, per width (``gait``): swings (air phases of at least ``MIN_SWING_S``)
+  per metre the pelvis travelled, their median / p90 apex (foot-site height
+  gained between lift-off and touch-down), the share of lift-offs that are
+  shorter contact chatter, stance slide (horizontal foot-site speed while in
+  contact, integrated, per metre travelled) and the fraction of foot-time in
+  the air. A shuffling gait shows up as few swings, a low apex and a high
+  slide; success rates alone hide it, and a gait that relies on sliding is
+  friction-dependent on hardware.
 
 Writes ``--out`` (default ``results/beam/eval[_<tag>].json``).
 """
@@ -114,6 +122,93 @@ def _record_episodes(env, env_ids):
   return {}
 
 
+MIN_SWING_S = 0.1  # shorter air phases are contact chatter, not steps
+
+
+class GaitMeter:
+  """Accumulates the gait statistics of the running episode of every env.
+  ``step`` runs after each env step; envs reset in that step are skipped (their
+  state is already the next episode's spawn) and restarted."""
+
+  def __init__(self, env):
+    import torch
+
+    from sendg1.common.beam.mdp import BeamEpisode
+
+    self.env, self.robot = env, env.scene["robot"]
+    self.sites = BeamEpisode.get(env)._foot_sites
+    z = lambda: torch.zeros(env.num_envs, device=env.device)  # noqa: E731
+    self.path, self.slide, self.air, self.steps, self.chatter = z(), z(), z(), z(), z()
+    self.air_t = torch.zeros(env.num_envs, 2, device=env.device)
+    self.apexes: list[list[float]] = [[] for _ in range(env.num_envs)]
+    c, z_, xy = self._state()
+    self.c, self.lift_z, self.apex, self.xy = c.clone(), z_.clone(), torch.zeros_like(z_), xy.clone()
+
+  def _state(self):
+    from sendg1.common.beam.mdp import _feet_in_contact
+
+    d = self.robot.data
+    return _feet_in_contact(self.env), d.site_pos_w[:, self.sites, 2], d.root_link_pos_w[:, :2]
+
+  def step(self, dones):
+    import torch
+
+    live = ~dones
+    c, z, xy = self._state()
+    v = self.robot.data.site_lin_vel_w[:, self.sites, :2].norm(dim=-1)
+    off = self.c & ~c & live[:, None]
+    on = ~self.c & c & live[:, None]
+    self.lift_z = torch.where(off, z, self.lift_z)
+    self.apex = torch.where(off, torch.zeros_like(self.apex), torch.maximum(self.apex, z - self.lift_z))
+    self.air_t = torch.where(c, self.air_t, self.air_t + self.env.step_dt)
+    swing = on & (self.air_t >= MIN_SWING_S)
+    for i, f in swing.nonzero().tolist():
+      self.apexes[i].append(float(self.apex[i, f]))
+    self.chatter += (on & ~swing).sum(1)
+    self.air_t = torch.where(c, torch.zeros_like(self.air_t), self.air_t)
+    m = live.float()
+    self.air += (~c).float().sum(1) * m
+    self.steps += m
+    self.slide += (v * c.float()).sum(1) * self.env.step_dt * m
+    self.path += (xy - self.xy).norm(dim=-1) * m
+    # Reset envs restart from their spawn state.
+    d = dones[:, None]
+    self.c, self.xy = c, xy.clone()
+    self.lift_z = torch.where(d, z, self.lift_z)
+    self.apex = torch.where(d, torch.zeros_like(self.apex), self.apex)
+    self.air_t = torch.where(d, torch.zeros_like(self.air_t), self.air_t)
+
+  def pop(self, e: int) -> dict:
+    """The finished episode of env ``e``; zeroes its counters."""
+    out = {
+      "path_m": float(self.path[e]),
+      "slide_m": float(self.slide[e]),
+      "chatter": int(self.chatter[e]),
+      "air_frac": float(self.air[e] / (2 * self.steps[e].clamp(min=1))),
+      "_apex": self.apexes[e],
+    }
+    for t in (self.path, self.slide, self.air, self.steps, self.chatter):
+      t[e] = 0.0
+    self.apexes[e] = []
+    return out
+
+
+def _gait(rs: list[dict]) -> dict:
+  import numpy as np
+
+  apex = np.array([a for r in rs for a in r["_apex"]]) * 100
+  path = max(sum(r["path_m"] for r in rs), 1e-6)
+  chatter = sum(r["chatter"] for r in rs)
+  return {
+    "swings_per_m": apex.size / path,
+    "swing_apex_cm_median": float(np.median(apex)) if apex.size else None,
+    "swing_apex_cm_p90": float(np.quantile(apex, 0.9)) if apex.size else None,
+    "chatter_frac": chatter / max(chatter + apex.size, 1),
+    "slide_cm_per_m": 100 * sum(r["slide_m"] for r in rs) / path,
+    "air_frac": sum(r["air_frac"] for r in rs) / len(rs),
+  }
+
+
 def load_policy(args, env):
   """Actor only, so a checkpoint loads into either beam task (their critics
   differ by the curved task's ``beam_ahead``)."""
@@ -157,6 +252,8 @@ def _per_width(by_w: dict[float, list[dict]]) -> dict:
       "vel_err": sum(r["vel_err"] for r in rs) / n,
       "ends": dict(ends),
     }
+    if "_apex" in rs[0]:
+      out[f"{w:.2f}"]["gait"] = _gait(rs)
   return out
 
 
@@ -185,11 +282,16 @@ def main() -> None:
   # Run until every env has finished ``episodes`` episodes (envs that fail fast
   # must not fill the quota for slow ones).
   done_per_env = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+  gait = GaitMeter(env)
   with torch.inference_mode():
     while bool((done_per_env < args.episodes).any()):
+      n0 = len(env._beam_records)
       obs, _, dones, _ = wrapped.step(policy(obs))
       policy.reset(dones.bool())
       done_per_env += dones.long()
+      gait.step(dones.bool())
+      for r in env._beam_records[n0:]:
+        r.update(gait.pop(r["env"]))
   # Keep exactly the first ``episodes`` per env, so every width is weighted the same.
   kept, seen = [], defaultdict(int)
   for r in env._beam_records:
@@ -198,6 +300,8 @@ def main() -> None:
       seen[r["env"]] += 1
   summary = summarise(kept)
   by_path = summarise_by_path(kept)
+  for r in kept:
+    r.pop("_apex")  # pooled into the per-width gait; too long to keep per episode
   out = Path(args.out or REPO / "results" / "beam" / f"eval{('_' + args.tag) if args.tag else ''}.json")
   out.parent.mkdir(parents=True, exist_ok=True)
   json.dump(
@@ -228,6 +332,13 @@ def main() -> None:
     print(
       f"  width {w}  n={s['n']:4d}  success {s['success_rate']:.3f}  "
       f"traversed {s['traversed_m']:.2f} m  vel_err {s['vel_err']:.3f}  {s['ends']}"
+    )
+    g = s["gait"]
+    print(
+      f"              swings {g['swings_per_m']:.1f}/m  apex {g['swing_apex_cm_median'] or 0:.2f}"
+      f"/{g['swing_apex_cm_p90'] or 0:.2f} cm  chatter {g['chatter_frac']:.2f}"
+      f"  slide {g['slide_cm_per_m']:.0f} cm/m"
+      f"  air {g['air_frac']:.2f}"
     )
   if len(by_path) > 1:
     for p, per_w in by_path.items():

@@ -34,7 +34,9 @@ from sendg1.tasks.beam import (
   TOUCH_PLAIN_TASK,
   TOUCH_TASK,
   assert_actor_is_deployable,
+  reward_task,
 )
+from sendg1.tasks.beam.env_cfg import REWARD_VARIANTS
 
 ACTOR_EXPECTED = {
   "base_ang_vel",
@@ -434,3 +436,19 @@ def test_mlp_actor_trains_one_iteration(task: str, tmp_path) -> None:
     assert all(torch.isfinite(p).all() for p in actor.parameters())
   finally:
     env.close()
+
+
+@pytest.mark.parametrize("variant", sorted(REWARD_VARIANTS))
+def test_reward_variant_changes_only_the_reward(variant: str) -> None:
+  """The reward study compares rewards: observations, events, terminations,
+  terrain, curriculum and PPO are the touch plain MLP's."""
+  from sendg1.fingerprint import fingerprint
+
+  v, ref = load_env_cfg(reward_task(variant)), load_env_cfg(TOUCH_MLP_PLAIN_TASK)
+  for part in ("observations", "events", "terminations", "curriculum", "commands", "actions"):
+    assert fingerprint(getattr(v, part)) == fingerprint(getattr(ref, part)), part
+  assert fingerprint(v.scene.terrain) == fingerprint(ref.scene.terrain)
+  v_rl, ref_rl = load_rl_cfg(reward_task(variant)), load_rl_cfg(TOUCH_MLP_PLAIN_TASK)
+  assert v_rl.actor == ref_rl.actor and v_rl.critic == ref_rl.critic and v_rl.algorithm == ref_rl.algorithm
+  same = fingerprint(v.rewards) == fingerprint(ref.rewards)
+  assert same == (variant == "base")

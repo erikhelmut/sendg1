@@ -241,6 +241,83 @@ def build_rewards() -> dict[str, RewardTermCfg]:
   }
 
 
+def _reward_slip(r: dict[str, RewardTermCfg]) -> None:
+  # Replaces the squared foot_slip (-0.1), which a 0.3 m/s skate barely felt.
+  r.pop("foot_slip")
+  r["stance_slip"] = RewardTermCfg(func=mdp.stance_slip, weight=-1.0)
+
+
+def _reward_clear(r: dict[str, RewardTermCfg]) -> None:
+  r["swing_clearance"] = RewardTermCfg(
+    func=mdp.swing_clearance, weight=5.0, params={"target_height": 0.05}
+  )
+
+
+def _reward_air(r: dict[str, RewardTermCfg]) -> None:
+  r["feet_air_time"].weight = 1.0
+
+
+def _reward_soft(r: dict[str, RewardTermCfg]) -> None:
+  # The two terms that make a real step (a load rising within a few steps,
+  # a fast swing foot) costlier than sliding the foot along the beam.
+  r["touchdown_force_rate"].weight = -2.0
+  r["swing_foot_speed"].params = {"max_speed": 1.6}
+
+
+def _reward_arms(r: dict[str, RewardTermCfg]) -> None:
+  # Arms free to balance: posture holds only legs and waist, the arm pull and
+  # arm-velocity costs drop 4x (wrists still drift without any pull).
+  r["posture"].params = {
+    "std": {
+      k: v for k, v in POSE_STD_BEAM.items() if not any(a in k for a in ("shoulder", "elbow", "wrist"))
+    },
+    "asset_cfg": SceneEntityCfg("robot", joint_names=(*LEG_JOINTS, ".*waist.*")),
+  }
+  r["arm_posture"].weight = -0.005
+  r["arm_joint_vel"].weight = -0.005
+
+
+def _reward_tandem(r: dict[str, RewardTermCfg]) -> None:
+  # Partial credit for narrowing the stance on the way to heel-to-toe: at
+  # std 0.08 a side-by-side gait (gap ~12-15 cm) earned ~3% of it, so nothing
+  # pulled the feet together; at 0.15 it earns ~40-50%.
+  r["feet_in_line"].params = {"std": 0.15}
+
+
+_REWARD_PARTS = {
+  "slip": _reward_slip,
+  "clear": _reward_clear,
+  "air": _reward_air,
+  "soft": _reward_soft,
+  "arms": _reward_arms,
+  "tandem": _reward_tandem,
+}
+REWARD_VARIANTS: dict[str, tuple[str, ...]] = {
+  "base": (),
+  "slip": ("slip",),
+  "clear": ("clear",),
+  "step": ("slip", "clear"),
+  "step_air": ("slip", "clear", "air"),
+  "step_soft": ("slip", "clear", "soft"),
+  "arms": ("arms",),
+  "tandem": ("tandem",),
+  "step_arms": ("slip", "clear", "arms"),
+  "step_tandem": ("slip", "clear", "tandem"),
+  "all": ("slip", "clear", "air", "soft", "arms", "tandem"),
+}
+"""Reward alternatives on top of ``build_rewards`` for the touch-MLP study:
+the first touch-MLP run skated (no swings, 1.3-2 m of slide per metre walked).
+``step`` = penalise sliding + pay lifted steps; ``arms`` frees the arms for
+balancing; ``tandem`` pulls the feet toward heel-to-toe."""
+
+
+def build_variant_rewards(variant: str) -> dict[str, RewardTermCfg]:
+  r = build_rewards()
+  for part in REWARD_VARIANTS[variant]:
+    _REWARD_PARTS[part](r)
+  return r
+
+
 # ---------------------------------------------------------------------------
 # Terminations
 # ---------------------------------------------------------------------------
@@ -391,12 +468,14 @@ def make_beam_env_cfg(
   curves: bool = False,
   tactile: Tactile = "map",
   evaluation: bool = False,
+  reward: str = "base",
 ) -> ManagerBasedRlEnvCfg:
   """``curves``: two thirds of the terrain columns are bent beams
   (``terrain.BEND_MAX_TURN_DEG``), and the critic also sees how the beam
   turns ahead (``beam_ahead``). ``tactile``: see ``Tactile``. ``evaluation``:
   held-out terrain (``EVAL_TERRAIN_SEED``) and ``EVAL_EPISODE_S`` episodes,
-  observations unchanged so training checkpoints load."""
+  observations unchanged so training checkpoints load. ``reward``: a
+  ``REWARD_VARIANTS`` key."""
   cfg = make_velocity_env_cfg()
   cfg.episode_length_s = EVAL_EPISODE_S if evaluation else EPISODE_S
 
@@ -445,7 +524,7 @@ def make_beam_env_cfg(
     )
   }
 
-  cfg.rewards = build_rewards()
+  cfg.rewards = build_variant_rewards(reward)
   cfg.events = build_events()
   cfg.terminations = build_terminations()
   # Only walking episodes promote (the first run rose to level 3 on standing
