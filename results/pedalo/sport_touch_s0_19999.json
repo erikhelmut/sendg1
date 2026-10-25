@@ -1,0 +1,62 @@
+{
+  "checkpoint": "/home/erik/sendg1-pedalo/logs/rsl_rl/pedalo_sport_plain/2026-10-20_19-51-10_sport_touch_s0/model_19999.pt",
+  "rows": [
+    {
+      "command": 0.0,
+      "no_fall": 0.75,
+      "falls": [
+        "tilt",
+        "base_too_low",
+        "tilt",
+        "tilt"
+      ],
+      "mean_speed": 0.08323122560977936,
+      "distance_m": 1.2453876733779907,
+      "arm_out_max_rad": 0.6197580099105835,
+      "arm_out_mean_rad": 0.2515072822570801
+    },
+    {
+      "command": 0.15,
+      "no_fall": 1.0,
+      "falls": [],
+      "mean_speed": 0.12948313355445862,
+      "distance_m": 2.5035629272460938,
+      "arm_out_max_rad": 0.6021090745925903,
+      "arm_out_mean_rad": 0.3040294945240021
+    },
+    {
+      "command": 0.3,
+      "no_fall": 0.875,
+      "falls": [
+        "board_tipped",
+        "tilt"
+      ],
+      "mean_speed": 0.23867397010326385,
+      "distance_m": 4.301844120025635,
+      "arm_out_max_rad": 0.5617492198944092,
+      "arm_out_mean_rad": 0.2731856107711792
+    },
+    {
+      "command": 0.45,
+      "no_fall": 0.9375,
+      "falls": [
+        "board_tipped"
+      ],
+      "mean_speed": 0.33642345666885376,
+      "distance_m": 6.710730075836182,
+      "arm_out_max_rad": 0.5785326957702637,
+      "arm_out_mean_rad": 0.2881578207015991
+    },
+    {
+      "command": 0.6,
+      "no_fall": 0.9375,
+      "falls": [
+        "board_tipped"
+      ],
+      "mean_speed": 0.4725276827812195,
+      "distance_m": 8.509908676147461,
+      "arm_out_max_rad": 0.5384658575057983,
+      "arm_out_mean_rad": 0.25449177622795105
+    }
+  ]
+}
