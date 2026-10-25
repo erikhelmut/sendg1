@@ -49,10 +49,15 @@ TENSION = 1500.0
 TENSION_RANGE = (1000.0, 2000.0)
 WIDTH = 0.05
 THICKNESS = 0.004
-COLLISION_DEPTH = 0.02
+COLLISION_RGBA = (0.0, 0.0, 0.0, 0.002)
+"""Near-invisible, not invisible: raycasts skip alpha-0 geoms (mujoco_warp
+``ray.py``), and the taxel rays must see the webbing."""
+COLLISION_DEPTH = 0.08
 """The contact box reaches this far below the webbing's top face: 4 mm of
 real webbing is thinner than a loaded contact sinks, and a foot would fall
-through it. Only the top face is ever touched."""
+through it. Only the top face is ever touched. At 2 cm a loaded sole sank
+past the box's mid-plane and MuJoCo resolved the contact through the bottom
+face: normals flipped and the line pulled the foot down."""
 NODE_SPACING = 0.2
 NUM_NODES = round(SPAN / NODE_SPACING) - 1
 """Interior nodes; the two ends are the anchors."""
@@ -152,12 +157,12 @@ def slackline_spec(tension: float = TENSION) -> mujoco.MjSpec:
       size=(half_seg, WIDTH / 2, COLLISION_DEPTH / 2),
       pos=(0.0, 0.0, -COLLISION_DEPTH / 2),
       mass=NODE_MASS,
-      rgba=(0, 0, 0, 0),
+      rgba=COLLISION_RGBA,
     )
     g.contype = CONTYPE
     g.conaffinity = CONAFFINITY
     g.friction = (FRICTION, 0.005, 0.0001)
-    g.group = 0  # the taxel rays look for group-0 geoms; alpha 0 hides it
+    g.group = 0  # the taxel rays look for group-0 geoms
     look = node.add_geom(
       name=LOOK_GEOM.format(i),
       type=mujoco.mjtGeom.mjGEOM_BOX,

@@ -35,8 +35,11 @@ Numerics, learnt the hard way at the 5 ms step:
 - Free nodes coupled by damped tendons went unstable at any damping; the fix is
   armature on each slide (0.3 kg, ~6 kg over the span against the robot's 35)
   plus relative damping on the tendons. The fundamental mode stays lightly damped.
-- A 4 mm contact box lets a loaded foot sink through; the contact box is 2 cm
-  deep and invisible, with a 4 mm visual strip on top.
+- A 4 mm contact box lets a loaded foot sink through; the contact box is 8 cm
+  deep and near-invisible, with a 4 mm visual strip on top. At 2 cm a loaded
+  sole sank past its mid-plane and MuJoCo resolved the contact through the
+  bottom face (normals flipped, the line pulled the foot down). Alpha 0 would
+  hide it from the taxel rays: mujoco_warp's raycast skips alpha-0 geoms.
 
 Video of the line alone and of the robot on it without a policy:
 `uv run python scripts/slackline_video.py` (`results/slackline/line_demo.mp4`).
@@ -97,7 +100,12 @@ body on the line (the ankle-linkage braces excepted) or the floor, base under
 
 ## Open
 
-- Untrained beyond a 300-iteration sanity run (Blind, 4096 envs, one seed):
+- First 20k-iteration pair (2026-10-21, one seed) is void: it ran with the
+  2 cm, alpha-0 contact box, so the Touch actor's taxel rays never saw the
+  line and contact forces had mixed signs. Both stayed on level 0 (mean level
+  0.07 / 0.06), episodes 422 / 280 of 1000 steps, no walking. Video:
+  `scripts/slackline_policy_video.py`.
+- Before that, a 300-iteration sanity run (Blind, 4096 envs, one seed):
   mean episode length fell from 28 to 12 steps, then climbed to 53 (~1 s of
   20 s); every env still on level 0. Held open-loop, the stance topples in
   ~0.3 s on every level: the policy has to balance from the start.
