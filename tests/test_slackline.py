@@ -254,3 +254,66 @@ def test_curriculum_builds_each_level_and_moves_envs(monkeypatch) -> None:
     assert st.home.tolist() == [4, 2, 3, 4, 4, 4, 4][:n]
   finally:
     env.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_balance_difficulty_spans_the_levels_and_moves_on_success_rate(monkeypatch) -> None:
+  """Balance tasks: difficulty 0 is the stiffest 5 cm line, 1 the free line,
+  the distinct levels sit evenly between with springs softening
+  monotonically; an env moves only on its windowed success rate, a late fall
+  still counts, and probe episodes leave the window alone."""
+  from mjlab.envs import ManagerBasedRlEnv
+
+  from sendg1.common.slackline import mdp
+  from sendg1.tasks.slackline import BALANCE_TASKS
+
+  cfg = load_env_cfg(BALANCE_TASKS[False])
+  assert set(cfg.curriculum) == {"line_difficulty"}
+  play = load_env_cfg(BALANCE_TASKS[False], play=True)
+  assert play.events["line_level"].params["continuous"]
+  n = 6
+  cfg.scene.num_envs = n
+  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
+  try:
+    env.reset()
+    anchors = mdp._difficulty_anchors(env)
+    # Every level's springs are on the scale, easiest first; at 5 cm levels 0
+    # and 1 are the same line.
+    at_levels = [mdp.level_difficulty(env, i) for i in range(len(mdp.LEVELS))]
+    assert at_levels[0] == at_levels[1] == 0.0 and at_levels[-1] == 1.0
+    assert all(a <= b for a, b in itertools.pairwise(at_levels))
+    d = torch.linspace(0, 1, 101, device=env.device)
+    p = mdp.difficulty_params(env, d)
+    assert torch.allclose(p[:, 0], torch.full_like(d, sm.WIDTH))
+    assert bool((p[1:, 1:] <= p[:-1, 1:] + 1e-6).all())
+    k = len(anchors) - 1
+    at = mdp.difficulty_params(env, torch.arange(k + 1, device=env.device) / k)
+    assert torch.allclose(at, anchors, rtol=1e-5)
+
+    env.step(torch.zeros(n, env.action_manager.total_action_dim, device=env.device))
+    st = mdp.LineState.get(env)
+    ids = torch.arange(n, device=env.device)
+    st.home_difficulty[:] = 0.5
+    st.cmd_dist[:] = 0.0
+    st.probe[:] = False
+    st.probe[5] = True
+    st.history[:] = 0.0
+    # env 0: 1 of 3 won, this one too -> 50 %, up; env 1: 0 of 3, falls -> down;
+    # env 2: 1 of 3 won, falls -> 25 %, stays; env 3: too few episodes to judge;
+    # env 4: 1 of 3, falls late (counts) -> 50 %, up; env 5: probe, nothing moves.
+    st.history[0, :1] = 1.0
+    st.history[2, :1] = 1.0
+    st.history[4, :1] = 1.0
+    st.history[5, :3] = 1.0
+    st.history_n[:] = torch.tensor([3, 3, 3, 1, 3, 3], device=env.device)
+    terminated = torch.tensor([False, True, True, True, True, False], device=env.device)
+    monkeypatch.setattr(type(env.termination_manager), "terminated", property(lambda self: terminated))
+    env.episode_length_buf[:] = 10
+    env.episode_length_buf[4] = int(0.9 * env.max_episode_length)
+    mdp.line_difficulty(env, ids)
+    step = mdp.DIFFICULTY_STEP
+    expected = [0.5 + step, 0.5 - step, 0.5, 0.5, 0.5 + step, 0.5]
+    assert st.home_difficulty.tolist() == pytest.approx(expected)
+    assert st.history_n.tolist() == [0, 0, 4, 2, 0, 3]
+  finally:
+    env.close()

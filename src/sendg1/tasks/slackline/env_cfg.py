@@ -13,6 +13,7 @@ each; ``build_rewards`` argues the reward.
 
 from __future__ import annotations
 
+import functools
 import math
 
 from mjlab.entity import EntityCfg
@@ -92,7 +93,12 @@ ARM_POSE_STD_SLACKLINE: dict[str, float] = {**ARM_POSE_STD, **BALANCE_ARM_STD}
 # ---------------------------------------------------------------------------
 
 
-def build_rewards() -> dict[str, RewardTermCfg]:
+FREE_ELBOW_RANGE = (-0.8, ELBOW_RANGE[1])
+"""Balance-only: the elbow may bend as far as it likes; only hyperextension
+past straight is a cost."""
+
+
+def build_rewards(free_arms: bool = False) -> dict[str, RewardTermCfg]:
   """Stand and walk on a slackline.
 
   The line is the whole support sideways, and it is not fixed: push it and
@@ -118,8 +124,12 @@ def build_rewards() -> dict[str, RewardTermCfg]:
   The reward is the same on every curriculum level: the curriculum changes
   the line, never what is asked of the robot, so returns are comparable
   across levels and between the two conditions.
+
+  ``free_arms`` (balance-only): no pull of the arms to a pose, the elbow free
+  to bend (``FREE_ELBOW_RANGE``) and a lighter arm-speed cost, so the arms can
+  swing out for balance as a slackliner's do.
   """
-  return {
+  rewards = {
     # -- 1. survival -------------------------------------------------------------
     "alive": RewardTermCfg(func=mdp.alive, weight=1.0),
     # Beam lesson: without a large one-off cost of an early end, the random
@@ -209,6 +219,11 @@ def build_rewards() -> dict[str, RewardTermCfg]:
       params={"sensor_name": "self_collision", "force_threshold": 10.0},
     ),
   }
+  if free_arms:
+    del rewards["arm_posture"]
+    rewards["elbow_range"].params["low"] = FREE_ELBOW_RANGE[0]
+    rewards["arm_joint_vel"].weight = -0.005
+  return rewards
 
 
 # ---------------------------------------------------------------------------
@@ -243,12 +258,12 @@ def build_events() -> dict[str, EventTermCfg]:
   lo, hi = sm.TENSION_RANGE
   return {
     # -- startup DR (the tension first: the reset reads it to pre-sag the line)
-    # Tension: every string tendon scaled alike, per world.
+    # Tension: the string and twist couplings scaled alike, per world.
     "line_tension": EventTermCfg(
       mode="startup",
       func=dr.tendon_stiffness,
       params={
-        "asset_cfg": mdp.LINE_STRING_TENDONS,
+        "asset_cfg": mdp.LINE_TENSION_TENDONS,
         "operation": "scale",
         "ranges": (lo / sm.TENSION, hi / sm.TENSION),
         "shared_random": True,
@@ -335,29 +350,43 @@ def build_observations(tactile: bool) -> dict[str, ObservationGroupCfg]:
 
 
 def make_slackline_env_cfg(
-  *, play: bool = False, num_envs: int | None = None, tactile: bool = True
+  *,
+  play: bool = False,
+  num_envs: int | None = None,
+  tactile: bool = True,
+  surface: str = "box",
+  contact: str | None = None,
+  balance_only: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """``tactile``: whether the actor gets the slipper's touch features. The
   scene carries the tactile sensors either way (the critic reads them), so
-  the two conditions run the same simulation."""
+  the two conditions run the same simulation. ``surface`` / ``contact``: the
+  line's model (``sm.SURFACES``, ``sm.CONTACTS``). ``balance_only``: always
+  'stand', every level 5 cm wide (the levels go stiff to free), free arms."""
+  flex = surface != "box"
   cfg = make_velocity_env_cfg()
   cfg.episode_length_s = EPISODE_S
 
   cfg.scene.entities = {
     "robot": get_g1_cfg(),
     # Fixed base: mjlab wraps it in a mocap body, placed per env on reset.
-    mdp.LINE: EntityCfg(spec_fn=sm.slackline_spec),
+    mdp.LINE: EntityCfg(
+      spec_fn=functools.partial(sm.slackline_spec, surface=surface, contact=contact)
+    ),
   }
   cfg.scene.num_envs = num_envs or DEFAULT_NUM_ENVS
   # Worlds do not interact; the spacing only matters for the viewer.
   cfg.scene.env_spacing = 5.0
   cfg.scene.sensors = (
     feet_ground_contact_sensor(),
-    mdp.feet_line_contact_sensor(),
-    mdp.nonfoot_line_contact_sensor(),
+    mdp.feet_line_contact_sensor(flex),
+    # A flex line: ``mdp.nonfoot_on_line`` reads the contact list instead.
+    *(() if flex else (mdp.nonfoot_line_contact_sensor(),)),
     self_collision_sensor(),
     nonfoot_contact_sensor(),
-    *tactile_scene_sensors(secondary=mdp.line_match()),
+    *tactile_scene_sensors(
+      secondary=None if flex else mdp.line_match(), geom_only_rays=flex
+    ),
   )
   assert cfg.scene.terrain is not None
   cfg.scene.terrain.terrain_type = "plane"
@@ -392,10 +421,23 @@ def make_slackline_env_cfg(
     )
   }
 
-  cfg.rewards = build_rewards()
+  cfg.rewards = build_rewards(free_arms=balance_only)
   cfg.events = build_events()
   cfg.terminations = build_terminations()
   cfg.curriculum = {"line_levels": CurriculumTermCfg(func=mdp.line_levels)}
+  if balance_only:
+    cfg.commands["twist"].rel_standing_envs = 1.0
+    # Continuous difficulty with probes of harder lines (``line_difficulty``):
+    # under the +1/-1 levels an env climbed only by winning most episodes
+    # while exploring, and none ever felt a line that sways.
+    cfg.curriculum = {
+      "line_difficulty": CurriculumTermCfg(
+        func=mdp.line_difficulty, params={"standing_share": (1.0, 1.0)}
+      )
+    }
+    cfg.events["line_level"].params = {"width": sm.WIDTH, "continuous": True}
+    # Nothing to step towards.
+    del cfg.rewards["step_progress"]
 
   cfg.viewer.body_name = G1_TORSO_BODY
   cfg.viewer.distance = 3.5
@@ -404,5 +446,8 @@ def make_slackline_env_cfg(
   if play:
     # Evaluation and videos: the real slackline unless a script says otherwise.
     cfg.curriculum = {}
-    cfg.events["line_level"].params = {"fixed_level": mdp.TOP_LEVEL}
+    cfg.events["line_level"].params = {
+      **cfg.events["line_level"].params,
+      "fixed_level": mdp.TOP_LEVEL,
+    }
   return cfg

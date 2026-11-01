@@ -26,6 +26,7 @@ def main() -> None:
   ap.add_argument("--task", default=None, help="default: from the checkpoint's experiment")
   ap.add_argument("--level", type=int, default=0, help="curriculum level (0 plank .. 6 free)")
   ap.add_argument("--speed", type=float, default=0.25, help="walking command (m/s)")
+  ap.add_argument("--stand-only", action="store_true", help="every episode 'stand'")
   ap.add_argument("--episodes", type=int, default=4)
   ap.add_argument("--seconds", type=float, default=8.0, help="cap per episode")
   ap.add_argument("--seed", type=int, default=0)
@@ -43,15 +44,24 @@ def main() -> None:
 
   import sendg1.tasks  # noqa: F401
   from sendg1.common.slackline import mdp
-  from sendg1.tasks.slackline import BLIND_TASK, TOUCH_TASK
+  from sendg1.tasks.slackline import BALANCE_TASKS, BLIND_TASK, TOUCH_TASK
   from sendg1.video import EvalVideo, prepare_video_cfg
 
-  task = args.task or (TOUCH_TASK if "slackline_touch" in args.checkpoint else BLIND_TASK)
+  if args.task:
+    task = args.task
+  elif "slackline_balance_" in args.checkpoint:
+    task = BALANCE_TASKS["slackline_balance_touch" in args.checkpoint]
+  else:
+    task = TOUCH_TASK if "slackline_touch" in args.checkpoint else BLIND_TASK
   level = mdp.LEVELS[args.level]
   cfg = load_env_cfg(task, play=True)
   cfg.scene.num_envs = 1
   cfg.seed = args.seed
-  cfg.events["line_level"].params = {"fixed_level": args.level}
+  # Merge: the balance tasks keep their width and continuous difficulty.
+  cfg.events["line_level"].params = {
+    **(cfg.events["line_level"].params or {}),
+    "fixed_level": args.level,
+  }
   twist = cfg.commands["twist"]
   twist.rel_standing_envs = 0.0
   twist.resampling_time_range = (1e6, 1e6)
@@ -69,10 +79,11 @@ def main() -> None:
   st = mdp.LineState.get(env)
   tm = env.termination_manager
   cmd = env.command_manager.get_term("twist")
-  where = f"level {args.level}: {100 * level.width:.0f} cm webbing, helper {level.stiffness:.0f} N/m"
+  width = cfg.events["line_level"].params.get("width") or level.width
+  where = f"level {args.level}: {100 * width:.0f} cm webbing, helper {level.stiffness:.0f} N/m"
 
   for ep in range(args.episodes):
-    speed = 0.0 if ep % 2 == 0 else args.speed
+    speed = 0.0 if ep % 2 == 0 or args.stand_only else args.speed
     video.new_episode()
     with torch.inference_mode():
       obs, _ = wrapped.reset()
@@ -94,15 +105,19 @@ def main() -> None:
           [
             f"episode {ep + 1}/{args.episodes}: {task_line}   t = {k * env.step_dt:4.1f} s",
             f"{where}   progress {max(float(st.max_progress[0]), 0):.2f} m",
-            f"line under the robot: sag {-100 * sag:4.1f} cm, roll "
-            f"{float(line.roll[0, 0]) * 57.3:+5.1f} deg",
+            (
+              f"line under the robot: sag {-100 * sag:4.1f} cm, roll "
+              f"{float(line.roll[0, 0]) * 57.3:+5.1f} deg"
+            ),
           ]
         )
     print(f"[video] episode {ep}: {outcome} after {k * env.step_dt:.1f} s")
     video.hold(0.8, [f"episode {ep + 1}/{args.episodes}: {outcome} after {k * env.step_dt:.1f} s", where])
 
   env.close()
-  kind = "touch" if task == TOUCH_TASK else "blind"
+  kind = "touch" if task in (TOUCH_TASK, BALANCE_TASKS[True]) else "blind"
+  if task in BALANCE_TASKS.values():
+    kind = f"balance_{kind}"
   out = Path(args.out or REPO / "results" / "slackline" / f"policy_{kind}_L{args.level}.mp4")
   out.parent.mkdir(parents=True, exist_ok=True)
   video.save(out, video.take(), qp=28)

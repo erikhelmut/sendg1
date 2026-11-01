@@ -28,7 +28,11 @@ G1 on it the line sags ~20-30 cm and sways sideways with a ~1.2 s period. Each
 piece is also pitched and yawed to the local slope by equality constraints, so
 the webbing is a smooth chain rather than a staircase. Roll is nearly free
 (a 5 cm strip under tension barely resists twist): the soles have to keep the
-force through the line or it rolls out from under them.
+force through the line or it rolls out from under them. That twist stiffness is
+the tension's, `T w^2 / 12` per metre (the strip's edges stretch when it
+twists; the webbing's own torsional rigidity, `G w t^3 / 3` for 1-2 mm
+polyester, is ~1 % of it): ~0.3 N m/rad to twist the free line at mid-span,
+0.22-0.41 over the 1-2 kN tension range, which scales it with the string.
 
 Numerics, learnt the hard way at the 5 ms step:
 
@@ -43,6 +47,34 @@ Numerics, learnt the hard way at the 5 ms step:
 
 Video of the line alone and of the robot on it without a policy:
 `uv run python scripts/slackline_video.py` (`results/slackline/line_demo.mp4`).
+
+## Line models (`sm.SURFACES`, `sm.CONTACTS`)
+
+The same node chain (so the same sag and sway) under four contact surfaces;
+`G1-SlacklineFlex-*` and `G1-SlacklineCable-*` register the flex ones.
+`scripts/slackline_surfaces.py --stats --media` measures them with the G1
+holding the stance on the free line (256 spawns, first 0.3 s; boxes overlap
+their neighbours by 2 cm, `SEGMENT_OVERLAP`):
+
+| Model | Soles sink (mean / deepest) | Contacts pushing up | Sole load read | Taxel rays hit |
+|---|---|---|---|---|
+| boxes, default contact (`G1-Slackline-*`) | 10.4 / 24.6 mm | 16 % | -0.17 body weight | 44 % |
+| boxes, stiff contact | 1.7 / 3.4 mm | 95 % | 0.97 | 54 % |
+| flex ribbon (`G1-SlacklineFlex-*`) | 1.8 / 3.2 mm | 78 % | 0.88 | 48 % |
+| flex cable, round rope (`G1-SlacklineCable-*`) | 11.6 / 20.6 mm | 3 % | 1.05 | 12 % |
+
+What fixes the sensing is the contact, not the surface. MuJoCo scales a soft
+contact's stiffness by the effective mass at it, and a 20 cm piece of webbing
+pivoting on its pitch/yaw hinges weighs almost nothing, so with the defaults the
+soles sink 1-2.5 cm, mostly into the pieces' sides and ends. `stiff` gives the
+line `solref 0.01`, `solimp 0.95/0.99` (priority over the sole) and 20x the
+pitch/yaw armature; roll is untouched. The ribbon is seamless but needs
+workarounds in mujoco_warp 3.11 / mjlab 1.6: contact sensors cannot match a flex
+(they match against anything; `nonfoot_on_line` reads the contact list), the BVH
+raycast reads out of bounds with any flex in the model (the taxel rays use the
+plain geom kernel and hit thin non-colliding boxes under the ribbon), and flex
+vertex offsets are one per model, so its levels keep 5 cm width. The round
+cable gives a flat sole nothing to stand on.
 
 ## Curriculum (`common/slackline/mdp.py::LEVELS`, `line_levels`)
 
@@ -73,6 +105,30 @@ run at the top level (`apply_line_level(fixed_level=...)`).
 The width steps (20 -> 5 cm) come first and are the ones to watch: the beam task
 never got past 10 cm.
 
+### Balance tasks: continuous difficulty (`line_difficulty`)
+
+`G1-SlacklineBalance-{Touch,Blind}` stand only, on 5 cm webbing throughout, and
+replace the levels with a per-env difficulty in [0, 1]
+(`apply_line_level(continuous=True)`). It slides through `BALANCE_SPRINGS`,
+eleven helper settings evenly spaced: the levels' (at 0, .1, .2, .4, .6, 1)
+plus steps in the soft end, geometric between neighbours and linear into the
+free line's zero. Roll helper per piece by tenth: 400, 150, 50, 25, 15, 8, 4,
+1.5, 0.5, 0.15, 0 N m/rad. The old table jumped from level 5's 4 N m/rad per
+piece (~75 over the span) straight to the free line's ~0.3. Why: under
++1/-1 an env climbs only by winning more than half its episodes, and training
+rollouts explore (action std 0.42) while videos do not. After 20k iterations
+half the envs were still on level 0, none ever reached a swaying line (level
+4+), and the policy fell off the free line within ~2 s.
+
+- An episode succeeds if it lasted 80 % of the time limit (`SURVIVE_FRAC`).
+- Episodes on the env's own difficulty fill a window of 8; with at least 4 in
+  it, a success rate of 50 % or more raises the difficulty by 0.05, below 25 %
+  lowers it, and either clears the window. (At 60 / 30 % the first cluster
+  run parked at ~48 % success: training rollouts explore.)
+- 70 % of resets run on the env's own difficulty, 15 % on an easier one, 10 %
+  on a harder one and 5 % on the free line, from the start; these probes do
+  not count towards the window. The critic sees the episode's difficulty.
+
 ## Stance and spawn
 
 `scripts/slackline_stance.py` solves the stance slackliners teach: front foot
@@ -99,6 +155,16 @@ body on the line (the ankle-linkage braces excepted) or the floor, base under
 0.55 m over the line, or 45° tilt.
 
 ## Open
+
+- Balance, Touch, one seed (2026-10-29, local, levels): 20k iterations
+  (5k + 15k resumed), episodes 571 of 1000 steps, mean level 0.72 (50 % on
+  level 0, none above 3). Videos: stands 20 s on the stiff line, falls off
+  the free line in 1.4-2.8 s. Continued from that checkpoint on the cluster
+  with `line_difficulty` (run `balance_touch_s0_difficulty`, to 30k; first
+  version: levels 1-6 evenly spaced, 60 / 30 %): mean difficulty 0.16 (peak
+  0.19), none past 0.4, ~48 % success on the envs' own difficulty. Videos at
+  29999: stiff line 3 of 3 x 20 s, difficulty 0.4 1 of 3, free line falls in
+  1.5-1.9 s. Action std flat at 0.41 from 20k to 30k (entropy 0.005).
 
 - First 20k-iteration pair (2026-10-21, one seed) is void: it ran with the
   2 cm, alpha-0 contact box, so the Touch actor's taxel rays never saw the

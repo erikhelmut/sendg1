@@ -59,6 +59,11 @@ through it. Only the top face is ever touched. At 2 cm a loaded sole sank
 past the box's mid-plane and MuJoCo resolved the contact through the bottom
 face: normals flipped and the line pulled the foot down."""
 NODE_SPACING = 0.2
+SEGMENT_OVERLAP = 0.01
+"""Each piece's box reaches this far past its half of the spacing at both ends,
+so neighbours overlap by 2 cm: where two pieces meet at an angle there is no
+exposed end face for a sole to catch on. The pieces never collide with each
+other (contype 2, conaffinity 1)."""
 NUM_NODES = round(SPAN / NODE_SPACING) - 1
 """Interior nodes; the two ends are the anchors."""
 
@@ -136,33 +141,117 @@ def _coupling(
     ten.wrap_joint(joint, coef)
 
 
-def slackline_spec(tension: float = TENSION) -> mujoco.MjSpec:
+SURFACES = ("box", "ribbon", "cable")
+"""What the feet touch, over the same node chain (so the same sag and sway):
+
+- ``box``: a deep box per 20 cm piece (the original model).
+- ``ribbon``: a MuJoCo flex, a seamless strip of triangles with two vertices
+  on every piece, rolling with it; thickness ``FLEX_RADIUS`` either side.
+- ``cable``: a 1D flex through the pieces' centres, a round rope of radius
+  ``CABLE_RADIUS`` (no flat face, so roll means nothing to the sole).
+
+In the flex variants the boxes stay as thin, non-colliding strips: the taxel
+rays (mujoco_warp's geom raycast) do not see flexes."""
+CONTACTS = ("soft", "stiff")
+"""``soft``: MuJoCo's default contact (the original model). ``stiff``: the
+line's contacts get ``STIFF_SOLREF`` / ``STIFF_SOLIMP`` (by priority over the
+sole's) and each piece ``STIFF_TURN_ARMATURE`` on its pitch and yaw hinges.
+MuJoCo scales a soft contact's stiffness by the effective mass at it, and a
+20 cm piece of webbing pivoting on those hinges weighs almost nothing: with
+the defaults a 35 kg sole on capsules sinks through the line. Roll is left
+alone, so the webbing rolls as freely as before."""
+STIFF_SOLREF = (0.01, 1.0)
+STIFF_SOLIMP = (0.95, 0.99, 0.001, 0.5, 2.0)
+STIFF_PRIORITY = 2
+STIFF_TURN_ARMATURE = 20 * 2e-3
+FLEX_RADIUS = 0.004
+CABLE_RADIUS = 0.0125
+FLEX_NAME = "webbing_flex"
+
+
+def _add_flex(spec: mujoco.MjSpec, surface: str, width: float, stiff: bool) -> None:
+  """Skin the node chain with a flex, from anchor to anchor. Its top surface is
+  the node frame (as the box's top face is), so vertices sit one radius below."""
+  radius = FLEX_RADIUS if surface == "ribbon" else CABLE_RADIUS
+  bodies: list[str] = []
+  verts: list[float] = []
+  rows = (width / 2, -width / 2) if surface == "ribbon" else (0.0,)
+  stations = [(ROOT_BODY, -SPAN / 2)] + [(NODE_BODY.format(i), None) for i in range(NUM_NODES)]
+  stations.append((ROOT_BODY, SPAN / 2))
+  for body, x in stations:
+    for y in rows:
+      bodies.append(body)
+      # The anchors' vertices live in the root frame, the pieces' in their own.
+      verts += [x, y, HEIGHT - radius] if x is not None else [0.0, y, -radius]
+  elem: list[int] = []
+  n = len(stations)
+  for i in range(n - 1):
+    if surface == "ribbon":
+      lo, ro, ln, rn = 2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 3
+      elem += [lo, ro, rn, lo, rn, ln]  # both wound with the normal up
+    else:
+      elem += [i, i + 1]
+  f = spec.add_flex()
+  f.name = FLEX_NAME
+  f.dim = 2 if surface == "ribbon" else 1
+  f.vertbody = bodies
+  f.vert = verts
+  f.elem = elem
+  f.radius = radius
+  f.contype = CONTYPE
+  f.conaffinity = CONAFFINITY
+  f.friction = (FRICTION, 0.005, 0.0001)
+  f.selfcollide = mujoco.mjtFlexSelf.mjFLEXSELF_NONE
+  f.internal = False
+  f.young = 0.0  # the string's springs are the tendons below; the flex is a skin
+  f.rgba = WEBBING_RGBA
+  f.group = 0
+  if stiff:
+    f.solref, f.solimp, f.priority = STIFF_SOLREF, STIFF_SOLIMP, STIFF_PRIORITY
+
+
+def slackline_spec(
+  tension: float = TENSION, surface: str = "box", contact: str | None = None
+) -> mujoco.MjSpec:
+  """``contact`` defaults to ``soft`` for the box, ``stiff`` for the flexes
+  (which a sole otherwise passes straight through)."""
+  if surface not in SURFACES:
+    raise ValueError(f"surface {surface!r} not in {SURFACES}")
+  flex = surface != "box"
+  contact = contact or ("stiff" if flex else "soft")
+  if contact not in CONTACTS:
+    raise ValueError(f"contact {contact!r} not in {CONTACTS}")
+  stiff = contact == "stiff"
+  turn_armature = STIFF_TURN_ARMATURE if stiff else PITCH_ARMATURE
   spec = mujoco.MjSpec()
   root = spec.worldbody.add_body(name=ROOT_BODY)
-  half_seg = NODE_SPACING / 2 + 0.003  # a hair of overlap: no gap for an edge to catch
+  half_seg = NODE_SPACING / 2 + SEGMENT_OVERLAP
   for i in range(NUM_NODES):
     node = root.add_body(name=NODE_BODY.format(i), pos=(node_x(i), 0.0, HEIGHT))
     for name, jtype, axis, arm, damp in (
       (SLIDE_Y, mujoco.mjtJoint.mjJNT_SLIDE, (0, 1, 0), NODE_ARMATURE, NODE_DAMPING),
       (SLIDE_Z, mujoco.mjtJoint.mjJNT_SLIDE, (0, 0, 1), NODE_ARMATURE, NODE_DAMPING),
-      (YAW, mujoco.mjtJoint.mjJNT_HINGE, (0, 0, 1), PITCH_ARMATURE, 0.0),
-      (PITCH, mujoco.mjtJoint.mjJNT_HINGE, (0, 1, 0), PITCH_ARMATURE, 0.0),
+      (YAW, mujoco.mjtJoint.mjJNT_HINGE, (0, 0, 1), turn_armature, 0.0),
+      (PITCH, mujoco.mjtJoint.mjJNT_HINGE, (0, 1, 0), turn_armature, 0.0),
       (ROLL, mujoco.mjtJoint.mjJNT_HINGE, (1, 0, 0), ROLL_ARMATURE, ROLL_DAMPING),
     ):
       node.add_joint(name=name.format(i), type=jtype, axis=axis, armature=arm, damping=damp)
     # The node frame sits on the webbing's top face, on its centreline.
+    depth = THICKNESS if flex else COLLISION_DEPTH
     g = node.add_geom(
       name=NODE_GEOM.format(i),
       type=mujoco.mjtGeom.mjGEOM_BOX,
-      size=(half_seg, WIDTH / 2, COLLISION_DEPTH / 2),
-      pos=(0.0, 0.0, -COLLISION_DEPTH / 2),
+      size=(half_seg, WIDTH / 2, depth / 2),
+      pos=(0.0, 0.0, -depth / 2),
       mass=NODE_MASS,
       rgba=COLLISION_RGBA,
     )
-    g.contype = CONTYPE
-    g.conaffinity = CONAFFINITY
+    g.contype = 0 if flex else CONTYPE
+    g.conaffinity = 0 if flex else CONAFFINITY
     g.friction = (FRICTION, 0.005, 0.0001)
     g.group = 0  # the taxel rays look for group-0 geoms
+    if stiff and not flex:
+      g.solref, g.solimp, g.priority = STIFF_SOLREF, STIFF_SOLIMP, STIFF_PRIORITY
     look = node.add_geom(
       name=LOOK_GEOM.format(i),
       type=mujoco.mjtGeom.mjGEOM_BOX,
@@ -172,6 +261,8 @@ def slackline_spec(tension: float = TENSION) -> mujoco.MjSpec:
       rgba=WEBBING_RGBA,
     )
     _visual(look)
+    if flex:
+      look.rgba = (0, 0, 0, 0)  # the flex draws itself
 
   # The string: each neighbour pair, and each end node against its anchor.
   k = tension / NODE_SPACING
@@ -202,6 +293,9 @@ def slackline_spec(tension: float = TENSION) -> mujoco.MjSpec:
       name = f"slope_{i:02d}_{'yaw' if angle == YAW else 'pitch'}"
       _coupling(spec, name, terms, 0.0)
       spec.add_equality(type=mujoco.mjtEq.mjEQ_TENDON, name1=name, objtype=mujoco.mjtObj.mjOBJ_TENDON)
+
+  if flex:
+    _add_flex(spec, surface, WIDTH, stiff)
 
   # Posts and anchor blocks: visual only (the task ends before a foot gets there).
   for side, x in (("lo", -SPAN / 2), ("hi", SPAN / 2)):

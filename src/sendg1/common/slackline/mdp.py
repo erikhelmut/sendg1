@@ -29,12 +29,18 @@ share ``REPLAY_SHARE`` of resets replays an easier level without moving the
 env's own one (the beam's lesson: without it the population forgets the easy
 levels). The share of standing commands falls as the mean level rises.
 
+The balance tasks use a continuous variant (:func:`line_difficulty`): each
+env's difficulty in [0, 1] slides through the distinct rows of the level table
+(log-spaced springs), moves on its recent success rate with hysteresis, and a
+share of resets samples a harder line, the free one included, from the start.
+
 The reward is laid out and argued in ``tasks/slackline/env_cfg.py``.
 """
 
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -116,6 +122,41 @@ WALK_MIN_DIST = 0.5
 """Commanded distance (m) below which an episode counts as standing."""
 REPLAY_SHARE = 0.2
 STANDING_SHARE = (0.7, 0.4)
+DIFFICULTY_STEP = 0.05
+SUCCESS_WINDOW = 8
+"""Episodes on its own difficulty an env is judged on (``line_difficulty``)."""
+SUCCESS_MIN = 4
+"""Episodes needed at a difficulty before it may move: one fall is not a verdict."""
+PROMOTE_RATE = 0.5
+DEMOTE_RATE = 0.25
+"""Judged on training rollouts, which explore: at 0.6 / 0.3 the population
+parked at ~48 % success, half of it on the stiffest line its noise-free
+policy held 3 of 3 times."""
+BALANCE_SPRINGS: tuple[tuple[float, float], ...] = (
+  (8000.0, 400.0),
+  (4000.0, 150.0),
+  (2000.0, 50.0),
+  (1200.0, 25.0),
+  (800.0, 15.0),
+  (500.0, 8.0),
+  (250.0, 4.0),
+  (120.0, 1.5),
+  (50.0, 0.5),
+  (20.0, 0.15),
+  (0.0, 0.0),
+)
+"""Helper springs (N/m, N m/rad per piece) at evenly spaced difficulties, for
+``line_difficulty``. The levels' springs (all of them here, at 0, .1, .2, .4,
+.6 and 1) plus steps where the old table jumped: from level 5's roll helper
+(4 N m/rad per piece, ~75 over the span) straight to the free line's twist
+(~0.3 N m/rad for the whole span, ``model``) was the cliff. Below 2000 N/m the
+helpers soften by a like factor per step, down to ~1/20 of the twist's own."""
+EASIER_SHARE = 0.15
+HARDER_SHARE = 0.15
+FREE_SHARE = 0.05
+"""Of all resets, on the free line itself (part of ``HARDER_SHARE``)."""
+SURVIVE_FRAC = 0.8
+"""A fall this late into the episode still counts as a success (``line_difficulty``)."""
 """Share of standing commands at mean level 0 and at the top level: balance
 first, then more walking."""
 
@@ -149,8 +190,15 @@ def line_match() -> ContactMatch:
   return ContactMatch(mode="subtree", pattern=sm.ROOT_BODY, entity=LINE)
 
 
-def feet_line_contact_sensor() -> ContactSensorCfg:
-  """Net contact force per foot against the webbing."""
+def has_flex(env: ManagerBasedRlEnv) -> bool:
+  """The line is a flex (``sm.SURFACES``), not boxes."""
+  return env.sim.mj_model.nflex > 0
+
+
+def feet_line_contact_sensor(flex: bool = False) -> ContactSensorCfg:
+  """Net contact force per foot against the webbing. ``flex``: against
+  anything, since mujoco_warp's contact sensors match geoms and bodies and a
+  flex contact has neither; a foot on the floor ends the episode anyway."""
   return ContactSensorCfg(
     name=FOOT_LINE_SENSOR,
     primary=ContactMatch(
@@ -158,7 +206,7 @@ def feet_line_contact_sensor() -> ContactSensorCfg:
       pattern=r"^(left_ankle_roll_link|right_ankle_roll_link)$",
       entity="robot",
     ),
-    secondary=line_match(),
+    secondary=None if flex else line_match(),
     fields=("found", "force"),
     reduce="netforce",
     num_slots=1,
@@ -229,6 +277,19 @@ class LineState:
     self.home = torch.zeros(env.num_envs, dtype=torch.long, device=dev)
     """Each env's own curriculum level; a replay episode runs below it."""
     self.replay = torch.zeros(env.num_envs, dtype=torch.bool, device=dev)
+    self.difficulty = torch.zeros(env.num_envs, device=dev)
+    """This episode's difficulty in [0, 1]; the discrete levels set ``level / top``."""
+    self.home_difficulty = torch.zeros(env.num_envs, device=dev)
+    """Each env's own difficulty (``line_difficulty``); a probe episode runs off it."""
+    self.probe = torch.zeros(env.num_envs, dtype=torch.bool, device=dev)
+    self.history = torch.zeros(env.num_envs, SUCCESS_WINDOW, device=dev)
+    """Recent successes on the env's own difficulty, newest first."""
+    self.history_n = torch.zeros(env.num_envs, dtype=torch.long, device=dev)
+    first = LEVELS[0]
+    self.params = torch.tensor(
+      [[first.width, first.stiffness, first.roll_stiffness]], device=dev
+    ).repeat(env.num_envs, 1)
+    """[B, 3] this episode's line: width, helper stiffness, helper roll stiffness."""
     # Per-episode bookkeeping for the curriculum (``update``).
     self.cmd_dist = torch.zeros(env.num_envs, device=dev)
     self.max_progress = torch.zeros(env.num_envs, device=dev)
@@ -436,14 +497,11 @@ def line_under_robot(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 
 def line_level_obs(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """This episode's curriculum level: level / top, webbing width (m), the
-  helper springs scaled to level 0's. [B, 4]"""
+  """This episode's curriculum level: difficulty (level / top), webbing width
+  (m), the helper springs scaled to level 0's. [B, 4]"""
   st = LineState.get(env)
-  table = _level_table(env)[st.level]
   base = _level_table(env)[0]
-  return torch.cat(
-    [(st.level.float() / max(TOP_LEVEL, 1))[:, None], table[:, :1], table[:, 1:] / base[1:]], -1
-  )
+  return torch.cat([st.difficulty[:, None], st.params[:, :1], st.params[:, 1:] / base[1:]], -1)
 
 
 def feet_line_pose(env: ManagerBasedRlEnv) -> torch.Tensor:
@@ -667,8 +725,34 @@ def foot_on_ground(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 
 def nonfoot_on_line(env: ManagerBasedRlEnv) -> torch.Tensor:
+  if has_flex(env):
+    return _nonfoot_on_flex(env)
   found = env.scene[NONFOOT_LINE_SENSOR].data.found
   return found.view(env.num_envs, -1).any(-1)
+
+
+def _nonfoot_on_flex(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """``nonfoot_line_contact_sensor`` for a flex line, from the raw contact
+  list (the contact sensors cannot match a flex)."""
+  mask = getattr(env, "_slackline_nonfoot_geoms", None)
+  if mask is None:
+    m = env.sim.mj_model
+    mask = torch.zeros(m.ngeom, dtype=torch.bool, device=env.device)
+    pat = re.compile(r"robot/.*_collision")
+    skip = re.compile(r".*_(foot\d|linkage_brace)_collision")
+    for g in range(m.ngeom):
+      name = m.geom(g).name
+      mask[g] = bool(pat.fullmatch(name)) and not skip.fullmatch(name)
+    env._slackline_nonfoot_geoms = mask
+  c = env.sim.data.contact
+  n = int(env.sim.data.nacon[0])
+  geom, flex, world = c.geom[:n], c.flex[:n], c.worldid[:n]
+  on_flex = (flex >= 0).any(-1)
+  g = geom.max(-1).values  # the geom side of a geom-flex contact
+  hit = on_flex & mask[g.clamp_min(0)]
+  out = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+  out[world[hit].long()] = True
+  return out
 
 
 def base_too_low(env: ManagerBasedRlEnv, min_height: float = 0.55) -> torch.Tensor:
@@ -745,7 +829,7 @@ def reset_on_line(
   # tension and level: the string's stiffness (``T / dx`` between
   # neighbours, ``model``) plus the level's helper springs, solved exactly.
   feet_x = torch.stack([direction * (along + f * STANCE_LENGTH / 2) for f in (-1.0, 1.0)], -1)
-  sag = static_sag(line_tension(env)[env_ids], _level_table(env)[st.level[env_ids], 1], feet_x)
+  sag = static_sag(line_tension(env)[env_ids], st.params[env_ids, 1], feet_x)
   st.on_spawn(env_ids)
   q = torch.zeros(n, line.data.joint_pos.shape[1], device=dev)
   q[:, st.z_ids] = sag
@@ -799,9 +883,16 @@ def static_sag(tension: torch.Tensor, helper: torch.Tensor, feet_x: torch.Tensor
 def _level_table(env: ManagerBasedRlEnv) -> torch.Tensor:
   """[levels, 3]: width, helper stiffness, helper roll stiffness."""
   table = getattr(env, "_slackline_levels", None)
-  if table is None:
+  width = getattr(env, "_slackline_width", None)
+  if table is None or (width is not None and bool((table[:, 0] != width).any())):
+    # A flex's vertex offsets are one per model, not per world: its width
+    # cannot follow the levels, which then differ only in their springs.
     table = torch.tensor(
-      [[lv.width, lv.stiffness, lv.roll_stiffness] for lv in LEVELS], device=env.device
+      [
+        [width or (sm.WIDTH if has_flex(env) else lv.width), lv.stiffness, lv.roll_stiffness]
+        for lv in LEVELS
+      ],
+      device=env.device,
     )
     env._slackline_levels = table
   return table
@@ -809,17 +900,28 @@ def _level_table(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 @requires_model_fields("jnt_stiffness", "geom_size", "geom_rbound", "geom_aabb")
 def apply_line_level(
-  env: ManagerBasedRlEnv, env_ids: torch.Tensor | None, fixed_level: int | None = None
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  fixed_level: int | None = None,
+  width: float | None = None,
+  continuous: bool = False,
 ) -> None:
   """Reset event, before ``reset_on_line``: give each world its level's
   webbing width and helper springs (``LEVELS``). ``fixed_level``: put every
-  env there instead (evaluation, play)."""
+  env there instead (evaluation, play). ``width``: every level this wide, so
+  the levels differ only in their springs. ``continuous``: build the line from
+  each env's ``difficulty`` (``line_difficulty``) instead of its level; a
+  ``fixed_level`` then means that level's difficulty."""
+  env._slackline_width = width
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device)
   st = LineState.get(env)
   if fixed_level is not None:
     st.level[env_ids] = fixed_level
     st.home[env_ids] = fixed_level
+    if continuous:
+      st.difficulty[env_ids] = level_difficulty(env, fixed_level)
+      st.home_difficulty[env_ids] = st.difficulty[env_ids]
   ids = getattr(env, "_slackline_model_ids", None)
   if ids is None:
     m = env.sim.mj_model
@@ -836,7 +938,12 @@ def apply_line_level(
       ),
     }
     env._slackline_model_ids = ids
-  lv = _level_table(env)[st.level[env_ids]]
+  if continuous:
+    lv = difficulty_params(env, st.difficulty[env_ids])
+  else:
+    lv = _level_table(env)[st.level[env_ids]]
+    st.difficulty[env_ids] = st.level[env_ids].float() / max(TOP_LEVEL, 1)
+  st.params[env_ids] = lv
   model = env.sim.model
   e = env_ids[:, None]
   model.jnt_stiffness[e, ids["slide"][None]] = lv[:, 1:2].expand(-1, len(ids["slide"]))
@@ -897,6 +1004,109 @@ def line_levels(
   return out
 
 
+def _difficulty_anchors(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """[K, 3] width and ``BALANCE_SPRINGS``, easiest first."""
+  width = getattr(env, "_slackline_width", None) or sm.WIDTH
+  return torch.tensor([[width, k, kr] for k, kr in BALANCE_SPRINGS], device=env.device)
+
+
+def difficulty_params(env: ManagerBasedRlEnv, difficulty: torch.Tensor) -> torch.Tensor:
+  """[n, 3] width, helper and roll helper at ``difficulty`` in [0, 1], which
+  spaces ``BALANCE_SPRINGS`` evenly: geometrically between two of them (each
+  step a like share of stiffness), linearly into the free line's zero."""
+  anchors = _difficulty_anchors(env)
+  k = len(anchors) - 1
+  x = difficulty.clamp(0.0, 1.0) * k
+  i = x.floor().long().clamp(max=k - 1)
+  t = (x - i)[:, None]
+  lo, hi = anchors[i], anchors[i + 1]
+  linear = lo + t * (hi - lo)
+  both = (lo > 0) & (hi > 0)
+  geometric = lo.clamp_min(1e-9) * (hi.clamp_min(1e-9) / lo.clamp_min(1e-9)) ** t
+  out = torch.where(both, geometric, linear)
+  out[:, 0] = linear[:, 0]
+  return out
+
+
+def level_difficulty(env: ManagerBasedRlEnv, level: int) -> float:
+  """The difficulty at which ``difficulty_params`` builds ``LEVELS[level]``'s
+  springs."""
+  anchors = _difficulty_anchors(env)
+  row = _level_table(env)[level]
+  i = int((anchors[:, 1:] == row[1:]).all(-1).nonzero()[0, 0])
+  return i / (len(anchors) - 1)
+
+
+def line_difficulty(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  standing_share: tuple[float, float] = STANDING_SHARE,
+) -> dict[str, torch.Tensor]:
+  """Continuous per-env curriculum (module doc), with ``apply_line_level(
+  continuous=True)``. An episode succeeds if it ran ``SURVIVE_FRAC`` of the
+  time limit (walking, also tracked the command). Episodes on the env's own
+  difficulty fill a window of ``SUCCESS_WINDOW``; once it holds
+  ``SUCCESS_MIN``, a success rate of ``PROMOTE_RATE`` or more raises the difficulty
+  by ``DIFFICULTY_STEP``, one below ``DEMOTE_RATE`` lowers it, and either
+  clears the window. Each reset then runs on the env's own difficulty, or on
+  an easier one (``EASIER_SHARE``), a harder one (``HARDER_SHARE``) or the
+  free line (``FREE_SHARE``); those probes do not count towards the window."""
+  st = LineState.get(env)
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  out: dict[str, torch.Tensor] = {}
+  n, dev = len(env_ids), env.device
+  if env.common_step_counter > 0 and n > 0:
+    terminated = env.termination_manager.terminated[env_ids]
+    lasted = env.episode_length_buf[env_ids] >= SURVIVE_FRAC * env.max_episode_length
+    cmd = st.cmd_dist[env_ids]
+    tracked = (cmd < WALK_MIN_DIST) | (st.max_progress[env_ids] >= TRACK_FRAC * cmd) | st.reached_end[env_ids]
+    success = (~terminated | lasted) & tracked
+    own = ~st.probe[env_ids]
+    hist = st.history[env_ids]
+    hist = torch.where(own[:, None], torch.cat([success.float()[:, None], hist[:, :-1]], -1), hist)
+    count = (st.history_n[env_ids] + own.long()).clamp(max=SUCCESS_WINDOW)
+    rate = hist.sum(-1) / count.clamp_min(1)
+    judged = count >= SUCCESS_MIN
+    up = judged & (rate >= PROMOTE_RATE)
+    down = judged & (rate < DEMOTE_RATE)
+    home = st.home_difficulty[env_ids] + DIFFICULTY_STEP * (up.float() - down.float())
+    st.home_difficulty[env_ids] = home.clamp(0.0, 1.0)
+    moved = up | down
+    st.history[env_ids] = torch.where(moved[:, None], 0.0, hist)
+    st.history_n[env_ids] = torch.where(moved, 0, count)
+    out["success"] = success.float().mean()
+    out["success_own"] = (success & own).float().sum() / own.float().sum().clamp_min(1)
+    out["terminated"] = terminated.float().mean()
+    out["promoted"] = up.float().mean()
+    out["demoted"] = down.float().mean()
+    out["progress_m"] = st.max_progress[env_ids].clamp(min=0.0).mean()
+
+  if n > 0:
+    home = st.home_difficulty[env_ids]
+    u = torch.rand(n, device=dev)
+    r = torch.rand(n, device=dev)
+    easier = u < EASIER_SHARE
+    free = (u >= EASIER_SHARE) & (u < EASIER_SHARE + FREE_SHARE)
+    harder = (u >= EASIER_SHARE + FREE_SHARE) & (u < EASIER_SHARE + HARDER_SHARE)
+    d = torch.where(easier, home * r, home)
+    d = torch.where(harder, home + (1.0 - home) * r, d)
+    d = torch.where(free, torch.ones_like(d), d)
+    st.difficulty[env_ids] = d
+    st.probe[env_ids] = easier | harder | free
+
+  home = st.home_difficulty
+  share = standing_share[0] + (standing_share[1] - standing_share[0]) * float(home.mean())
+  env.command_manager.get_term("twist").cfg.rel_standing_envs = float(share)
+  out["mean"] = home.mean()
+  out["max"] = home.max()
+  out["standing_share"] = torch.tensor(float(share))
+  for lo in (0.0, 0.2, 0.4, 0.6, 0.8):
+    top = 1.01 if lo == 0.8 else lo + 0.2
+    out[f"frac_{lo:.1f}"] = ((home >= lo) & (home < top)).float().mean()
+  return out
+
+
 def set_levels(env: ManagerBasedRlEnv, levels: torch.Tensor) -> None:
   """Place every env on ``levels`` (own and current level), e.g. to resume a
   run at a level distribution. Takes effect at the next reset."""
@@ -914,7 +1124,8 @@ def reset_tactile_noise(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) ->
 
 
 LINE_GEOMS = SceneEntityCfg(LINE, geom_names=(r"webbing_\d+",))
-LINE_STRING_TENDONS = SceneEntityCfg(
-  LINE, tendon_names=(r"anchor_.*_[yz]", r"seg_.*_[yz]")
+LINE_TENSION_TENDONS = SceneEntityCfg(
+  LINE, tendon_names=(r"anchor_.*_(y|z|roll)", r"seg_.*_(y|z|roll)")
 )
-"""The tendons that carry the tension (not the roll couplings)."""
+"""The couplings whose stiffness is the tension's: the string (``T / dx``) and
+the strip's twist (``T w^2 / 12 / dx``), so a world's tension scales both."""
