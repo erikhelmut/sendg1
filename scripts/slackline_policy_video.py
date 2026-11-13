@@ -35,6 +35,12 @@ def main() -> None:
   ap.add_argument("--width-px", type=int, default=1280)
   ap.add_argument("--height-px", type=int, default=720)
   ap.add_argument("--theme", default="studio", help="studio | gray | mujoco")
+  ap.add_argument("--qp", type=int, default=28, help="H.264 quantiser (lower = better, ~18 is near lossless)")
+  ap.add_argument("--no-caption", action="store_true", help="drop the top-left caption card")
+  ap.add_argument("--logo", action="append", default=[],
+                  help="top-left logo, repeatable (left to right): an image path or 'ias' / 'flexoo'")
+  ap.add_argument("--sensor-brand", default=None,
+                  help="logo for a 'sensor by' row in the tactile card: a path or 'flexoo'")
   args = ap.parse_args()
 
   import torch
@@ -45,7 +51,7 @@ def main() -> None:
   import sendg1.tasks  # noqa: F401
   from sendg1.common.slackline import mdp
   from sendg1.tasks.slackline import BALANCE_TASKS, BLIND_TASK, TOUCH_TASK
-  from sendg1.video import EvalVideo, prepare_video_cfg
+  from sendg1.video import LOGOS, EvalVideo, prepare_video_cfg
 
   if args.task:
     task = args.task
@@ -75,7 +81,10 @@ def main() -> None:
   runner.load(args.checkpoint, load_cfg={"actor": True}, strict=True, map_location="cuda:0")
   policy = runner.get_inference_policy(device="cuda:0")
   it = Path(args.checkpoint).stem.split("_")[-1]
-  video = EvalVideo(env, rl_cfg, title=args.label or f"{task}, iteration {it}", theme=args.theme)
+  video = EvalVideo(env, rl_cfg, title=args.label or f"{task}, iteration {it}", theme=args.theme,
+                    caption=not args.no_caption,
+                    logo=[LOGOS.get(name, name) for name in args.logo] or None,
+                    sensor_brand=LOGOS.get(args.sensor_brand, args.sensor_brand))
   st = mdp.LineState.get(env)
   tm = env.termination_manager
   cmd = env.command_manager.get_term("twist")
@@ -120,7 +129,7 @@ def main() -> None:
     kind = f"balance_{kind}"
   out = Path(args.out or REPO / "results" / "slackline" / f"policy_{kind}_L{args.level}.mp4")
   out.parent.mkdir(parents=True, exist_ok=True)
-  video.save(out, video.take(), qp=28)
+  video.save(out, video.take(), qp=args.qp)
   print(f"[video] wrote {out}")
 
 
