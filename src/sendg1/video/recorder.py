@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Iterable, Sequence
 
 import numpy as np
 
@@ -12,6 +12,14 @@ from sendg1.video.theme import apply_theme
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
+
+
+IAS_LOGO = Path(__file__).parent / "assets" / "ias_logo.png"
+"""The IAS (TU Darmstadt) logo, black on transparent."""
+FLEXOO_LOGO = Path(__file__).parent / "assets" / "flexoo_logo.png"
+"""The Flexoo logo (flexoo.com, cropped to its content), on transparent."""
+LOGOS = {"ias": IAS_LOGO, "flexoo": FLEXOO_LOGO}
+"""Short names for the bundled logos, as scripts accept them."""
 
 
 def prepare_video_cfg(
@@ -73,6 +81,11 @@ class EvalVideo:
   ``tactile`` defaults to whether the actor reads the tactile sole. When it is
   False the sole card is drawn but every taxel reads zero: what the policy
   gets is nothing, and the clip says so.
+
+  ``caption=False`` drops the top-left card; ``logo`` (an image path such as
+  ``IAS_LOGO``, or a sequence of them) is drawn there instead, each on a white
+  plate, left to right. ``sensor_brand`` (e.g. ``FLEXOO_LOGO``) adds a
+  "sensor by <logo>" row to the bottom of the tactile card.
   """
 
   def __init__(
@@ -84,6 +97,9 @@ class EvalVideo:
     tactile: bool | None = None,
     theme: str = "studio",
     show_tactile: bool = True,
+    caption: bool = True,
+    logo: str | Path | Sequence[str | Path] | None = None,
+    sensor_brand: str | Path | None = None,
     vmax: float = 30.0,
     history_s: float = 3.0,
   ):
@@ -94,6 +110,8 @@ class EvalVideo:
     self.badge = _badge(env.cfg, rl_cfg) if rl_cfg is not None else "POLICY"
     self.tactile = (self.badge == "TACTILE") if tactile is None else tactile
     self.title = title
+    self.show_caption = caption
+    self.logo = logo
     self.params = TactileParams()
     self.vignette = theme != "mujoco"
     apply_theme(env, theme)
@@ -101,7 +119,7 @@ class EvalVideo:
     self.card = (
       hud.TactileCard(LAYOUTS[self.params.layout], (h, w), live=self.tactile, vmax=vmax,
                       history=max(1, int(history_s / env.step_dt)), history_s=history_s,
-                      weight=_robot_weight(env))
+                      weight=_robot_weight(env), brand=sensor_brand)
       if show_tactile
       else None
     )
@@ -132,7 +150,11 @@ class EvalVideo:
         trace = self.card.trace.copy()
         frame = self.card.draw(frame, normal)
         self.card.trace = trace
-    return hud.caption(frame, self.title, self.badge, self.tactile, lines)
+    if self.show_caption:
+      frame = hud.caption(frame, self.title, self.badge, self.tactile, lines)
+    if self.logo is not None:
+      frame = hud.logo(frame, self.logo)
+    return frame
 
   def capture(self, lines: Iterable[str] = ()) -> np.ndarray | None:
     """Render env 0 now and append the annotated frame."""
