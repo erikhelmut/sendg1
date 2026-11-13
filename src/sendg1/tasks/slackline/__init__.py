@@ -60,7 +60,7 @@ for _surface, _tactile in ((s, t) for s in SURFACE_TASKS for t in (True, False))
     env_cfg=_env,
     play_env_cfg=make_slackline_env_cfg(play=True, tactile=_tactile, surface=_surface),
     rl_cfg=beam_ppo_cfg(
-      experiment_name=_experiment, symmetric=False, max_iterations=MAX_ITERATIONS
+      experiment_name=_experiment, actor="gru", max_iterations=MAX_ITERATIONS
     ),
   )
 
@@ -74,7 +74,7 @@ for _tactile, _task in BALANCE_TASKS.items():
     play_env_cfg=make_slackline_env_cfg(play=True, **_kw),
     rl_cfg=beam_ppo_cfg(
       experiment_name=f"slackline_balance_{'touch' if _tactile else 'blind'}",
-      symmetric=False,
+      actor="gru",
       max_iterations=MAX_ITERATIONS,
     ),
   )

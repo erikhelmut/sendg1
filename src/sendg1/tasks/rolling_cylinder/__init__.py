@@ -47,6 +47,6 @@ for _task, _tactile, _experiment in (
     env_cfg=_env,
     play_env_cfg=make_rolling_cylinder_env_cfg(play=True, tactile=_tactile),
     rl_cfg=beam_ppo_cfg(
-      experiment_name=_experiment, symmetric=False, max_iterations=MAX_ITERATIONS
+      experiment_name=_experiment, actor="gru", max_iterations=MAX_ITERATIONS
     ),
   )

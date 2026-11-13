@@ -59,5 +59,5 @@ for _task, _variant, _blind, _symmetric, _experiment in _TASKS:
     task_id=_task,
     env_cfg=_env,
     play_env_cfg=make_pedalo_env_cfg(play=True, variant=_variant, blind=_blind),
-    rl_cfg=beam_ppo_cfg(experiment_name=_experiment, symmetric=_symmetric),
+    rl_cfg=beam_ppo_cfg(experiment_name=_experiment, actor="sym_gru" if _symmetric else "gru"),
   )
