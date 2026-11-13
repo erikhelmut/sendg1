@@ -45,11 +45,16 @@ class TactileParams:
 
 
 def tactile_scene_sensors(
-  params: TactileParams = TactileParams(), secondary: ContactMatch = TERRAIN_MATCH
+  params: TactileParams = TactileParams(),
+  secondary: ContactMatch | None = TERRAIN_MATCH,
+  geom_only_rays: bool = False,
 ) -> tuple:
   """The scene sensors ``read_tactile`` needs, configured for ``params``.
-  ``secondary``: what the soles stand on (default: the terrain)."""
-  return tactile_sensors(LAYOUTS[params.layout], params.rays_per_axis, secondary)
+  ``secondary``: what the soles stand on (default: the terrain; ``None``:
+  anything). ``geom_only_rays``: for scenes with a flex (``sensors``)."""
+  return tactile_sensors(
+    LAYOUTS[params.layout], params.rays_per_axis, secondary, geom_only_rays
+  )
 
 
 @lru_cache(maxsize=8)

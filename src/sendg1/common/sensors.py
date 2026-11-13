@@ -17,10 +17,12 @@ from mjlab.sensor import (
   ContactSensorCfg,
   GridPatternCfg,
   ObjRef,
+  RayCastSensor,
   RayCastSensorCfg,
   RingPatternCfg,
   TerrainHeightSensorCfg,
 )
+from mujoco_warp._src.ray import rays
 
 from sendg1.common.robots.g1 import G1_FOOT_SITES, G1_PELVIS_BODY
 from sendg1.common.tactile.layout import SIDES, SOLE_Z, TaxelLayout
@@ -140,7 +142,7 @@ class TaxelRayPatternCfg:
 TERRAIN_MATCH = ContactMatch(mode="body", pattern="terrain")
 
 
-def sole_contact_sensor(secondary: ContactMatch = TERRAIN_MATCH) -> ContactSensorCfg:
+def sole_contact_sensor(secondary: ContactMatch | None = TERRAIN_MATCH) -> ContactSensorCfg:
   """Every individual contact between each foot and the terrain (or whatever
   ``secondary`` names the feet stand on, e.g. the pedalo).
 
@@ -163,10 +165,41 @@ def sole_contact_sensor(secondary: ContactMatch = TERRAIN_MATCH) -> ContactSenso
   )
 
 
-def taxel_ray_sensor(side: str, layout: TaxelLayout, per_axis: int) -> RayCastSensorCfg:
+class _GeomOnlyRayCastSensor(RayCastSensor):
+  """Casts without the render context's BVH. mujoco_warp 3.11's BVH ray kernel
+  reads out of bounds when the model has a flex (its geom and flex leaves are
+  laid out with different strides); the plain kernel tests geoms only, which
+  is all the taxel rays need."""
+
+  def raycast_kernel(self, rc) -> None:
+    rays(
+      m=self._model.struct,  # type: ignore[attr-defined]
+      d=self._data.struct,  # type: ignore[attr-defined]
+      pnt=self._ray_pnt,  # type: ignore[invalid-argument-type]
+      vec=self._ray_vec,  # type: ignore[invalid-argument-type]
+      geomgroup=self._geomgroup,  # pyright: ignore[reportArgumentType]
+      flg_static=True,
+      bodyexclude=self._ray_bodyexclude,
+      dist=self._ray_dist,  # type: ignore[invalid-argument-type]
+      geomid=self._ray_geomid,  # type: ignore[invalid-argument-type]
+      normal=self._ray_normal,  # type: ignore[invalid-argument-type]
+    )
+
+
+@dataclass(kw_only=True)
+class GeomOnlyRayCastSensorCfg(RayCastSensorCfg):
+  def build(self) -> RayCastSensor:
+    return _GeomOnlyRayCastSensor(self)
+
+
+def taxel_ray_sensor(
+  side: str, layout: TaxelLayout, per_axis: int, geom_only: bool = False
+) -> RayCastSensorCfg:
   """Rays down from ``per_axis``^2 points on every taxel of one sole, to find
-  which patches have ground beneath them."""
-  return RayCastSensorCfg(
+  which patches have ground beneath them. ``geom_only``: skip the BVH (needed
+  when the scene has a flex, see ``_GeomOnlyRayCastSensor``)."""
+  cls = GeomOnlyRayCastSensorCfg if geom_only else RayCastSensorCfg
+  return cls(
     name=taxel_ray_sensor_name(side),
     frame=ObjRef(type="body", name=f"{side}_ankle_roll_link", entity="robot"),
     pattern=TaxelRayPatternCfg(
@@ -181,11 +214,14 @@ def taxel_ray_sensor(side: str, layout: TaxelLayout, per_axis: int) -> RayCastSe
 
 
 def tactile_sensors(
-  layout: TaxelLayout, per_axis: int, secondary: ContactMatch = TERRAIN_MATCH
+  layout: TaxelLayout,
+  per_axis: int,
+  secondary: ContactMatch | None = TERRAIN_MATCH,
+  geom_only_rays: bool = False,
 ) -> tuple:
   """All scene sensors the tactile model reads. ``secondary``: what the soles
-  touch; the taxel rays see every group-0 geom anyway."""
+  touch (``None``: anything); the taxel rays see every group-0 geom anyway."""
   return (
     sole_contact_sensor(secondary),
-    *(taxel_ray_sensor(side, layout, per_axis) for side in SIDES),
+    *(taxel_ray_sensor(side, layout, per_axis, geom_only_rays) for side in SIDES),
   )
