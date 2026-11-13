@@ -39,7 +39,8 @@ if [ "${SLURM_RESTART_COUNT:-0}" -gt 0 ]; then
     | awk -F'model_' '{split($NF, n, "."); print n[1], $0}' | sort -n | tail -1 | cut -d" " -f2 || true)
   if [ -n "$ck" ]; then
     done_it=$(basename "$ck" .pt | sed 's/model_//')
-    left=$(( total - done_it ))
+    # rsl_rl's last checkpoint of an N-iteration run is model_<N-1>.
+    left=$(( total - 1 - done_it ))
     [ "$left" -gt 0 ] || { echo "[job] $run already at $done_it/$total"; exit 0; }
     rundir=$(basename "$(dirname "$ck")")
     echo "[job] restart $SLURM_RESTART_COUNT: resuming $rundir/$(basename "$ck"), $left iterations left"

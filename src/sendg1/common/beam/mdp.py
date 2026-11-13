@@ -15,12 +15,19 @@ Every episode is judged by :class:`BeamEpisode`, updated once per env step:
 
 Success = no early termination AND (reached the end platform, OR covered at
 least ``TRACK_FRAC`` of the commanded distance; a commanded distance under
-``WALK_MIN_DIST`` counts as standing and only has to survive).
+``WALK_MIN_DIST`` counts as standing and only has to survive). An episode that
+reached the end stops ``FINISH_HOLD_S`` later (:func:`finished`, a time-out, so
+its value is bootstrapped): standing on the end platform for the rest of a
+35 s episode teaches nothing.
 
 Curriculum (per env, :func:`beam_levels`)
 -----------------------------------------
-Promote one width level on success, demote one on an early termination, stay
-otherwise (time-out without tracking). Levels from ``PLATFORM_FROM_LEVEL`` on
+Each env keeps its last ``HISTORY`` results at its level: a success, or a fall
+(an early termination); a standing or a walking episode that neither succeeds
+nor falls adds nothing. ``PROMOTE_AFTER`` successes among them move it one
+width narrower, ``DEMOTE_AFTER`` falls one wider, and either move clears the
+history. One episode moved the level before, so it random-walked around the
+width where a single success and a single fall were equally likely. Levels from ``PLATFORM_FROM_LEVEL`` on
 spawn on the start platform; below it, directly on the beam. Difficulty is
 coupled to the level: the centreline reward's sigma tightens
 (``CENTRELINE_SIGMA``), pushes switch on from ``PUSH_FROM_LEVEL`` and grow,
@@ -28,8 +35,9 @@ tactile faults grow (``tactile.noise_strength``), and the share of walking
 commands rises with the population's mean level.
 
 Replay: each env keeps its own curriculum ("home") level, but a share
-``REPLAY_SHARE`` of resets is placed on a uniformly drawn level at or below it.
-A replay episode does not move the home level. Without it the population drains
+``REPLAY_SHARE`` of resets is placed on a uniformly drawn level at or below it,
+and a share ``STRETCH_SHARE`` one level above it (the next width gives a
+learning signal before the env is promoted to it). Neither moves the home level. Without it the population drains
 out of the wide levels and the policy forgets them (first full run: 100 %
 success at 0.05 m, 36 % at 0.40 m, with the width obs out of distribution).
 """
@@ -51,6 +59,7 @@ from mjlab.utils.lab_api.math import quat_apply, quat_from_euler_xyz, quat_mul
 
 from sendg1.common.beam import tactile as tac
 from sendg1.common.beam.geometry import BeamGeometry
+from sendg1.common.beam.terrain import BEAM_WIDTHS
 from sendg1.common.robots.g1 import G1_FOOT_GEOMS, G1_FOOT_SITES
 from sendg1.common.tactile.layout import LAYOUTS
 from sendg1.common.tactile.sensing import TactileParams, read_tactile
@@ -60,21 +69,35 @@ if TYPE_CHECKING:
 
 # -- episode / curriculum constants ------------------------------------------
 
-PLATFORM_FROM_LEVEL = 2
+PLATFORM_FROM_LEVEL = BEAM_WIDTHS.index(0.20)
 """First level (0.20 m) that starts on the start platform. The default stance is
 0.31 m wide at the outer sole edges, so a spawn straight onto 0.20 m would put
 both feet half off the beam; from here on the robot steps onto the beam itself."""
 
-PUSH_FROM_LEVEL = 3
+PUSH_FROM_LEVEL = BEAM_WIDTHS.index(0.15)
 TRACK_FRAC = 0.7
 WALK_MIN_DIST = 0.5
 """Commanded distance (m) below which an episode counts as standing."""
 
-CENTRELINE_SIGMA: tuple[float, ...] = (0.12, 0.10, 0.07, 0.05, 0.04, 0.03, 0.025)
-"""Stance-foot centreline reward width per level (m)."""
+CENTRELINE_SIGMA: tuple[float, ...] = (
+  0.12, 0.10, 0.085, 0.07, 0.06, 0.05, 0.045, 0.04, 0.035, 0.03, 0.025
+)
+"""Stance-foot centreline reward width per level (m), one per ``BEAM_WIDTHS``."""
 
 REPLAY_SHARE = 0.2
 """Share of resets placed on a random easier level (does not move the home level)."""
+
+STRETCH_SHARE = 0.15
+"""Share of resets placed one level above home (does not move the home level)."""
+
+HISTORY = 3
+PROMOTE_AFTER = 2
+DEMOTE_AFTER = 2
+"""Curriculum window: successes / falls among the last ``HISTORY`` results at a
+level that move it one narrower / wider."""
+
+FINISH_HOLD_S = 2.0
+"""Seconds an episode runs on after reaching the end platform."""
 
 STANDING_SHARE = (0.6, 0.15)
 """Share of standing commands at mean level 0 and at the top level."""
@@ -85,6 +108,12 @@ NONFOOT_CONTACT_SENSOR = "nonfoot_contact"
 
 FOOT_BELOW_TOP_TOL = 0.03
 """A sole contact this far below the top surface is on a beam side or the ground."""
+
+FOOT_OFF_TERMINATE_TOL = 0.10
+"""A sole contact this far below the top ends the episode: the foot has dropped
+off the beam (the ground is 0.15-0.30 m down). Brushing a side face higher up is
+only penalised (``foot_side_contact``) and can be recovered from; ending those
+episodes at 3 cm never let a policy learn to."""
 
 TACTILE = TactileParams()
 
@@ -129,6 +158,7 @@ class BeamEpisode:
     self.vel_err_sum = z()
     self.steps = z()
     self.reached_end = b()
+    self.reach_step = z()
     self.new_reach = b()
     self.platform_mode = b()
     self._stamp = -1
@@ -175,6 +205,7 @@ class BeamEpisode:
     feet_arc = self.feet_proj().arc
     reached = (feet_arc.min(dim=1).values > beam_end + 0.02) & (arc > beam_end + 0.15)
     self.new_reach = reached & ~self.reached_end
+    self.reach_step = torch.where(self.new_reach, self.steps, self.reach_step)
     self.reached_end |= reached
 
   def stats(self, env_ids: torch.Tensor) -> EpisodeStats:
@@ -198,7 +229,7 @@ class BeamEpisode:
   def on_spawn(self, env_ids: torch.Tensor, spawn_arc: torch.Tensor, platform: torch.Tensor) -> None:
     self.spawn_arc[env_ids] = spawn_arc
     self.platform_mode[env_ids] = platform
-    for t in (self.progress, self.max_progress, self.cmd_dist, self.vel_err_sum, self.steps):
+    for t in (self.progress, self.max_progress, self.cmd_dist, self.vel_err_sum, self.steps, self.reach_step):
       t[env_ids] = 0.0
     self.reached_end[env_ids] = False
     self.new_reach[env_ids] = False
@@ -888,6 +919,19 @@ def foot_off_support(env: ManagerBasedRlEnv, tol: float = FOOT_BELOW_TOP_TOL) ->
   return (low & valid).any(dim=-1)
 
 
+def foot_side_contact(env: ManagerBasedRlEnv, tol: float = FOOT_BELOW_TOP_TOL) -> torch.Tensor:
+  """1 while a sole touches a beam side face (any contact ``tol`` below the
+  top), the cost that replaces ending the episode for it."""
+  return foot_off_support(env, tol).float()
+
+
+def finished(env: ManagerBasedRlEnv, hold_s: float = FINISH_HOLD_S) -> torch.Tensor:
+  """``hold_s`` after reaching the end platform. Register with ``time_out=True``."""
+  ep = BeamEpisode.get(env)
+  ep.update()
+  return ep.reached_end & (ep.steps - ep.reach_step >= round(hold_s / env.step_dt))
+
+
 def base_too_low(env: ManagerBasedRlEnv, min_height: float = 0.5) -> torch.Tensor:
   z = _robot(env).data.root_link_pos_w[:, 2]
   return z < BeamGeometry.get(env).top_z() + min_height
@@ -1082,17 +1126,23 @@ def beam_levels(
   env_ids: torch.Tensor | None,
   standing_share: tuple[float, float] = STANDING_SHARE,
   replay_share: float = REPLAY_SHARE,
+  stretch_share: float = STRETCH_SHARE,
   standing_promotes: bool = True,
   success_beam_m: float | None = None,
+  history: int = HISTORY,
+  promote_after: int = PROMOTE_AFTER,
+  demote_after: int = DEMOTE_AFTER,
 ) -> dict[str, torch.Tensor]:
   """Per-env width curriculum plus the coupled command mix. See module doc.
-  ``standing_promotes=False``: surviving a standing command does not promote,
+  ``standing_promotes=False``: surviving a standing command is not a success,
   so the level only rises on walking successes. ``success_beam_m``: a walking
   episode also succeeds once it has covered that many metres of the beam
   without falling, at any pace (the default criterion, 70 % of the commanded
   distance, is rarely met on narrow beams and stalled the first E2E run's
-  curriculum at level ~2). Episodes restarted from the state bank
-  (:func:`spawn_from_bank`) never move the level."""
+  curriculum at level ~2). Only episodes on the home level count: replay and
+  stretch episodes, and restarts from the state bank (:func:`spawn_from_bank`),
+  never move it. ``history=promote_after=demote_after=1, stretch_share=0`` is
+  the round-two curriculum: every success or fall moves the level."""
   terrain = env.scene.terrain
   assert terrain is not None
   geo = BeamGeometry.get(env)
@@ -1105,28 +1155,35 @@ def beam_levels(
   if home is None:
     home = geo.levels.clone()
     env._beam_home_level = home
-    env._beam_replay = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-  replay = env._beam_replay
+    env._beam_history = torch.full((env.num_envs, history), -1, dtype=torch.int8, device=env.device)
+  hist = env._beam_history
 
   if env.common_step_counter > 0 and len(env_ids) > 0:
     st = ep.stats(env_ids)
-    up = st.success
+    win = st.success
     if success_beam_m is not None:
       on_beam = ep.spawn_arc[env_ids] + ep.max_progress[env_ids] - geo.beam_arc()[env_ids, 0]
-      up = up | (~st.terminated & (on_beam >= success_beam_m))
+      win = win | (~st.terminated & (on_beam >= success_beam_m))
     if not standing_promotes:
-      up = up & (st.cmd_dist >= WALK_MIN_DIST)
-    up = up.long()
-    down = st.terminated.long()
-    moved = (home[env_ids] + up - down).clamp(0, geo.num_levels - 1)
-    frozen = replay[env_ids]
+      win = win & (st.cmd_dist >= WALK_MIN_DIST)
+    counts = st.level == home[env_ids]
     bank = getattr(env, "_beam_bank", None)
     if bank is not None:
-      frozen = frozen | bank[env_ids]
-    home[env_ids] = torch.where(frozen, home[env_ids], moved)
+      counts = counts & ~bank[env_ids]
+    result = torch.where(win, 1, torch.where(st.terminated, 0, -1)).to(torch.int8)
+    adds = counts & (result >= 0)
+    h = hist[env_ids]
+    h = torch.where(adds[:, None], torch.cat([h[:, 1:], result[:, None]], dim=1), h)
+    up = (h == 1).sum(-1) >= promote_after
+    down = ~up & ((h == 0).sum(-1) >= demote_after)
+    moved = (home[env_ids] + up.long() - down.long()).clamp(0, geo.num_levels - 1)
+    h = torch.where((up | down)[:, None], torch.full_like(h, -1), h)
+    hist[env_ids] = h
+    home[env_ids] = moved
 
     out["success"] = st.success.float().mean()
-    out["promoted"] = (up.bool() & ~frozen).float().mean()
+    out["promoted"] = up.float().mean()
+    out["demoted"] = down.float().mean()
     if bank is not None:
       out["bank_share"] = bank[env_ids].float().mean()
     out["terminated"] = st.terminated.float().mean()
@@ -1140,10 +1197,12 @@ def beam_levels(
 
   if len(env_ids) > 0:
     n = len(env_ids)
-    rep = (torch.rand(n, device=env.device) < replay_share) & (home[env_ids] > 0)
-    easier = (torch.rand(n, device=env.device) * (home[env_ids] + 1).float()).long()
-    lv = torch.where(rep, easier.clamp(max=geo.num_levels - 1), home[env_ids])
-    replay[env_ids] = rep & (lv < home[env_ids])
+    hm = home[env_ids]
+    u = torch.rand(n, device=env.device)
+    easier = (torch.rand(n, device=env.device) * (hm + 1).float()).long()
+    lv = torch.where(u < replay_share, easier, hm)
+    harder = (u >= replay_share) & (u < replay_share + stretch_share)
+    lv = torch.where(harder, hm + 1, lv).clamp(max=geo.num_levels - 1)
     terrain.terrain_levels[env_ids] = lv
     terrain.env_origins[env_ids] = terrain.terrain_origins[lv, terrain.terrain_types[env_ids]]
 
@@ -1157,9 +1216,10 @@ def beam_levels(
   out["standing_share"] = torch.tensor(float(share))
   for i in range(geo.num_levels):
     out[f"frac_L{i}"] = (home == i).float().mean()
-  out["replay_share"] = replay.float().mean()
+  cur = terrain.terrain_levels
+  out["replay_share"] = (cur < home).float().mean()
+  out["stretch_share"] = (cur > home).float().mean()
   return out
-
 
 
 def set_levels(env: ManagerBasedRlEnv, levels: torch.Tensor) -> None:
@@ -1170,4 +1230,23 @@ def set_levels(env: ManagerBasedRlEnv, levels: torch.Tensor) -> None:
   terrain.terrain_levels[:] = levels
   terrain.env_origins[:] = terrain.terrain_origins[levels, terrain.terrain_types]
   env._beam_home_level = levels.clone()
-  env._beam_replay = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+  # Keep the window the curriculum term was built with (``beam_levels(history=)``).
+  n = env._beam_history.shape[1] if hasattr(env, "_beam_history") else HISTORY
+  env._beam_history = torch.full((env.num_envs, n), -1, dtype=torch.int8, device=env.device)
+
+
+def curriculum_state(env: ManagerBasedRlEnv) -> dict[str, torch.Tensor] | None:
+  """The per-env curriculum (home level and result history), for checkpoints."""
+  home = getattr(env, "_beam_home_level", None)
+  if home is None:
+    return None
+  return {"home": home.clone(), "history": env._beam_history.clone()}
+
+
+def load_curriculum_state(env: ManagerBasedRlEnv, state: dict[str, torch.Tensor]) -> None:
+  """Restore :func:`curriculum_state` on a resumed run, if the env count matches."""
+  home = state["home"].to(env.device)
+  if len(home) != env.num_envs:
+    return
+  set_levels(env, home)
+  env._beam_history = state["history"].to(env.device)

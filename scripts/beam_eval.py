@@ -13,7 +13,7 @@ Protocol (fixed)
   episodes. No curriculum.
 - Every episode starts on the START PLATFORM, whatever the width, with a
   constant forward command ``--speed`` (default 0.3 m/s), for the task's
-  episode length (20 s; 35 s on held-out beams with a ``-Eval`` task). Success =
+  episode length (35 s; an episode that reached the end stops 2 s later). Success =
   reaching the end platform with no early termination.
 - Training DR stays on (friction, mass, CoM, motor gains/strength, latency,
   IMU noise/bias, tactile faults at the level's strength). Pushes off by
@@ -50,10 +50,9 @@ def build_env(args, task: str):
   from mjlab.managers.curriculum_manager import CurriculumTermCfg
   from mjlab.tasks.registry import load_env_cfg
 
-  from sendg1.common.beam.terrain import BEAM_WIDTHS
-
   cfg = load_env_cfg(task)
-  n_levels = len(BEAM_WIDTHS)
+  # The task's own widths: the round-two tasks keep the old seven.
+  n_levels = len(next(iter(cfg.scene.terrain.terrain_generator.sub_terrains.values())).widths)
   cfg.scene.num_envs = args.envs_per_level * n_levels
   cfg.seed = args.seed
   cfg.events["spawn"].params = {
@@ -102,7 +101,10 @@ def _record_episodes(env, env_ids):
   tm = env.termination_manager
   reasons = []
   for i in range(len(env_ids)):
-    fired = [n for n in tm.active_terms if n != "time_out" and bool(tm.get_term(n)[env_ids[i]])]
+    # Time-out terms (``time_out``, ``finished``) end an episode without a fall.
+    fired = [
+      n for n in tm.active_terms if not tm.get_term_cfg(n).time_out and bool(tm.get_term(n)[env_ids[i]])
+    ]
     reasons.append(fired[0] if fired else ("success" if bool(reached[i]) else "time_out"))
   for i, e in enumerate(env_ids.tolist()):
     env._beam_records.append(

@@ -51,11 +51,15 @@ from sendg1.common.sensors import feet_ground_contact_sensor, self_collision_sen
 from sendg1.common.tactile.sensing import tactile_scene_sensors
 
 DEFAULT_NUM_ENVS = 4096
-EPISODE_S = 20.0
-EVAL_EPISODE_S = 35.0
-"""Episode length of the ``-Eval`` tasks. A crossing from the start platform is
-~4.65 m, 15.5 s at a perfect 0.3 m/s; 35 s lets a policy that keeps walking at
-half that pace finish, so a time-out means it stalled, not that it was careful."""
+EPISODE_S = 35.0
+"""Episode length, training and ``-Eval`` alike. A crossing from the start
+platform is ~4.65 m, 15.5 s at a perfect 0.3 m/s; 35 s lets a policy that
+keeps walking at half that pace finish, so a time-out means it stalled, not
+that it was careful. Training used 20 s before, so a recurrent actor ran
+longer in evaluation than it ever had in training. An episode ends 2 s after
+reaching the end platform (``mdp.finished``), so the long episodes add no idle
+standing."""
+EVAL_EPISODE_S = EPISODE_S
 MAX_FORWARD_SPEED = 0.3
 """A careful, probing step on an unseen beam is easier to learn at walking
 pace, and evaluation runs at 0.3 m/s anyway."""
@@ -76,11 +80,23 @@ stalled at mean level ~2.2 and shuffled with its feet ~10-17 cm apart: the
 level-coupled widths (``mdp.CENTRELINE_SIGMA``, 12 cm at level 0) never asked
 for more. A foot (and the CoM) now pays only over the beam, which the actor can
 only find by touch."""
-SUCCESS_BEAM_M = 1.0
-"""Metres of beam that promote a walking episode at any pace."""
+SUCCESS_BEAM_M = 2.0
+"""Metres of beam (of 4) that make a walking episode a curriculum success at
+any pace. 1 m promoted envs that could not yet cross the beam."""
 STATE_BANK = Path(__file__).resolve().parents[4] / "results" / "beam" / "v4_beam_states.pt"
 """Mid-beam states recorded from an earlier privileged policy that walked
 heel-to-toe on 0.05-0.10 m beams (``mdp.spawn_from_bank``)."""
+ROUND2_WIDTHS: tuple[float, ...] = (0.40, 0.30, 0.20, 0.15, 0.10, 0.07, 0.05)
+"""The seven width levels before round three (``round2``)."""
+ROUND2_CURRICULUM = {
+  "success_beam_m": 1.0,
+  "history": 1,
+  "promote_after": 1,
+  "demote_after": 1,
+  "stretch_share": 0.0,
+}
+"""Round-two curriculum: one success (1 m of beam) or one fall moves the level,
+no tries at the next width."""
 BANK_SHARE = 0.25
 """Share of resets restarted mid-beam from the bank."""
 SHOULDER_ROLL_STD = 1.2
@@ -238,6 +254,9 @@ def build_rewards() -> dict[str, RewardTermCfg]:
     # Heel-to-toe, paid per metre gained; cheaper forms were farmed (see
     # mdp.feet_in_line).
     "feet_in_line": RewardTermCfg(func=mdp.feet_in_line, weight=3.0),
+    # A sole on a beam side face no longer ends the episode (only a foot 10 cm
+    # down does), so it costs -1 per second instead: recoverable, not free.
+    "foot_side_contact": RewardTermCfg(func=mdp.foot_side_contact, weight=-1.0),
   }
 
 
@@ -284,6 +303,17 @@ def _reward_tandem(r: dict[str, RewardTermCfg]) -> None:
   r["feet_in_line"].params = {"std": 0.15}
 
 
+def _reward_walk(r: dict[str, RewardTermCfg]) -> None:
+  # A gentle `step`: at -1.0 slip and a 5 cm target the policies stepped but
+  # lost most narrow-beam success (0.20 m: 59 -> 19%), while base drifted into
+  # 1.4 cm shuffles on its own. A third of the slip cost, kept on top of
+  # foot_slip, and a 3 cm target at 2/5 the pay ask for a real but low step.
+  r["stance_slip"] = RewardTermCfg(func=mdp.stance_slip, weight=-0.3)
+  r["swing_clearance"] = RewardTermCfg(
+    func=mdp.swing_clearance, weight=2.0, params={"target_height": 0.03}
+  )
+
+
 _REWARD_PARTS = {
   "slip": _reward_slip,
   "clear": _reward_clear,
@@ -291,6 +321,7 @@ _REWARD_PARTS = {
   "soft": _reward_soft,
   "arms": _reward_arms,
   "tandem": _reward_tandem,
+  "walk": _reward_walk,
 }
 REWARD_VARIANTS: dict[str, tuple[str, ...]] = {
   "base": (),
@@ -304,11 +335,14 @@ REWARD_VARIANTS: dict[str, tuple[str, ...]] = {
   "step_arms": ("slip", "clear", "arms"),
   "step_tandem": ("slip", "clear", "tandem"),
   "all": ("slip", "clear", "air", "soft", "arms", "tandem"),
+  "walk": ("walk",),
+  "walk_arms": ("walk", "arms"),
 }
 """Reward alternatives on top of ``build_rewards`` for the touch-MLP study:
 the first touch-MLP run skated (no swings, 1.3-2 m of slide per metre walked).
 ``step`` = penalise sliding + pay lifted steps; ``arms`` frees the arms for
-balancing; ``tandem`` pulls the feet toward heel-to-toe."""
+balancing; ``tandem`` pulls the feet toward heel-to-toe; ``walk`` is a
+gentler ``step`` (round two, after ``step`` cost narrow-beam success)."""
 
 
 def build_variant_rewards(variant: str) -> dict[str, RewardTermCfg]:
@@ -329,7 +363,10 @@ def build_terminations() -> dict[str, TerminationTermCfg]:
     "nonfoot_contact": TerminationTermCfg(
       func=vel_mdp.illegal_contact, params={"sensor_name": mdp.NONFOOT_CONTACT_SENSOR}
     ),
-    "foot_off_beam": TerminationTermCfg(func=mdp.foot_off_support),
+    "finished": TerminationTermCfg(func=mdp.finished, time_out=True),
+    "foot_off_beam": TerminationTermCfg(
+      func=mdp.foot_off_support, params={"tol": mdp.FOOT_OFF_TERMINATE_TOL}
+    ),
     "base_too_low": TerminationTermCfg(func=mdp.base_too_low, params={"min_height": 0.5}),
     "tilt": TerminationTermCfg(
       func=vel_mdp.bad_orientation, params={"limit_angle": math.radians(40.0)}
@@ -436,8 +473,11 @@ blind, no tactile actor term, with the ``touch`` critic."""
 
 
 def build_observations(
-  curves: bool = False, tactile: Tactile = "map"
+  curves: bool = False, tactile: Tactile = "map", actor_history: int = 0
 ) -> dict[str, ObservationGroupCfg]:
+  """``actor_history``: > 0 gives the actor the last that many frames, shape
+  ``[B, H, D]`` oldest first, for the transformer actor; the critic stays on
+  the current frame."""
   actor_terms, priv_terms, noisy = {
     "map": (ACTOR_TERMS, PRIVILEGED_TERMS, "tactile_map"),
     "touch": (TOUCH_ACTOR_TERMS, TOUCH_PRIVILEGED_TERMS, "tactile_touch"),
@@ -450,6 +490,7 @@ def build_observations(
       terms={n: TERMS[n].build() for n in actor_terms},
       concatenate_terms=True,
       enable_corruption=True,
+      **({"history_length": actor_history, "flatten_history_dim": False} if actor_history else {}),
     ),
     # The faulted tactile term is stateful (frame drops), so it is computed
     # once, for the actor; the critic reads the clean map.
@@ -469,13 +510,19 @@ def make_beam_env_cfg(
   tactile: Tactile = "map",
   evaluation: bool = False,
   reward: str = "base",
+  actor_history: int = 0,
+  round2: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """``curves``: two thirds of the terrain columns are bent beams
   (``terrain.BEND_MAX_TURN_DEG``), and the critic also sees how the beam
   turns ahead (``beam_ahead``). ``tactile``: see ``Tactile``. ``evaluation``:
   held-out terrain (``EVAL_TERRAIN_SEED``) and ``EVAL_EPISODE_S`` episodes,
   observations unchanged so training checkpoints load. ``reward``: a
-  ``REWARD_VARIANTS`` key."""
+  ``REWARD_VARIANTS`` key. ``actor_history``: see ``build_observations``.
+  ``round2``: round two's widths, curriculum, terminations and reward (no
+  ``finished``, a 3 cm foot-off, no ``foot_side_contact``) with the current 35 s
+  episodes, to tell the episode length apart from the other round-three
+  changes."""
   cfg = make_velocity_env_cfg()
   cfg.episode_length_s = EVAL_EPISODE_S if evaluation else EPISODE_S
 
@@ -491,7 +538,9 @@ def make_beam_env_cfg(
   assert cfg.scene.terrain is not None
   cfg.scene.terrain.terrain_type = "generator"
   cfg.scene.terrain.terrain_generator = make_beam_terrain_cfg(
-    curves=curves, **({"seed": EVAL_TERRAIN_SEED} if evaluation else {})
+    curves=curves,
+    **({"seed": EVAL_TERRAIN_SEED} if evaluation else {}),
+    **({"widths": ROUND2_WIDTHS} if round2 else {}),
   )
   cfg.scene.terrain.max_init_terrain_level = 0  # everyone starts on the widest beam
 
@@ -499,7 +548,7 @@ def make_beam_env_cfg(
   cfg.sim.contact_sensor_maxmatch = 128
   cfg.sim.nconmax = 70
 
-  cfg.observations = build_observations(curves, tactile)
+  cfg.observations = build_observations(curves, tactile, actor_history)
 
   cfg.actions = {
     "joint_pos": mdp.DelayedJointPositionActionCfg(
@@ -526,6 +575,10 @@ def make_beam_env_cfg(
 
   cfg.rewards = build_variant_rewards(reward)
   cfg.events = build_events()
+  if actor_history:
+    # The mirror maps serve the symmetric actors, which see one frame; a
+    # windowed actor is plain.
+    cfg.events.pop("register_actor_mirror")
   cfg.terminations = build_terminations()
   # Only walking episodes promote (the first run rose to level 3 on standing
   # commands alone), and a walking episode also promotes once it has covered
@@ -536,6 +589,13 @@ def make_beam_env_cfg(
       params={"standing_promotes": False, "success_beam_m": SUCCESS_BEAM_M},
     )
   }
+  if round2:
+    cfg.rewards.pop("foot_side_contact")
+    cfg.terminations.pop("finished")
+    cfg.terminations["foot_off_beam"].params = {}
+    # Pushes still start at 0.15 m, level 3 of the seven.
+    cfg.events["push"].params["from_level"] = ROUND2_WIDTHS.index(0.15)
+    cfg.curriculum["beam_levels"].params.update(ROUND2_CURRICULUM)
 
   cfg.viewer.body_name = G1_TORSO_BODY
   if play:

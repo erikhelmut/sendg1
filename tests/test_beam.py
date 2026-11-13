@@ -31,8 +31,15 @@ from sendg1.tasks.beam import (
   TASK,
   TOUCH_MLP_PLAIN_TASK,
   TOUCH_MLP_SYM_TASK,
+  TOUCH_LSTM_R2_R64_TASK,
+  TOUCH_LSTM_R2_TASK,
+  TOUCH_PLAIN_R2_R64_TASK,
+  TOUCH_PLAIN_R2_TASK,
+  TOUCH_PLAIN_R64_TASK,
   TOUCH_PLAIN_TASK,
   TOUCH_TASK,
+  TOUCH_TRANSFORMER_TASK,
+  TRANSFORMER_HISTORY,
   assert_actor_is_deployable,
   reward_task,
 )
@@ -452,3 +459,98 @@ def test_reward_variant_changes_only_the_reward(variant: str) -> None:
   assert v_rl.actor == ref_rl.actor and v_rl.critic == ref_rl.critic and v_rl.algorithm == ref_rl.algorithm
   same = fingerprint(v.rewards) == fingerprint(ref.rewards)
   assert same == (variant == "base")
+
+
+def test_memory_tasks_change_only_the_actor_window() -> None:
+  """The transformer and the 64-step GRU compare memory: rewards, terminations,
+  terrain, curriculum and critic are the touch plain GRU's. The transformer's
+  actor sees the same terms as a window of frames; the R64 GRU differs only in
+  its rollout length."""
+  from sendg1.fingerprint import fingerprint
+
+  ref, ref_rl = load_env_cfg(TOUCH_PLAIN_TASK), load_rl_cfg(TOUCH_PLAIN_TASK)
+  for task in (TOUCH_TRANSFORMER_TASK, TOUCH_PLAIN_R64_TASK):
+    v = load_env_cfg(task)
+    for part in ("rewards", "terminations", "curriculum", "commands", "actions"):
+      assert fingerprint(getattr(v, part)) == fingerprint(getattr(ref, part)), (task, part)
+    assert fingerprint(v.scene.terrain) == fingerprint(ref.scene.terrain)
+    assert fingerprint(v.observations["critic"]) == fingerprint(ref.observations["critic"])
+    assert v.observations["actor"].terms.keys() == ref.observations["actor"].terms.keys()
+    assert load_rl_cfg(task).critic == ref_rl.critic
+  r64, r64_rl = load_env_cfg(TOUCH_PLAIN_R64_TASK), load_rl_cfg(TOUCH_PLAIN_R64_TASK)
+  assert fingerprint(r64.observations) == fingerprint(ref.observations)
+  assert r64_rl.actor == ref_rl.actor
+  assert (r64_rl.num_steps_per_env, ref_rl.num_steps_per_env) == (64, 32)
+  # Same minibatch size: twice the samples in twice the minibatches.
+  assert (r64_rl.algorithm.num_mini_batches, ref_rl.algorithm.num_mini_batches) == (8, 4)
+  r64_rl.algorithm.num_mini_batches = 4
+  assert r64_rl.algorithm == ref_rl.algorithm
+  tr = load_env_cfg(TOUCH_TRANSFORMER_TASK).observations["actor"]
+  assert (tr.history_length, tr.flatten_history_dim) == (TRANSFORMER_HISTORY, False)
+
+
+def test_round2_tasks_keep_round_two_rules_but_35s_episodes() -> None:
+  """The R2-35s GRUs are the touch plain GRU (and its R64 twin) under round
+  two's widths, curriculum, terminations and reward, with 35 s episodes."""
+  from sendg1.fingerprint import fingerprint
+  from sendg1.tasks.beam.env_cfg import EPISODE_S, ROUND2_CURRICULUM, ROUND2_WIDTHS
+
+  for task, ref_task in ((TOUCH_PLAIN_R2_TASK, TOUCH_PLAIN_TASK),
+                         (TOUCH_PLAIN_R2_R64_TASK, TOUCH_PLAIN_R64_TASK)):
+    v, ref = load_env_cfg(task), load_env_cfg(ref_task)
+    assert v.episode_length_s == EPISODE_S == 35.0
+    assert fingerprint(v.observations) == fingerprint(ref.observations)
+    assert load_rl_cfg(task).actor == load_rl_cfg(ref_task).actor
+    assert load_rl_cfg(task).num_steps_per_env == load_rl_cfg(ref_task).num_steps_per_env
+    gen = v.scene.terrain.terrain_generator
+    assert all(t.widths == ROUND2_WIDTHS for t in gen.sub_terrains.values())
+    assert "finished" not in v.terminations and "foot_side_contact" not in v.rewards
+    assert v.terminations["foot_off_beam"].params == {}
+    assert v.events["push"].params["from_level"] == 3
+    params = v.curriculum["beam_levels"].params
+    assert {k: params[k] for k in ROUND2_CURRICULUM} == ROUND2_CURRICULUM
+    assert set(v.rewards) | {"foot_side_contact"} == set(ref.rewards)
+  # The LSTM twins differ from the R2 GRUs only in the recurrent cell.
+  for lstm, gru in ((TOUCH_LSTM_R2_TASK, TOUCH_PLAIN_R2_TASK),
+                    (TOUCH_LSTM_R2_R64_TASK, TOUCH_PLAIN_R2_R64_TASK)):
+    assert fingerprint(load_env_cfg(lstm)) == fingerprint(load_env_cfg(gru))
+    a, b = load_rl_cfg(lstm), load_rl_cfg(gru)
+    assert (a.actor.rnn_type, b.actor.rnn_type) == ("lstm", "gru")
+    a.actor.rnn_type = "gru"
+    assert (a.actor, a.algorithm, a.num_steps_per_env) == (b.actor, b.algorithm, b.num_steps_per_env)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_transformer_actor_trains_one_iteration(tmp_path) -> None:
+  """The transformer actor reads a [B, H, D] window and runs a PPO update."""
+  from dataclasses import asdict
+
+  from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.rl import RslRlVecEnvWrapper
+
+  from sendg1.rl.transformer import TransformerModel
+  from sendg1.tasks.beam.runner import BeamRunner
+
+  cfg = load_env_cfg(TOUCH_TRANSFORMER_TASK)
+  cfg.scene.num_envs = 8
+  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
+  try:
+    rl = asdict(load_rl_cfg(TOUCH_TRANSFORMER_TASK))
+    rl["logger"] = "tensorboard"
+    runner = BeamRunner(RslRlVecEnvWrapper(env), rl, log_dir=str(tmp_path), device="cuda:0")
+    actor = runner.alg.actor
+    assert isinstance(actor, TransformerModel) and actor.history == TRANSFORMER_HISTORY
+    runner.learn(num_learning_iterations=1)
+    assert all(torch.isfinite(p).all() for p in actor.parameters())
+    # The checkpoint carries the curriculum, and restoring it from there works
+    # (BeamRunner.load does the same in a resumed run's fresh process).
+    from sendg1.common.beam import mdp
+
+    env._beam_home_level[:] = 3
+    runner.save(str(tmp_path / "m.pt"))
+    env._beam_home_level[:] = 0
+    infos = torch.load(tmp_path / "m.pt", weights_only=False)["infos"]
+    mdp.load_curriculum_state(env, infos["beam_curriculum"])
+    assert bool((env._beam_home_level == 3).all())
+  finally:
+    env.close()
