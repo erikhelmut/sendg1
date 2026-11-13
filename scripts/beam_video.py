@@ -42,6 +42,20 @@ def main() -> None:
   ap.add_argument("--width-px", type=int, default=1280)
   ap.add_argument("--height-px", type=int, default=720)
   ap.add_argument("--theme", default="studio", help="studio | gray | mujoco")
+  ap.add_argument("--qp", type=int, default=28, help="H.264 quantiser (lower = better, ~18 is near lossless)")
+  ap.add_argument("--no-caption", action="store_true", help="drop the top-left caption card")
+  ap.add_argument("--logo", action="append", default=[],
+                  help="top-left logo, repeatable (left to right): an image path or 'ias' / 'flexoo'")
+  ap.add_argument("--sensor-brand", default=None,
+                  help="logo for a 'sensor by' row in the tactile card: a path or 'flexoo'")
+  ap.add_argument("--distance", type=float, default=3.2)
+  ap.add_argument("--elevation", type=float, default=-18.0)
+  ap.add_argument("--azimuth", type=float, default=135.0,
+                  help="camera azimuth [deg], fixed in the world (90 = side on to the beam)")
+  ap.add_argument("--arrow-scale", type=float, default=None,
+                  help="size of the command arrows above the robot (default: the task's)")
+  ap.add_argument("--arrow-height", type=float, default=None,
+                  help="how far above the robot the command arrows float [m]")
   args = ap.parse_args()
 
   import torch
@@ -51,13 +65,14 @@ def main() -> None:
 
   import sendg1.tasks  # noqa: F401
   from sendg1.common.beam.mdp import BeamEpisode
-  from sendg1.common.beam.terrain import BEAM_WIDTHS
-  from sendg1.video import EvalVideo, prepare_video_cfg
+  from sendg1.video import LOGOS, EvalVideo, prepare_video_cfg
 
-  level = min(range(len(BEAM_WIDTHS)), key=lambda i: abs(BEAM_WIDTHS[i] - args.width))
   task = args.task
   cfg = load_env_cfg(task)
   columns = list(cfg.scene.terrain.terrain_generator.sub_terrains)
+  # The task's own widths: the round-two tasks keep the old seven.
+  widths = cfg.scene.terrain.terrain_generator.sub_terrains[columns[0]].widths
+  level = min(range(len(widths)), key=lambda i: abs(widths[i] - args.width))
   kind = lambda n: next((k for k in ("bend", "turn") if n.endswith(k)), "straight")  # noqa: E731
   same_kind = [i for i, n in enumerate(columns) if kind(n) == args.path]
   if not same_kind:
@@ -77,9 +92,13 @@ def main() -> None:
   twist.rel_standing_envs = 0.0
   twist.resampling_time_range = (1e6, 1e6)
   prepare_video_cfg(cfg, args.width_px, args.height_px, args.theme)
-  cfg.viewer.distance = 3.2
-  cfg.viewer.elevation = -18.0
-  cfg.viewer.azimuth = 135.0
+  cfg.viewer.distance = args.distance
+  cfg.viewer.elevation = args.elevation
+  cfg.viewer.azimuth = args.azimuth
+  if args.arrow_scale is not None:
+    twist.viz.scale = args.arrow_scale
+  if args.arrow_height is not None:
+    twist.viz.z_offset = args.arrow_height
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0", render_mode="rgb_array")
   t = env.scene.terrain
   t.terrain_levels[:] = level
@@ -91,11 +110,14 @@ def main() -> None:
   runner = MjlabOnPolicyRunner(wrapped, asdict(rl_cfg), device="cuda:0")
   runner.load(args.checkpoint, load_cfg={"actor": True}, strict=True, map_location="cuda:0")
   policy = runner.get_inference_policy(device="cuda:0")
-  video = EvalVideo(env, rl_cfg, title=args.label or task, theme=args.theme)
+  video = EvalVideo(env, rl_cfg, title=args.label or task, theme=args.theme,
+                    caption=not args.no_caption,
+                    logo=[LOGOS.get(name, name) for name in args.logo] or None,
+                    sensor_brand=LOGOS.get(args.sensor_brand, args.sensor_brand))
   ep = BeamEpisode.get(env)
   tm = env.termination_manager
 
-  chosen = None
+  chosen = fallback = None
   for attempt in range(args.tries):
     video.take()
     video.new_episode()
@@ -110,7 +132,11 @@ def main() -> None:
         act = policy(obs)
         obs, _, dones, _ = wrapped.step(act)
         if bool(dones[0]):
-          fired = [n for n in tm.active_terms if n != "time_out" and bool(tm.get_term(n)[0])]
+          # Time-out terms (``time_out``, ``finished`` after the end platform) are not falls.
+          fired = [
+            n for n in tm.active_terms
+            if not tm.get_term_cfg(n).time_out and bool(tm.get_term(n)[0])
+          ]
           outcome = "failure" if fired else ("success" if stand_after is not None else "timeout")
           reason = fired[0] if fired else ""
           break
@@ -118,7 +144,7 @@ def main() -> None:
           stand_after = step
         progress = float(ep.max_progress[0])
         lines = [
-          f"{args.path} beam {BEAM_WIDTHS[level]:.2f} m",
+          f"{args.path} beam {widths[level]:.2f} m",
           f"command {args.speed:.2f} m/s   progress {max(progress, 0):.2f} m",
         ]
         if stand_after is not None:
@@ -133,22 +159,27 @@ def main() -> None:
     print(f"[video] try {attempt}: {outcome} {reason} ({len(video.frames)} frames)")
     if args.want == "any" or outcome == args.want:
       if outcome == "failure":
-        video.hold(0.8, [f"{args.path} beam {BEAM_WIDTHS[level]:.2f} m", f"FAILED: {reason}"])
+        video.hold(0.8, [f"{args.path} beam {widths[level]:.2f} m", f"FAILED: {reason}"])
       chosen = (video.take(), outcome, reason)
       break
+    if outcome == "failure":
+      # A policy that never succeeds still gets a clip: its last failure.
+      video.hold(0.8, [f"{args.path} beam {widths[level]:.2f} m", f"FAILED: {reason}"])
+    fallback = (video.take(), outcome, reason)
 
   env.close()
   if chosen is None:
-    raise SystemExit(f"no {args.want} episode in {args.tries} tries")
+    print(f"[video] no {args.want} episode in {args.tries} tries; keeping the last ({fallback[1]})")
+    chosen = fallback
   frames, outcome, reason = chosen
   out = Path(
     args.out
-    or REPO / "media" / "beam" / f"{args.path}_w{BEAM_WIDTHS[level]:.2f}_{outcome}.mp4"
+    or REPO / "media" / "beam" / f"{args.path}_w{widths[level]:.2f}_{outcome}.mp4"
   )
   out.parent.mkdir(parents=True, exist_ok=True)
-  video.save(out, frames, qp=28)
+  video.save(out, frames, qp=args.qp)
   meta = out.with_suffix(".json")
-  meta.write_text(json.dumps({"outcome": outcome, "reason": reason, "width": BEAM_WIDTHS[level]}))
+  meta.write_text(json.dumps({"outcome": outcome, "reason": reason, "width": widths[level]}))
   print(f"[video] wrote {out} ({outcome} {reason})")
 
 

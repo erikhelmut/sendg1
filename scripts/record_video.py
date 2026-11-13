@@ -67,6 +67,25 @@ def main() -> None:
   ap.add_argument("--no-overlay", action="store_true", help="no caption lines")
   ap.add_argument("--theme", default="studio", help="studio | gray | mujoco")
   ap.add_argument("--no-tactile-card", action="store_true")
+  ap.add_argument("--arrow-scale", type=float, default=1.4,
+                  help="size of the command arrows drawn above the robot")
+  ap.add_argument("--arrow-height", type=float, default=0.55,
+                  help="how far above the robot the command arrows float [m]")
+  ap.add_argument("--view-angle", type=float, default=None,
+                  help="camera azimuth relative to the robot's STARTING heading [deg] "
+                       "(90 = side on, 135 = front three-quarter); the camera then stays "
+                       "fixed in the world. Default: the task's world-fixed azimuth")
+  ap.add_argument("--start-yaw", type=float, default=None,
+                  help="pin the robot's starting yaw [deg] (0 = along the floor grid); "
+                       "default: the task's random yaw")
+  ap.add_argument("--no-caption", action="store_true", help="drop the top-left caption card")
+  ap.add_argument("--logo", action="append", default=[],
+                  help="top-left logo, repeatable (left to right): an image path or 'ias' / 'flexoo'")
+  ap.add_argument("--sensor-brand", default=None,
+                  help="logo for a 'sensor by' row in the tactile card: a path or 'flexoo'")
+  ap.add_argument("--live-tactile", action="store_true",
+                  help="show the soles' real readings even for a blind actor (showcase clips "
+                       "only: the study convention draws a blind actor's card at zero)")
   args = ap.parse_args()
 
   import torch
@@ -77,7 +96,7 @@ def main() -> None:
   from mjlab.utils.torch import configure_torch_backends
 
   import sendg1.tasks  # noqa: F401
-  from sendg1.video import EvalVideo, prepare_video_cfg
+  from sendg1.video import LOGOS, EvalVideo, prepare_video_cfg
 
   configure_torch_backends()
   device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -106,6 +125,22 @@ def main() -> None:
     for _g in env_cfg.observations.values():
       _g.enable_corruption = False
 
+  if args.live_tactile:
+    # A blind task's scene has no sole sensors; add them for the HUD. They only
+    # feed the video card, never the actor's observations.
+    from sendg1.common.sensors import SOLE_CONTACT_SENSOR
+    from sendg1.common.tactile.sensing import tactile_scene_sensors
+
+    if not any(s.name == SOLE_CONTACT_SENSOR for s in env_cfg.scene.sensors):
+      env_cfg.scene.sensors = (*env_cfg.scene.sensors, *tactile_scene_sensors())
+
+  if args.start_yaw is not None:
+    # With --view-angle 90 this makes the side view square to the floor grid.
+    import math
+
+    yaw = math.radians(args.start_yaw)
+    env_cfg.events["reset_base"].params["pose_range"]["yaw"] = (yaw, yaw)
+
   prepare_video_cfg(env_cfg, args.width, args.height, args.theme)
   # Default distance 3.0 with the torso as origin puts the head and the command
   # arrow drawn above it right at the top edge. Pull back and raise the eye line.
@@ -119,8 +154,18 @@ def main() -> None:
   twist_cfg = env_cfg.commands.get("twist")
   if twist_cfg is not None:
     assert isinstance(twist_cfg, UniformVelocityCommandCfg)
-    twist_cfg.viz.scale = 1.4
-    twist_cfg.viz.z_offset = 0.55
+    # The scripted schedule must be what the policy sees: a randomly drawn
+    # "standing env" zeroes the command inside step(), overriding the script.
+    # Likewise heading envs (wz steered toward a random heading), world-frame
+    # and forward-only envs, and a running start.
+    twist_cfg.rel_standing_envs = 0.0
+    twist_cfg.rel_heading_envs = 0.0
+    twist_cfg.rel_world_envs = 0.0
+    twist_cfg.rel_forward_envs = 0.0
+    twist_cfg.init_velocity_prob = 0.0
+    twist_cfg.resampling_time_range = (1e6, 1e6)
+    twist_cfg.viz.scale = args.arrow_scale
+    twist_cfg.viz.z_offset = args.arrow_height
   env_cfg.observations["proprio"].enable_corruption = False
 
   env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode="rgb_array")
@@ -142,7 +187,11 @@ def main() -> None:
   wrapped = RslRlVecEnvWrapper(env, clip_actions=rl_cfg.clip_actions)
 
   video = EvalVideo(env, rl_cfg, title=args.task, theme=args.theme,
-                    show_tactile=not args.no_tactile_card)
+                    show_tactile=not args.no_tactile_card,
+                    tactile=True if args.live_tactile else None,
+                    caption=not args.no_caption,
+                    logo=[LOGOS.get(name, name) for name in args.logo] or None,
+                    sensor_brand=LOGOS.get(args.sensor_brand, args.sensor_brand))
 
   runner_cls = load_runner_cls(args.task) or MjlabOnPolicyRunner
   runner = runner_cls(wrapped, asdict(rl_cfg), device=device)
@@ -155,6 +204,14 @@ def main() -> None:
   if cmd_term is None:
     schedule = [(sum(s[0] for s in schedule), 0.0, 0.0, 0.0, "")]
   obs, _ = wrapped.reset()
+
+  if args.view_angle is not None:
+    # Place the camera once, relative to the robot's starting heading, then
+    # leave it fixed in the world: the robot's own turns show as turns.
+    import math
+
+    heading = float(env.scene["robot"].data.heading_w[0])
+    env._offline_renderer._cam.azimuth = math.degrees(heading) + args.view_angle
 
   with torch.inference_mode():
     for secs, vx, vy, wz, label in schedule:

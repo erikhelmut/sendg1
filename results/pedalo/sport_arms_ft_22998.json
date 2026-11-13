@@ -1,0 +1,54 @@
+{
+  "checkpoint": "logs/rsl_rl/pedalo_sport/2026-10-20_08-14-45_sport_arms_ft/model_22998.pt",
+  "rows": [
+    {
+      "command": 0.0,
+      "no_fall": 0.875,
+      "falls": [
+        "base_too_low"
+      ],
+      "mean_speed": 0.05425266921520233,
+      "distance_m": 0.8738723993301392,
+      "arm_out_max_rad": 0.8781764507293701,
+      "arm_out_mean_rad": 0.5790011286735535
+    },
+    {
+      "command": 0.15,
+      "no_fall": 0.875,
+      "falls": [
+        "base_too_low"
+      ],
+      "mean_speed": 0.1458880454301834,
+      "distance_m": 2.5094103813171387,
+      "arm_out_max_rad": 0.8414123058319092,
+      "arm_out_mean_rad": 0.5668832063674927
+    },
+    {
+      "command": 0.3,
+      "no_fall": 1.0,
+      "falls": [],
+      "mean_speed": 0.24165546894073486,
+      "distance_m": 4.656695365905762,
+      "arm_out_max_rad": 0.8511006832122803,
+      "arm_out_mean_rad": 0.5981016755104065
+    },
+    {
+      "command": 0.45,
+      "no_fall": 1.0,
+      "falls": [],
+      "mean_speed": 0.36316603422164917,
+      "distance_m": 7.021646499633789,
+      "arm_out_max_rad": 0.8332319855690002,
+      "arm_out_mean_rad": 0.5567286014556885
+    },
+    {
+      "command": 0.6,
+      "no_fall": 1.0,
+      "falls": [],
+      "mean_speed": 0.4739950895309448,
+      "distance_m": 9.171299934387207,
+      "arm_out_max_rad": 0.8287696838378906,
+      "arm_out_mean_rad": 0.5339289903640747
+    }
+  ]
+}

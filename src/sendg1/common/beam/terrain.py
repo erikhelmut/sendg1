@@ -62,11 +62,15 @@ BEAM_PATH_PATCH = "beam_path"
 BEAM_ENDS_PATCH = "beam_ends"
 NUM_PATH_POINTS = 64
 
-BEAM_WIDTHS: tuple[float, ...] = (0.40, 0.30, 0.20, 0.15, 0.10, 0.07, 0.05)
+BEAM_WIDTHS: tuple[float, ...] = (
+  0.40, 0.30, 0.25, 0.20, 0.175, 0.15, 0.125, 0.10, 0.085, 0.07, 0.05
+)
 """Width per curriculum level (m). The G1's default stance is 0.31 m from outer
-sole edge to outer sole edge (feet 0.238 m apart, soles 0.076 m wide): levels 0-1
-admit it, level 2 needs a narrowed stance, 0.15 m and below need near-tandem
-feet, and 0.076 m is the sole's own width."""
+sole edge to outer sole edge (feet 0.238 m apart, soles 0.076 m wide): 0.30 m
+and up admit it, 0.20-0.25 m need a narrowed stance, 0.15 m and below need
+near-tandem feet, and 0.076 m is the sole's own width. Steps of 12-20 % between
+neighbours: the earlier seven levels jumped a third from 0.15 to 0.10 m, right
+where every policy stalled."""
 
 BEAM_HEIGHTS: tuple[float, ...] = (0.15, 0.20, 0.25, 0.30)
 """Beam top above the ground, one per terrain column (m)."""
@@ -81,6 +85,9 @@ CURVED_TILE_SIZE = (8.0, 6.0)
 sideways (straight tiles are 8 x 2 m)."""
 
 TERRAIN_SEED = 20261011
+EVAL_TERRAIN_SEED = 20261018
+"""Held-out terrain of the ``-Eval`` tasks: same widths, heights and path
+kinds, but bend and turn shapes the policy never trained on."""
 
 _GROUND_RGBA = (0.18, 0.20, 0.22, 1.0)
 _PLATFORM_RGBA = (0.85, 0.55, 0.20, 1.0)

@@ -9,3 +9,5 @@ media/
 videos/
 .venv/
 slurm/
+logs/
+MUJOCO_LOG.TXT

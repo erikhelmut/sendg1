@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pathlib import Path
+
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
@@ -101,6 +103,7 @@ class TactileCard:
     history: int,
     history_s: float,
     weight: float | None = None,
+    brand: str | Path | None = None,
   ):
     self.layout = layout
     self.live = live
@@ -117,7 +120,10 @@ class TactileCard:
     self.header = int(46 * u)
     self.footer = int(170 * u)
     self.w = 2 * sole.size[0] + self.gap + 2 * self.pad + int(70 * u)
-    self.h = self.header + sole.size[1] + self.footer
+    # optional bottom row naming the sensor maker: "sensor by <logo>"
+    self.brand = _on_dark(str(brand), int(18 * u)) if brand is not None else None
+    self.brand_h = int(34 * u) if brand is not None else 0
+    self.h = self.header + sole.size[1] + self.footer + self.brand_h
     self.trace = np.zeros((2, history))
     self.history_s = history_s
     self.weight = weight
@@ -219,7 +225,7 @@ class TactileCard:
 
     # force trace, with a newton axis and the robot's weight for reference
     t0 = y + int(48 * u)
-    t1 = self.h - self.pad
+    t1 = self.h - self.pad - self.brand_h
     ymax, ystep = self._axis()
     d.text((x0, y + int(26 * u)), f"total load per foot [N], last {self.history_s:g} s",
            font=small, fill=INK_2)
@@ -244,6 +250,15 @@ class TactileCard:
     for f_idx in range(2):
       ys = to_y(self.trace[f_idx])
       d.line(list(zip(xs, ys)), fill=FOOT_COLORS[f_idx], width=int(2 * u), joint="curve")
+
+    if self.brand is not None:
+      # separated from the trace by a hairline, right-aligned like the chip above
+      yl = self.h - self.brand_h - int(2 * u)
+      d.line([x0, yl, x1, yl], fill=CARD_EDGE, width=max(1, int(u)))
+      ym = self.h - (self.brand_h + int(4 * u)) // 2
+      lx = x1 - self.brand.width
+      card.alpha_composite(self.brand, (lx, ym - self.brand.height // 2))
+      d.text((lx - int(8 * u), ym), "sensor by", font=small, fill=INK_2, anchor="rm")
 
     card = card.resize((self.w // SS, self.h // SS), Image.LANCZOS)
     img = Image.fromarray(frame).convert("RGBA")
@@ -288,6 +303,49 @@ def caption(frame: np.ndarray, title: str, badge: str, live: bool, lines) -> np.
   img = Image.fromarray(frame).convert("RGBA")
   m = int(18 * u / SS)
   img.alpha_composite(card, (m, m))
+  return np.asarray(img.convert("RGB"))
+
+
+@lru_cache(maxsize=4)
+def _on_dark(path: str, height: int) -> Image.Image:
+  """A logo scaled to ``height`` px for a dark background: its near-neutral
+  (grey/black) pixels become ``INK``, coloured ones keep their colour."""
+  src = np.asarray(Image.open(path).convert("RGBA")).astype(np.float32)
+  rgb = src[..., :3]
+  neutral = (rgb.max(-1) - rgb.min(-1)) < 40
+  rgb[neutral] = INK[:3]
+  img = Image.fromarray(src.astype(np.uint8), "RGBA")
+  return img.resize((round(img.width * height / img.height), height), Image.LANCZOS)
+
+
+@lru_cache(maxsize=4)
+def logo_plate(path: str, height: int, pad: float = 0.05) -> Image.Image:
+  """A logo scaled to ``height`` px on a white rectangular plate, as it is meant to
+  be shown: the logo is black on white, and on the dark studio background it
+  would vanish. ``pad`` is a fraction of ``height``."""
+  ss = 4
+  src = Image.open(path).convert("RGBA")
+  h = height * ss
+  w = round(src.width * h / src.height)
+  p = round(pad * h)
+  plate = Image.new("RGBA", (w + 2 * p, h + 2 * p), (255, 255, 255, 255))
+  plate.alpha_composite(src.resize((w, h), Image.LANCZOS), (p, p))
+  return plate.resize((round(plate.width / ss), round(plate.height / ss)), Image.LANCZOS)
+
+
+def logo(frame: np.ndarray, paths, height_frac: float = 0.09) -> np.ndarray:
+  """Top-left logos, left to right on separate plates of equal height, in the spot
+  the caption card would take. ``paths`` is one image path or a sequence."""
+  if isinstance(paths, (str, Path)):
+    paths = [paths]
+  h = frame.shape[0]
+  img = Image.fromarray(frame).convert("RGBA")
+  m = round(18 * h / 720)
+  x = m
+  for path in paths:
+    mark = logo_plate(str(path), max(8, round(height_frac * h)))
+    img.alpha_composite(mark, (x, m))
+    x += mark.width + m
   return np.asarray(img.convert("RGB"))
 
 

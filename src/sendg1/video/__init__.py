@@ -15,6 +15,9 @@ oracles), so paired clips line up panel for panel.
 """
 
 from sendg1.video.recorder import (
+  FLEXOO_LOGO,
+  IAS_LOGO,
+  LOGOS,
   EvalVideo,
   policy_sees_tactile,
   prepare_video_cfg,
@@ -22,6 +25,9 @@ from sendg1.video.recorder import (
 from sendg1.video.theme import THEMES, apply_theme
 
 __all__ = [
+  "FLEXOO_LOGO",
+  "IAS_LOGO",
+  "LOGOS",
   "THEMES",
   "EvalVideo",
   "apply_theme",
