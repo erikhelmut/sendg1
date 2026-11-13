@@ -137,8 +137,12 @@ class TaxelRayPatternCfg:
     return offsets, directions
 
 
-def sole_contact_sensor() -> ContactSensorCfg:
-  """Every individual contact between each foot and the terrain.
+TERRAIN_MATCH = ContactMatch(mode="body", pattern="terrain")
+
+
+def sole_contact_sensor(secondary: ContactMatch = TERRAIN_MATCH) -> ContactSensorCfg:
+  """Every individual contact between each foot and the terrain (or whatever
+  ``secondary`` names the feet stand on, e.g. the pedalo).
 
   Unlike ``feet_ground_contact`` this keeps contacts separate (position and
   force of each), which the tactile model needs to recover the centre of
@@ -151,7 +155,7 @@ def sole_contact_sensor() -> ContactSensorCfg:
       pattern=tuple(f"{side}_ankle_roll_link" for side in SIDES),
       entity="robot",
     ),
-    secondary=ContactMatch(mode="body", pattern="terrain"),
+    secondary=secondary,
     fields=("found", "force", "pos", "normal", "tangent"),
     reduce="maxforce",
     num_slots=SOLE_CONTACT_SLOTS,
@@ -176,9 +180,12 @@ def taxel_ray_sensor(side: str, layout: TaxelLayout, per_axis: int) -> RayCastSe
   )
 
 
-def tactile_sensors(layout: TaxelLayout, per_axis: int) -> tuple:
-  """All scene sensors the tactile model reads."""
+def tactile_sensors(
+  layout: TaxelLayout, per_axis: int, secondary: ContactMatch = TERRAIN_MATCH
+) -> tuple:
+  """All scene sensors the tactile model reads. ``secondary``: what the soles
+  touch; the taxel rays see every group-0 geom anyway."""
   return (
-    sole_contact_sensor(),
+    sole_contact_sensor(secondary),
     *(taxel_ray_sensor(side, layout, per_axis) for side in SIDES),
   )
