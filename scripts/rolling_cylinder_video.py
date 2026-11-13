@@ -31,6 +31,26 @@ def main() -> None:
   ap.add_argument("--seed", type=int, default=0)
   ap.add_argument("--out", default=None)
   ap.add_argument("--theme", default="studio")
+  ap.add_argument("--width-px", type=int, default=1280)
+  ap.add_argument("--height-px", type=int, default=720)
+  ap.add_argument("--qp", type=int, default=28, help="H.264 quantiser (lower = better, ~18 is near lossless)")
+  ap.add_argument("--no-caption", action="store_true", help="drop the top-left caption card")
+  ap.add_argument("--logo", action="append", default=[],
+                  help="top-left logo, repeatable (left to right): an image path or 'ias' / 'flexoo'")
+  ap.add_argument("--sensor-brand", default=None,
+                  help="logo for a 'sensor by' row in the tactile card: a path or 'flexoo'")
+  ap.add_argument("--azimuth", type=float, default=None,
+                  help="camera azimuth [deg], fixed in the world (task default 90 = from behind; "
+                       "0 or 180 = side on, cylinder end-on)")
+  ap.add_argument("--cylinder-yaw", type=float, default=None,
+                  help="pin the cylinder's spawn yaw [deg] (0 = axis along the floor grid's y, "
+                       "so --azimuth 90 looks along it); default: random")
+  ap.add_argument("--view-angle", type=float, default=None,
+                  help="camera azimuth relative to the robot's starting heading [deg] (180 = "
+                       "facing it, 145 / 215 = front three-quarter); then fixed in the world. "
+                       "Overrides --azimuth")
+  ap.add_argument("--distance", type=float, default=None)
+  ap.add_argument("--elevation", type=float, default=None)
   args = ap.parse_args()
 
   import torch
@@ -40,12 +60,20 @@ def main() -> None:
 
   import sendg1.tasks  # noqa: F401
   from sendg1.common.rolling_cylinder.mdp import CylinderState
-  from sendg1.video import EvalVideo, prepare_video_cfg
+  from sendg1.video import LOGOS, EvalVideo, prepare_video_cfg
 
   cfg = load_env_cfg(args.task)
   cfg.scene.num_envs = 1
   cfg.seed = args.seed
-  prepare_video_cfg(cfg, 1280, 720, args.theme)
+  if args.cylinder_yaw is not None:
+    import math
+
+    yaw = math.radians(args.cylinder_yaw)
+    cfg.events["reset_on_cylinder"].params["yaw_range"] = (yaw, yaw)
+  prepare_video_cfg(cfg, args.width_px, args.height_px, args.theme)
+  for key in ("azimuth", "distance", "elevation"):
+    if getattr(args, key) is not None:
+      setattr(cfg.viewer, key, getattr(args, key))
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0", render_mode="rgb_array")
 
   rl_cfg = load_rl_cfg(args.task)
@@ -53,7 +81,10 @@ def main() -> None:
   runner = MjlabOnPolicyRunner(wrapped, asdict(rl_cfg), device="cuda:0")
   runner.load(args.checkpoint, load_cfg={"actor": True}, strict=True, map_location="cuda:0")
   policy = runner.get_inference_policy(device="cuda:0")
-  video = EvalVideo(env, rl_cfg, title=args.label or args.task, theme=args.theme)
+  video = EvalVideo(env, rl_cfg, title=args.label or args.task, theme=args.theme,
+                    caption=not args.no_caption,
+                    logo=[LOGOS.get(name, name) for name in args.logo] or None,
+                    sensor_brand=LOGOS.get(args.sensor_brand, args.sensor_brand))
   tm = env.termination_manager
 
   seconds = args.seconds or cfg.episode_length_s
@@ -62,6 +93,13 @@ def main() -> None:
     obs, _ = wrapped.reset()
     policy.reset(torch.ones(1, dtype=torch.bool, device=env.device))
     st = CylinderState.get(env)
+    if args.view_angle is not None:
+      # The robot faces either way along the cylinder (random): aim from its
+      # actual start heading, then leave the camera fixed in the world.
+      import math
+
+      heading = float(env.scene["robot"].data.heading_w[0])
+      env._offline_renderer._cam.azimuth = math.degrees(heading) + args.view_angle
     video.new_episode()
     for _ in range(int(seconds / env.step_dt)):
       obs, _, dones, _ = wrapped.step(policy(obs))
@@ -81,7 +119,7 @@ def main() -> None:
   env.close()
   name = "touch" if "Touch" in args.task else "blind"
   out = Path(args.out or REPO / "media" / "rolling_cylinder" / f"{name}.mp4")
-  video.save(out, qp=28)
+  video.save(out, qp=args.qp)
   print(f"[video] wrote {out} ({len(video.frames)} frames, {t:.1f} s, "
         f"{'fell: ' + reason if reason else 'no fall'})")
 
