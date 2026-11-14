@@ -7,17 +7,19 @@ paired policies look the same:
 - **Theme** (`--theme`): `studio` (default; dark grid floor fading into a dark
   sky, terrain in greys), `gray`, or `mujoco` (mjlab's stock look). The theme
   only touches the renderer's private model copy; physics and sensors never see it.
-- **Caption**, top left: a badge (`TACTILE`, `BLIND`, `CONTACT ORACLE`, read
-  off the actor's observation terms), the task, and the script's lines.
-  `caption=False` drops it; `logo=` (`IAS_LOGO`, `FLEXOO_LOGO`, or a list,
-  from `sendg1.video.LOGOS`) draws those logos there instead, each on a white
-  plate.
+- **Logos**, top left: the IAS logo on a white plate, on every clip
+  (`logo=`, default `IAS_LOGO`; a list of paths or `LOGOS` names draws several
+  left to right; `NO_LOGO` / `--logo none` drops it).
+- **Caption**, right of the logo and as tall as it: a badge (`TACTILE`, `BLIND`, `CONTACT ORACLE`,
+  read off the actor's observation terms), the task, and the script's lines.
+  `caption=False` / `--no-caption` drops it (the showcase look).
 - **Tactile feet card**, bottom right: both soles from above, toe up, with
   per-taxel normal force, the centre of pressure, per-foot load and a 3 s trace
   of the load on a newton axis, with the robot's body weight as a dashed reference.
   It is live when the actor reads the tactile sole and all zero otherwise:
   a blind policy gets nothing from it, and the clip shows that.
-  `sensor_brand=FLEXOO_LOGO` adds a "sensor by <logo>" row under the trace.
+  The bottom row reads "sensor by <Flexoo logo>" (Flexoo makes the sensor), on
+  every clip (`sensor_brand=`, default `FLEXOO_LOGO`; `NO_LOGO` drops it).
 
 A new video script needs `prepare_video_cfg(env_cfg, w, h)` before the env is
 built, `EvalVideo(env, rl_cfg, title=...)` after, `video.capture(lines)` per

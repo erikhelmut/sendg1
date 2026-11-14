@@ -80,9 +80,9 @@ def main() -> None:
                        "default: the task's random yaw")
   ap.add_argument("--no-caption", action="store_true", help="drop the top-left caption card")
   ap.add_argument("--logo", action="append", default=[],
-                  help="top-left logo, repeatable (left to right): an image path or 'ias' / 'flexoo'")
+                  help="top-left logo, repeatable (left to right): an image path, 'ias' or 'flexoo'; default ias, 'none' for no logo")
   ap.add_argument("--sensor-brand", default=None,
-                  help="logo for a 'sensor by' row in the tactile card: a path or 'flexoo'")
+                  help="logo for the tactile card's 'sensor by' row: a path or 'flexoo' (default); 'none' drops the row")
   ap.add_argument("--live-tactile", action="store_true",
                   help="show the soles' real readings even for a blind actor (showcase clips "
                        "only: the study convention draws a blind actor's card at zero)")

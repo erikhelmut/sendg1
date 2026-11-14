@@ -36,9 +36,9 @@ def main() -> None:
   ap.add_argument("--qp", type=int, default=28, help="H.264 quantiser (lower = better, ~18 is near lossless)")
   ap.add_argument("--no-caption", action="store_true", help="drop the top-left caption card")
   ap.add_argument("--logo", action="append", default=[],
-                  help="top-left logo, repeatable (left to right): an image path or 'ias' / 'flexoo'")
+                  help="top-left logo, repeatable (left to right): an image path, 'ias' or 'flexoo'; default ias, 'none' for no logo")
   ap.add_argument("--sensor-brand", default=None,
-                  help="logo for a 'sensor by' row in the tactile card: a path or 'flexoo'")
+                  help="logo for the tactile card's 'sensor by' row: a path or 'flexoo' (default); 'none' drops the row")
   ap.add_argument("--azimuth", type=float, default=None,
                   help="camera azimuth [deg], fixed in the world (task default 90 = from behind; "
                        "0 or 180 = side on, cylinder end-on)")

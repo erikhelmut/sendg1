@@ -275,9 +275,21 @@ def _nice_axis(peak: float) -> tuple[float, float]:
   return float(np.ceil(peak / step) * step), step
 
 
-def caption(frame: np.ndarray, title: str, badge: str, live: bool, lines) -> np.ndarray:
-  """Top-left card: a policy badge and title, then free-form caption lines."""
-  u = max(frame.shape[0] / 720, 0.5) * SS
+def caption(
+  frame: np.ndarray, title: str, badge: str, live: bool, lines, left: int | None = None
+) -> np.ndarray:
+  """Top-left card: a policy badge and title, then free-form caption lines.
+  ``left``: its left edge in px (default: the frame margin), e.g. right of the logos."""
+  card = caption_card(frame.shape[0], title, badge, live, lines)
+  img = Image.fromarray(frame).convert("RGBA")
+  m = round(18 * frame.shape[0] / 720)
+  img.alpha_composite(card, (m if left is None else left, m))
+  return np.asarray(img.convert("RGB"))
+
+
+def caption_card(frame_h: int, title: str, badge: str, live: bool, lines) -> Image.Image:
+  """The caption card as an RGBA image, sized for a frame ``frame_h`` px high."""
+  u = max(frame_h / 720, 0.5) * SS
   big, small, bf = font(int(17 * u), True), font(int(14 * u)), font(int(12 * u), True)
   lines = [str(s) for s in lines if s]
   probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
@@ -299,11 +311,7 @@ def caption(frame: np.ndarray, title: str, badge: str, live: bool, lines) -> np.
          anchor="lm")
   for i, s in enumerate(lines):
     d.text((pad, pad + int(32 * u) + int(22 * u) * i), s, font=small, fill=INK_2)
-  card = card.resize((card.width // SS, card.height // SS), Image.LANCZOS)
-  img = Image.fromarray(frame).convert("RGBA")
-  m = int(18 * u / SS)
-  img.alpha_composite(card, (m, m))
-  return np.asarray(img.convert("RGB"))
+  return card.resize((card.width // SS, card.height // SS), Image.LANCZOS)
 
 
 @lru_cache(maxsize=4)
@@ -333,20 +341,26 @@ def logo_plate(path: str, height: int, pad: float = 0.05) -> Image.Image:
   return plate.resize((round(plate.width / ss), round(plate.height / ss)), Image.LANCZOS)
 
 
-def logo(frame: np.ndarray, paths, height_frac: float = 0.09) -> np.ndarray:
-  """Top-left logos, left to right on separate plates of equal height, in the spot
-  the caption card would take. ``paths`` is one image path or a sequence."""
+def logo(
+  frame: np.ndarray, paths, height_frac: float = 0.09, plate_h: int | None = None
+) -> tuple[np.ndarray, int]:
+  """Top-left logos, left to right on separate plates of equal height. ``paths``
+  is one image path or a sequence; ``plate_h`` sets the plates' outer height in
+  px (e.g. the caption card's). Returns the frame and the x (px) where
+  something placed right of the logos (the caption card) should start."""
   if isinstance(paths, (str, Path)):
     paths = [paths]
   h = frame.shape[0]
   img = Image.fromarray(frame).convert("RGBA")
   m = round(18 * h / 720)
+  pad = 0.05
+  inner = round(height_frac * h) if plate_h is None else round(plate_h / (1 + 2 * pad))
   x = m
   for path in paths:
-    mark = logo_plate(str(path), max(8, round(height_frac * h)))
+    mark = logo_plate(str(path), max(8, inner), pad=pad)
     img.alpha_composite(mark, (x, m))
-    x += mark.width + m
-  return np.asarray(img.convert("RGB"))
+    x += mark.width + m // 2
+  return np.asarray(img.convert("RGB")), x
 
 
 @lru_cache(maxsize=4)

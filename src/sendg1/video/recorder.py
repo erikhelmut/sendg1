@@ -21,6 +21,23 @@ FLEXOO_LOGO = Path(__file__).parent / "assets" / "flexoo_logo.png"
 LOGOS = {"ias": IAS_LOGO, "flexoo": FLEXOO_LOGO}
 """Short names for the bundled logos, as scripts accept them."""
 
+NO_LOGO = "none"
+"""Pass as ``logo`` or ``sensor_brand`` (or ``--logo none`` in the scripts) to
+leave that logo out; ``None`` means the default."""
+
+
+def _resolve(value, default):
+  if value is None:
+    return default
+  if value is False or (isinstance(value, str) and value.lower() == NO_LOGO):
+    return None
+  if isinstance(value, (list, tuple)):
+    names = [LOGOS.get(str(v), v) for v in value]
+    if any(isinstance(v, str) and v.lower() == NO_LOGO for v in names):
+      return None
+    return names or default
+  return LOGOS.get(str(value), value)
+
 
 def prepare_video_cfg(
   cfg: ManagerBasedRlEnvCfg, width: int = 1280, height: int = 720, theme: str = "studio"
@@ -82,10 +99,12 @@ class EvalVideo:
   False the sole card is drawn but every taxel reads zero: what the policy
   gets is nothing, and the clip says so.
 
-  ``caption=False`` drops the top-left card; ``logo`` (an image path such as
-  ``IAS_LOGO``, or a sequence of them) is drawn there instead, each on a white
-  plate, left to right. ``sensor_brand`` (e.g. ``FLEXOO_LOGO``) adds a
-  "sensor by <logo>" row to the bottom of the tactile card.
+  Every clip carries the IAS logo top left (``logo``: a path, a short name
+  from ``LOGOS``, or a sequence of them, each on a white plate, left to right)
+  and a "sensor by <Flexoo logo>" row at the bottom of the tactile card
+  (``sensor_brand``). ``None`` keeps these defaults; ``NO_LOGO`` drops one.
+  The caption card sits right of the logos, at the same height; ``caption=False``
+  drops it.
   """
 
   def __init__(
@@ -98,8 +117,8 @@ class EvalVideo:
     theme: str = "studio",
     show_tactile: bool = True,
     caption: bool = True,
-    logo: str | Path | Sequence[str | Path] | None = None,
-    sensor_brand: str | Path | None = None,
+    logo: str | Path | Sequence[str | Path] | bool | None = None,
+    sensor_brand: str | Path | bool | None = None,
     vmax: float = 30.0,
     history_s: float = 3.0,
   ):
@@ -111,7 +130,8 @@ class EvalVideo:
     self.tactile = (self.badge == "TACTILE") if tactile is None else tactile
     self.title = title
     self.show_caption = caption
-    self.logo = logo
+    self.logo = _resolve(logo, IAS_LOGO)
+    sensor_brand = _resolve(sensor_brand, FLEXOO_LOGO)
     self.params = TactileParams()
     self.vignette = theme != "mujoco"
     apply_theme(env, theme)
@@ -150,10 +170,15 @@ class EvalVideo:
         trace = self.card.trace.copy()
         frame = self.card.draw(frame, normal)
         self.card.trace = trace
+    left, plate_h = None, None
     if self.show_caption:
-      frame = hud.caption(frame, self.title, self.badge, self.tactile, lines)
+      # The logos match the caption card's height and sit left of it.
+      card = hud.caption_card(frame.shape[0], self.title, self.badge, self.tactile, lines)
+      plate_h = card.height
     if self.logo is not None:
-      frame = hud.logo(frame, self.logo)
+      frame, left = hud.logo(frame, self.logo, plate_h=plate_h)
+    if self.show_caption:
+      frame = hud.caption(frame, self.title, self.badge, self.tactile, lines, left=left)
     return frame
 
   def capture(self, lines: Iterable[str] = ()) -> np.ndarray | None:
