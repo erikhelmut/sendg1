@@ -454,8 +454,6 @@ def build_events() -> dict[str, EventTermCfg]:
       func=dr.encoder_bias,
       params={"asset_cfg": robot, "bias_range": (-0.015, 0.015)},
     ),
-    # -- startup -----------------------------------------------------------------
-    "register_actor_mirror": EventTermCfg(func=mdp.register_actor_mirror, mode="startup"),
   }
 
 
@@ -473,11 +471,8 @@ blind, no tactile actor term, with the ``touch`` critic."""
 
 
 def build_observations(
-  curves: bool = False, tactile: Tactile = "map", actor_history: int = 0
+  curves: bool = False, tactile: Tactile = "map"
 ) -> dict[str, ObservationGroupCfg]:
-  """``actor_history``: > 0 gives the actor the last that many frames, shape
-  ``[B, H, D]`` oldest first, for the transformer actor; the critic stays on
-  the current frame."""
   actor_terms, priv_terms, noisy = {
     "map": (ACTOR_TERMS, PRIVILEGED_TERMS, "tactile_map"),
     "touch": (TOUCH_ACTOR_TERMS, TOUCH_PRIVILEGED_TERMS, "tactile_touch"),
@@ -490,7 +485,6 @@ def build_observations(
       terms={n: TERMS[n].build() for n in actor_terms},
       concatenate_terms=True,
       enable_corruption=True,
-      **({"history_length": actor_history, "flatten_history_dim": False} if actor_history else {}),
     ),
     # The faulted tactile term is stateful (frame drops), so it is computed
     # once, for the actor; the critic reads the clean map.
@@ -510,7 +504,6 @@ def make_beam_env_cfg(
   tactile: Tactile = "map",
   evaluation: bool = False,
   reward: str = "base",
-  actor_history: int = 0,
   round2: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """``curves``: two thirds of the terrain columns are bent beams
@@ -518,7 +511,7 @@ def make_beam_env_cfg(
   turns ahead (``beam_ahead``). ``tactile``: see ``Tactile``. ``evaluation``:
   held-out terrain (``EVAL_TERRAIN_SEED``) and ``EVAL_EPISODE_S`` episodes,
   observations unchanged so training checkpoints load. ``reward``: a
-  ``REWARD_VARIANTS`` key. ``actor_history``: see ``build_observations``.
+  ``REWARD_VARIANTS`` key.
   ``round2``: round two's widths, curriculum, terminations and reward (no
   ``finished``, a 3 cm foot-off, no ``foot_side_contact``) with the current 35 s
   episodes, to tell the episode length apart from the other round-three
@@ -548,7 +541,7 @@ def make_beam_env_cfg(
   cfg.sim.contact_sensor_maxmatch = 128
   cfg.sim.nconmax = 70
 
-  cfg.observations = build_observations(curves, tactile, actor_history)
+  cfg.observations = build_observations(curves, tactile)
 
   cfg.actions = {
     "joint_pos": mdp.DelayedJointPositionActionCfg(
@@ -575,10 +568,6 @@ def make_beam_env_cfg(
 
   cfg.rewards = build_variant_rewards(reward)
   cfg.events = build_events()
-  if actor_history:
-    # The mirror maps serve the symmetric actors, which see one frame; a
-    # windowed actor is plain.
-    cfg.events.pop("register_actor_mirror")
   cfg.terminations = build_terminations()
   # Only walking episodes promote (the first run rose to level 3 on standing
   # commands alone), and a walking episode also promotes once it has covered

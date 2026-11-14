@@ -1048,16 +1048,6 @@ def spawn_from_bank(
   env._beam_bank[ids] = True
 
 
-def register_actor_mirror(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) -> None:
-  """Startup event: hand the actor group's mirror map to the symmetric GRU
-  actor (``sendg1.rl.symmetric_rnn``), which only ever sees tensors."""
-  from sendg1.common.beam.symmetry import _maps
-  from sendg1.rl import symmetric_rnn
-
-  maps = _maps(env)
-  symmetric_rnn.set_mirrors(obs={g: m for g, m in maps.items() if g != "__actions__"}, actions=maps["__actions__"])
-
-
 def reset_tactile_noise(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) -> None:
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device)

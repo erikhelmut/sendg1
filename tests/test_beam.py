@@ -1,5 +1,5 @@
 """Beam task: no privileged leak into the actor, terrain and geometry (straight
-and bent beams), tactile canonicalisation, mirror symmetry, and envs that
+and bent beams), tactile canonicalisation, and envs that
 build and step."""
 
 from __future__ import annotations
@@ -24,22 +24,16 @@ from sendg1.common.beam.terrain import (
 from sendg1.common.tactile.layout import LAYOUTS
 from sendg1.tasks.beam import (
   BLIND_MLP_PLAIN_TASK,
-  BLIND_MLP_SYM_TASK,
-  BLIND_SYM_TASK,
   BLIND_TASK,
   CURVED_TASK,
   TASK,
   TOUCH_MLP_PLAIN_TASK,
-  TOUCH_MLP_SYM_TASK,
   TOUCH_LSTM_R2_R64_TASK,
   TOUCH_LSTM_R2_TASK,
   TOUCH_PLAIN_R2_R64_TASK,
   TOUCH_PLAIN_R2_TASK,
   TOUCH_PLAIN_R64_TASK,
   TOUCH_PLAIN_TASK,
-  TOUCH_TASK,
-  TOUCH_TRANSFORMER_TASK,
-  TRANSFORMER_HISTORY,
   assert_actor_is_deployable,
   reward_task,
 )
@@ -57,8 +51,8 @@ ACTOR_EXPECTED = {
 ACTOR_DIM = 3 + 3 + 29 + 29 + 29 + 1 + 2 * 33
 TOUCH_ACTOR_DIM = ACTOR_DIM - 2 * 33 + 2 * 31
 BLIND_ACTOR_DIM = ACTOR_DIM - 2 * 33
-BLIND_TASKS = (BLIND_TASK, BLIND_SYM_TASK, BLIND_MLP_SYM_TASK, BLIND_MLP_PLAIN_TASK)
-TOUCH_TASKS = (TOUCH_TASK, TOUCH_PLAIN_TASK, TOUCH_MLP_SYM_TASK, TOUCH_MLP_PLAIN_TASK)
+BLIND_TASKS = (BLIND_TASK, BLIND_MLP_PLAIN_TASK)
+TOUCH_TASKS = (TOUCH_PLAIN_TASK, TOUCH_MLP_PLAIN_TASK)
 ALL_TASKS = [TASK, CURVED_TASK, *TOUCH_TASKS, *BLIND_TASKS]
 TOUCH_CRITIC_TASKS = (*TOUCH_TASKS, *BLIND_TASKS)
 
@@ -85,13 +79,14 @@ def test_actor_sees_only_deployable_signals(task: str) -> None:
   assert (touch_critic <= critic) == (task in TOUCH_CRITIC_TASKS)
 
 
-def test_touch_tasks_differ_only_in_the_actor_model() -> None:
-  sym, plain = load_rl_cfg(TOUCH_TASK), load_rl_cfg(TOUCH_PLAIN_TASK)
-  assert sym.actor.class_name.endswith("SymmetricRNNModel")
-  assert plain.actor.class_name == "RNNModel"
-  plain.actor.class_name = sym.actor.class_name
-  assert plain.actor == sym.actor and plain.algorithm == sym.algorithm and plain.critic == sym.critic
-  assert load_env_cfg(TOUCH_TASK).rewards.keys() == load_env_cfg(CURVED_TASK).rewards.keys()
+def test_every_actor_is_an_rsl_rl_model() -> None:
+  """Only rsl_rl's own GRU, LSTM and MLP actors: no custom model classes."""
+  from mjlab.tasks.registry import list_tasks
+
+  for task in list_tasks():
+    if task.startswith(("G1-Beam", "G1-Pedalo", "G1-RollingCylinder", "G1-Slackline")):
+      assert load_rl_cfg(task).actor.class_name in ("RNNModel", "MLPModel"), task
+  assert load_env_cfg(TOUCH_PLAIN_TASK).rewards.keys() == load_env_cfg(CURVED_TASK).rewards.keys()
 
 
 def test_touch_features() -> None:
@@ -274,114 +269,18 @@ def test_beam_ahead_sees_bends() -> None:
     env.close()
 
 
-def _swap_side(name: str) -> str:
-  if name.startswith("left_"):
-    return "right_" + name[len("left_") :]
-  if name.startswith("right_"):
-    return "left_" + name[len("right_") :]
-  return name
-
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("task", [TASK, CURVED_TASK, TOUCH_TASK])
-def test_mirror_maps_match_g1_kinematics_and_are_involutions(task: str) -> None:
-  """Mirrored joint angles must give the mirror-image robot (every body at
-  (x, -y, z) of its counterpart), the default pose must be its own mirror,
-  and mirroring every observation group and the actions twice must be the identity."""
-  from mjlab.envs import ManagerBasedRlEnv
-
-  from sendg1.common.beam.symmetry import _maps, joint_mirror
-
-  cfg = load_env_cfg(task)
-  cfg.scene.num_envs = 2
-  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
-  try:
-    obs, _ = env.reset()
-    robot = env.scene["robot"]
-    names = list(robot.joint_names)
-    src = torch.tensor([s for s, _ in joint_mirror(names)], device=env.device)
-    sign = torch.tensor([g for _, g in joint_mirror(names)], device=env.device)
-
-    default = robot.data.default_joint_pos[0]
-    torch.testing.assert_close(default[src] * sign, default)
-
-    gen = torch.Generator(device=env.device).manual_seed(0)
-    q0 = default + (torch.rand(len(names), generator=gen, device=env.device) - 0.5) * 0.8
-    q = torch.stack([q0, q0[src] * sign])
-    robot.write_joint_state_to_sim(q, torch.zeros_like(q))
-    pose = torch.zeros(2, 7, device=env.device)
-    pose[:, :3] = env.scene.env_origins + torch.tensor([0.0, 0.0, 1.0], device=env.device)
-    pose[:, 3] = 1.0
-    robot.write_root_link_pose_to_sim(pose)
-    env.sim.forward()
-    rel = robot.data.body_link_pos_w - pose[:, None, :3]
-    bodies = list(robot.body_names)
-    mirrored = rel[0, [bodies.index(_swap_side(b)) for b in bodies]] * torch.tensor(
-      [1.0, -1.0, 1.0], device=env.device
-    )
-    torch.testing.assert_close(rel[1], mirrored, atol=1e-4, rtol=0)
-
-    for name, (src, sign) in _maps(env).items():
-      x = torch.randn(3, len(src), device=env.device)
-      torch.testing.assert_close(((x[:, src] * sign)[:, src]) * sign, x, msg=f"{name} is not an involution")
-  finally:
-    env.close()
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("task", [TASK, TOUCH_TASK, BLIND_SYM_TASK, TOUCH_MLP_SYM_TASK, BLIND_MLP_SYM_TASK])
-def test_actor_is_mirror_equivariant(task: str) -> None:
-  """pi(M_o o_1..t) = M_a pi(o_1..t) over a whole observation sequence."""
-  from dataclasses import asdict
-
-  from mjlab.envs import ManagerBasedRlEnv
-  from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
-
-  from sendg1.common.beam.symmetry import _maps
-
-  cfg = load_env_cfg(task)
-  cfg.scene.num_envs = 4
-  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
-  try:
-    wrapped = RslRlVecEnvWrapper(env)
-    rl = asdict(load_rl_cfg(task))
-    rl["logger"] = "tensorboard"
-    runner = MjlabOnPolicyRunner(wrapped, rl, log_dir=None, device="cuda:0")
-    actor = runner.alg.actor
-    maps = _maps(wrapped)
-    obs, _ = wrapped.reset()
-    seq = []
-    for _ in range(15):
-      seq.append(obs.clone())
-      obs, *_ = wrapped.step(0.3 * torch.randn(4, env.action_manager.total_action_dim, device=env.device))
-    src, sign = maps["actor"]
-    asrc, asign = maps["__actions__"]
-    with torch.no_grad():
-      actor.reset()
-      a = [actor(o) for o in seq]
-      actor.reset()
-      am = []
-      for o in seq:
-        om = o.clone()
-        om["actor"] = o["actor"][:, src] * sign
-        am.append(actor(om))
-    for x, y in zip(a, am, strict=True):
-      torch.testing.assert_close(y, x[:, asrc] * asign, atol=1e-5, rtol=1e-4)
-  finally:
-    env.close()
-
-
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_plain_actor_trains_one_iteration(tmp_path) -> None:
-  """The plain-GRU experiment builds rsl_rl's RNNModel and runs a PPO update."""
+  """The GRU experiment builds rsl_rl's RNNModel, runs a PPO update with
+  ``BeamRunner``, and its checkpoint carries the curriculum."""
   from dataclasses import asdict
 
   from mjlab.envs import ManagerBasedRlEnv
-  from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+  from mjlab.rl import RslRlVecEnvWrapper
   from rsl_rl.models.rnn_model import RNNModel
 
-  from sendg1.rl.symmetric_rnn import SymmetricRNNModel
+  from sendg1.common.beam import mdp
+  from sendg1.tasks.beam.runner import BeamRunner
 
   cfg = load_env_cfg(TOUCH_PLAIN_TASK)
   cfg.scene.num_envs = 8
@@ -389,11 +288,19 @@ def test_plain_actor_trains_one_iteration(tmp_path) -> None:
   try:
     rl = asdict(load_rl_cfg(TOUCH_PLAIN_TASK))
     rl["logger"] = "tensorboard"
-    runner = MjlabOnPolicyRunner(RslRlVecEnvWrapper(env), rl, log_dir=str(tmp_path), device="cuda:0")
+    runner = BeamRunner(RslRlVecEnvWrapper(env), rl, log_dir=str(tmp_path), device="cuda:0")
     actor = runner.alg.actor
-    assert isinstance(actor, RNNModel) and not isinstance(actor, SymmetricRNNModel)
+    assert type(actor) is RNNModel
     runner.learn(num_learning_iterations=1)
     assert all(torch.isfinite(p).all() for p in actor.parameters())
+    # Restoring the curriculum from the checkpoint works (BeamRunner.load does
+    # the same in a resumed run's fresh process).
+    env._beam_home_level[:] = 3
+    runner.save(str(tmp_path / "m.pt"))
+    env._beam_home_level[:] = 0
+    infos = torch.load(tmp_path / "m.pt", weights_only=False)["infos"]
+    mdp.load_curriculum_state(env, infos["beam_curriculum"])
+    assert bool((env._beam_home_level == 3).all())
   finally:
     env.close()
 
@@ -402,8 +309,6 @@ def test_plain_actor_trains_one_iteration(tmp_path) -> None:
   ("touch", "blind"),
   [
     (TOUCH_PLAIN_TASK, BLIND_TASK),
-    (TOUCH_TASK, BLIND_SYM_TASK),
-    (TOUCH_MLP_SYM_TASK, BLIND_MLP_SYM_TASK),
     (TOUCH_MLP_PLAIN_TASK, BLIND_MLP_PLAIN_TASK),
   ],
 )
@@ -417,8 +322,7 @@ def test_blind_twin_differs_only_in_the_tactile_input(touch: str, blind: str) ->
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("task", [TOUCH_MLP_SYM_TASK, TOUCH_MLP_PLAIN_TASK])
-def test_mlp_actor_trains_one_iteration(task: str, tmp_path) -> None:
+def test_mlp_actor_trains_one_iteration(tmp_path) -> None:
   """The memoryless experiments build their MLP actor and run a PPO update."""
   from dataclasses import asdict
 
@@ -427,8 +331,7 @@ def test_mlp_actor_trains_one_iteration(task: str, tmp_path) -> None:
 
   from rsl_rl.models.mlp_model import MLPModel
 
-  from sendg1.rl.symmetric_mlp import SymmetricMLPModel
-
+  task = TOUCH_MLP_PLAIN_TASK
   cfg = load_env_cfg(task)
   cfg.scene.num_envs = 8
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
@@ -437,8 +340,7 @@ def test_mlp_actor_trains_one_iteration(task: str, tmp_path) -> None:
     rl["logger"] = "tensorboard"
     runner = MjlabOnPolicyRunner(RslRlVecEnvWrapper(env), rl, log_dir=str(tmp_path), device="cuda:0")
     actor = runner.alg.actor
-    assert isinstance(actor, MLPModel) and not actor.is_recurrent
-    assert isinstance(actor, SymmetricMLPModel) == (task == TOUCH_MLP_SYM_TASK)
+    assert type(actor) is MLPModel and not actor.is_recurrent
     runner.learn(num_learning_iterations=1)
     assert all(torch.isfinite(p).all() for p in actor.parameters())
   finally:
@@ -461,22 +363,16 @@ def test_reward_variant_changes_only_the_reward(variant: str) -> None:
   assert same == (variant == "base")
 
 
-def test_memory_tasks_change_only_the_actor_window() -> None:
-  """The transformer and the 64-step GRU compare memory: rewards, terminations,
-  terrain, curriculum and critic are the touch plain GRU's. The transformer's
-  actor sees the same terms as a window of frames; the R64 GRU differs only in
-  its rollout length."""
+def test_r64_task_changes_only_the_rollout_length() -> None:
+  """The 64-step GRU differs from the touch plain GRU only in its rollout
+  length (and the minibatch count that keeps the minibatch size)."""
   from sendg1.fingerprint import fingerprint
 
   ref, ref_rl = load_env_cfg(TOUCH_PLAIN_TASK), load_rl_cfg(TOUCH_PLAIN_TASK)
-  for task in (TOUCH_TRANSFORMER_TASK, TOUCH_PLAIN_R64_TASK):
-    v = load_env_cfg(task)
-    for part in ("rewards", "terminations", "curriculum", "commands", "actions"):
-      assert fingerprint(getattr(v, part)) == fingerprint(getattr(ref, part)), (task, part)
-    assert fingerprint(v.scene.terrain) == fingerprint(ref.scene.terrain)
-    assert fingerprint(v.observations["critic"]) == fingerprint(ref.observations["critic"])
-    assert v.observations["actor"].terms.keys() == ref.observations["actor"].terms.keys()
-    assert load_rl_cfg(task).critic == ref_rl.critic
+  v = load_env_cfg(TOUCH_PLAIN_R64_TASK)
+  for part in ("rewards", "terminations", "curriculum", "commands", "actions", "events"):
+    assert fingerprint(getattr(v, part)) == fingerprint(getattr(ref, part)), part
+  assert fingerprint(v.scene.terrain) == fingerprint(ref.scene.terrain)
   r64, r64_rl = load_env_cfg(TOUCH_PLAIN_R64_TASK), load_rl_cfg(TOUCH_PLAIN_R64_TASK)
   assert fingerprint(r64.observations) == fingerprint(ref.observations)
   assert r64_rl.actor == ref_rl.actor
@@ -485,8 +381,6 @@ def test_memory_tasks_change_only_the_actor_window() -> None:
   assert (r64_rl.algorithm.num_mini_batches, ref_rl.algorithm.num_mini_batches) == (8, 4)
   r64_rl.algorithm.num_mini_batches = 4
   assert r64_rl.algorithm == ref_rl.algorithm
-  tr = load_env_cfg(TOUCH_TRANSFORMER_TASK).observations["actor"]
-  assert (tr.history_length, tr.flatten_history_dim) == (TRANSFORMER_HISTORY, False)
 
 
 def test_round2_tasks_keep_round_two_rules_but_35s_episodes() -> None:
@@ -518,39 +412,3 @@ def test_round2_tasks_keep_round_two_rules_but_35s_episodes() -> None:
     assert (a.actor.rnn_type, b.actor.rnn_type) == ("lstm", "gru")
     a.actor.rnn_type = "gru"
     assert (a.actor, a.algorithm, a.num_steps_per_env) == (b.actor, b.algorithm, b.num_steps_per_env)
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_transformer_actor_trains_one_iteration(tmp_path) -> None:
-  """The transformer actor reads a [B, H, D] window and runs a PPO update."""
-  from dataclasses import asdict
-
-  from mjlab.envs import ManagerBasedRlEnv
-  from mjlab.rl import RslRlVecEnvWrapper
-
-  from sendg1.rl.transformer import TransformerModel
-  from sendg1.tasks.beam.runner import BeamRunner
-
-  cfg = load_env_cfg(TOUCH_TRANSFORMER_TASK)
-  cfg.scene.num_envs = 8
-  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
-  try:
-    rl = asdict(load_rl_cfg(TOUCH_TRANSFORMER_TASK))
-    rl["logger"] = "tensorboard"
-    runner = BeamRunner(RslRlVecEnvWrapper(env), rl, log_dir=str(tmp_path), device="cuda:0")
-    actor = runner.alg.actor
-    assert isinstance(actor, TransformerModel) and actor.history == TRANSFORMER_HISTORY
-    runner.learn(num_learning_iterations=1)
-    assert all(torch.isfinite(p).all() for p in actor.parameters())
-    # The checkpoint carries the curriculum, and restoring it from there works
-    # (BeamRunner.load does the same in a resumed run's fresh process).
-    from sendg1.common.beam import mdp
-
-    env._beam_home_level[:] = 3
-    runner.save(str(tmp_path / "m.pt"))
-    env._beam_home_level[:] = 0
-    infos = torch.load(tmp_path / "m.pt", weights_only=False)["infos"]
-    mdp.load_curriculum_state(env, infos["beam_curriculum"])
-    assert bool((env._beam_home_level == 3).all())
-  finally:
-    env.close()

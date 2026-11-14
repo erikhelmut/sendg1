@@ -165,8 +165,6 @@ def test_plain_gru_trains_one_iteration(task: str, tmp_path) -> None:
   from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
   from rsl_rl.models.rnn_model import RNNModel
 
-  from sendg1.rl.symmetric_rnn import SymmetricRNNModel
-
   cfg = load_env_cfg(task)
   cfg.scene.num_envs = 8
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
@@ -175,7 +173,7 @@ def test_plain_gru_trains_one_iteration(task: str, tmp_path) -> None:
     rl["logger"] = "tensorboard"
     runner = MjlabOnPolicyRunner(RslRlVecEnvWrapper(env), rl, log_dir=str(tmp_path), device="cuda:0")
     actor = runner.alg.actor
-    assert isinstance(actor, RNNModel) and not isinstance(actor, SymmetricRNNModel)
+    assert type(actor) is RNNModel
     runner.learn(num_learning_iterations=1)
     assert all(torch.isfinite(p).all() for p in actor.parameters())
   finally:

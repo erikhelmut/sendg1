@@ -1,15 +1,9 @@
 """PPO config of the beam task.
 
-Actor (``ActorKind``) over the ``actor`` group: ``sym_gru``, GRU(256) -> MLP
-(256, 128), mirror-equivariant by construction (``sendg1.rl.symmetric_rnn``;
-rsl_rl's symmetry augmentation does not support recurrent actors); ``gru``,
-rsl_rl's plain ``RNNModel`` of the same size, with no symmetry at all;
-``sym_mlp``, a memoryless MLP (512, 256, 128) on the current observation only,
-mirror-equivariant the same way (``sendg1.rl.symmetric_mlp``); ``mlp``, rsl_rl's
-plain ``MLPModel`` of the same size; ``lstm``, ``RNNModel`` with an LSTM(256)
-in place of the GRU; ``transformer``, a small causal
-transformer over a window of past frames (``sendg1.rl.transformer``; the env
-builds the actor group with that history) -> MLP (256, 128). Critic: MLP
+Actor (``ActorKind``) over the ``actor`` group, all rsl_rl's own models:
+``gru``, ``RNNModel`` with a GRU(256) -> MLP (256, 128); ``lstm``, the same
+with an LSTM(256); ``mlp``, a memoryless ``MLPModel`` (512, 256, 128) on the
+current observation only. Critic: MLP
 (512, 256, 128) over the ``critic`` group (ground truth). Both normalise their
 inputs. 32-step rollouts by default (``num_steps_per_env``): a GRU then learns
 from gradients over 0.64 s, under one step of the slow beam gait.
@@ -31,29 +25,21 @@ ENTROPY_COEF = 0.005
 collapse training."""
 
 
-ActorKind = Literal["sym_gru", "gru", "lstm", "sym_mlp", "mlp", "transformer"]
+ActorKind = Literal["gru", "lstm", "mlp"]
 _DISTRIBUTION = {"class_name": "GaussianDistribution", "init_std": 1.0, "std_type": "scalar"}
 
 
 def _actor_cfg(actor: ActorKind) -> RslRlModelCfg:
-  if actor == "transformer":
+  if actor == "mlp":
     return RslRlModelCfg(
-      class_name="sendg1.rl.transformer:TransformerModel",
-      hidden_dims=ACTOR_HEAD,
-      activation="elu",
-      obs_normalization=True,
-      distribution_cfg=dict(_DISTRIBUTION),
-    )
-  if actor in ("sym_mlp", "mlp"):
-    return RslRlModelCfg(
-      class_name="sendg1.rl.symmetric_mlp:SymmetricMLPModel" if actor == "sym_mlp" else "MLPModel",
+      class_name="MLPModel",
       hidden_dims=MLP_ACTOR_HIDDEN,
       activation="elu",
       obs_normalization=True,
       distribution_cfg=dict(_DISTRIBUTION),
     )
   return RslRlModelCfg(
-    class_name="sendg1.rl.symmetric_rnn:SymmetricRNNModel" if actor == "sym_gru" else "RNNModel",
+    class_name="RNNModel",
     rnn_type="lstm" if actor == "lstm" else "gru",
     rnn_hidden_dim=RNN_HIDDEN,
     rnn_num_layers=1,
@@ -68,7 +54,7 @@ def beam_ppo_cfg(
   seed: int = 0,
   max_iterations: int = 20_000,
   experiment_name: str = "beam_e2e",
-  actor: ActorKind = "sym_gru",
+  actor: ActorKind = "gru",
   num_steps_per_env: int = 32,
 ) -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(

@@ -8,7 +8,6 @@
 - ``tactile``   per-foot tactile features built on ``sendg1.common.tactile``.
 - ``mdp``       observations, rewards, terminations, events, curriculum.
 - ``terms``     the observation registry with availability tags.
-- ``symmetry``  left-right mirror maps for the symmetric actor.
 
 Lives under ``common`` so that the observation registry can import it without
 an import cycle through ``sendg1.tasks``.

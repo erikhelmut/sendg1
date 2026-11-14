@@ -61,7 +61,6 @@ src/sendg1/
                    sensors, tactile sole, beam and box-push pieces
   tasks/           task packages; _register.py fans each across all obs sets
   eval/            the measurement protocol (versioned; it is the product)
-  rl/              model classes beyond rsl_rl (the symmetric GRU)
   video/           EvalVideo: themed rendering + tactile HUD
   fingerprint.py   stable config hashing
 tests/             allowlist, fingerprints, registration, import order, ...

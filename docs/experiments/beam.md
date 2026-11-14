@@ -10,15 +10,10 @@ observations and episode length, so its checkpoints load).
 |---|---|---|---|
 | `G1-Beam-E2E` | straight | IMU, joints, previous action, forward command, tactile contact map | 160 |
 | `G1-Beam-E2E-Curved` | straight, `bend` (joints up to 25°), `turn` (up to 60°) | same | 160 |
-| `G1-Beam-Touch-Curved` | as `-Curved` | same, tactile as touch features; symmetric GRU | 156 |
-| `G1-Beam-Touch-Curved-Plain` | as `-Curved` | same as `Touch-Curved`; plain GRU (no symmetry) | 156 |
+| `G1-Beam-Touch-Curved-Plain` | as `-Curved` | same, tactile as touch features | 156 |
 | `G1-Beam-Curved-Blind` | as `-Curved` | as `Touch-Curved-Plain` without tactile input (blind baseline) | 94 |
-| `G1-Beam-Curved-Blind-Sym` | as `-Curved` | as `Curved-Blind`; symmetric GRU (blind `Touch-Curved`) | 94 |
-| `G1-Beam-Touch-Curved-MLP-Sym` | as `-Curved` | touch features; symmetric MLP, no memory | 156 |
 | `G1-Beam-Touch-Curved-MLP-Plain` | as `-Curved` | touch features; plain MLP, no memory | 156 |
-| `G1-Beam-Curved-Blind-MLP-Sym` | as `-Curved` | no tactile; symmetric MLP, no memory | 94 |
 | `G1-Beam-Curved-Blind-MLP-Plain` | as `-Curved` | no tactile; plain MLP, no memory | 94 |
-| `G1-Beam-Touch-Curved-Transformer` | as `-Curved` | touch features, last 64 frames; causal transformer | 64 x 156 |
 | `G1-Beam-Touch-Curved-Plain-R64` | as `-Curved` | as `Touch-Curved-Plain`, 64-step rollouts | 156 |
 | `G1-Beam-Touch-Curved-Plain-R2-35s` | round-two widths | as `Touch-Curved-Plain`, round-two rules, 35 s episodes | 156 |
 | `G1-Beam-Touch-Curved-Plain-R2-35s-R64` | round-two widths | as `-R2-35s`, 64-step rollouts | 156 |
@@ -31,25 +26,25 @@ observations and episode length, so its checkpoints load).
   (seven levels, 0.40-0.05 m, before round three). The curved task adds a `bend` and
   a `turn` column per height: straight pieces of 0.6-1.4 m joined at random
   heading changes, a disc filling each joint. Every bent tile has its own path.
-- **Actor**: a GRU(256) -> MLP(256, 128), left-right equivariant by
-  construction (`rl/symmetric_rnn.py`). It sees only `onboard` / `sensor`
-  terms (`common/beam/terms.py`); registration fails otherwise. Tactile input:
-  per foot a soft per-taxel contact map, load, CoP, contact area, edge
-  loading, contact flag, with gain errors, dead taxels, noise, frame drops and
-  0-1 step latency. The `Touch` tasks instead give per foot a 26-bit "taxel
-  above 3 N" map, load / body weight, CoP (+-1, 0 in the air), contact area
-  and a contact flag, under the same sensor faults. `Touch-Curved-Plain` uses
-  rsl_rl's plain `RNNModel` of the same size, to test whether the symmetric
-  actor helps. The `-MLP-*` tasks drop the memory: an MLP(512, 256, 128) on the
-  current observation only (joints, previous action, IMU, command, tactile),
-  mirror-equivariant by construction (`rl/symmetric_mlp.py`) or plain.
-  `-Transformer` (`rl/transformer.py`): the actor group carries the last 64
-  frames (1.28 s); every 4 frames form one token, 2 pre-norm layers (64 dim,
-  4 heads, causal mask) run over the 16 tokens, the newest token's output
-  feeds an MLP (256, 128). One token per frame made the PPO update ~25x the
-  GRU's and did not fit a 24 GB GPU. `-R64` is the plain GRU with 64-step
-  rollouts (in 8 minibatches, so each keeps the other runs' size): its
-  gradients span 1.28 s instead of 0.64 s, under one step of the slow beam gait.
+- **Actor**: rsl_rl's `RNNModel`, a GRU(256) -> MLP(256, 128). It sees only
+  `onboard` / `sensor` terms (`common/beam/terms.py`); registration fails
+  otherwise. Tactile input: per foot a soft per-taxel contact map, load, CoP,
+  contact area, edge loading, contact flag, with gain errors, dead taxels,
+  noise, frame drops and 0-1 step latency. The `Touch` tasks instead give per
+  foot a 26-bit "taxel above 3 N" map, load / body weight, CoP (+-1, 0 in the
+  air), contact area and a contact flag, under the same sensor faults (the
+  model every task now shares, [tactile.md](../tactile.md#what-the-actor-sees)).
+  The `-MLP-Plain` tasks drop the memory: rsl_rl's `MLPModel` (512, 256, 128)
+  on the current observation only. `-R64` is the GRU with 64-step rollouts (in
+  8 minibatches, so each keeps the other runs' size): its gradients span
+  1.28 s instead of 0.64 s, under one step of the slow beam gait. `-LSTM-*`
+  swap the GRU for an LSTM(256).
+- **Removed actors** (2026-11-14): the mirror-equivariant GRU and MLP
+  (`G1-Beam-Touch-Curved`, `-Curved-Blind-Sym`, `-MLP-Sym`, and the symmetric
+  actor `G1-Beam-E2E{,-Curved}` used to have) and the causal transformer
+  (`-Transformer`: 64 frames, 4 frames per token, 2 layers). Their results
+  below stay as a record; their checkpoints no longer load, and
+  `G1-Beam-E2E{,-Curved}` now train a plain GRU.
 - **Critic**: MLP on the actor's terms plus ground truth: base velocity, feet
   and base pose relative to the beam, beam progress, width, height and friction,
   the clean tactile map, contact forces, actuation lag; on curved beams also

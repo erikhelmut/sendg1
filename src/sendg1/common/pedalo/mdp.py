@@ -24,7 +24,7 @@ progress with slack and a symmetric clip instead of exact speed tracking (the
 beam policy rocked in place while backward motion cost nothing), a large
 one-off termination penalty (without it the random policy fell at once), feet
 and CoM centred on the support with fixed Gaussian widths, flat stance feet,
-walking regularisers, a symmetric actor.
+walking regularisers.
 """
 
 from __future__ import annotations
@@ -566,15 +566,6 @@ def reset_tactile_noise(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) ->
     env_ids = torch.arange(env.num_envs, device=env.device)
   st = tac.TactileNoiseState.get(env, LAYOUTS[TACTILE.layout])
   st.resample(env_ids, torch.full((len(env_ids),), TACTILE_NOISE_STRENGTH, device=env.device))
-
-
-def register_actor_mirror(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) -> None:
-  """Startup event: the symmetric GRU actor's mirror maps (``pedalo.symmetry``)."""
-  from sendg1.common.pedalo.symmetry import maps
-  from sendg1.rl import symmetric_rnn
-
-  m = maps(env)
-  symmetric_rnn.set_mirrors(obs={g: v for g, v in m.items() if g != "__actions__"}, actions=m["__actions__"])
 
 
 PEDALO_GEOMS = SceneEntityCfg(PEDALO, geom_names=(r".*_wheel$",))

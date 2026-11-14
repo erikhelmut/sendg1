@@ -6,8 +6,8 @@ The G1 stands on a Pedalo Classic (``common/pedalo/model.py``) or Sport
 forward at a joystick speed or holds it still. Plain PPO with the beam
 task's actor inputs (IMU, joints, previous action, forward command, tactile
 touch features; ``blind`` drops the touch features) and an MLP critic on
-that plus ground truth about the pedalo. The actor network (plain or
-symmetric GRU) is chosen at registration, in ``tasks/pedalo/__init__.py``.
+that plus ground truth about the pedalo. The actor is rsl_rl's GRU
+(``tasks/beam/rl_cfg.py``), chosen at registration in ``tasks/pedalo/__init__.py``.
 
 Every reward term, weight and termination is in this file, in one table each.
 """
@@ -289,8 +289,6 @@ def build_events() -> dict[str, EventTermCfg]:
       func=dr.encoder_bias,
       params={"asset_cfg": robot, "bias_range": (-0.015, 0.015)},
     ),
-    # -- startup -----------------------------------------------------------------
-    "register_actor_mirror": EventTermCfg(func=mdp.register_actor_mirror, mode="startup"),
   }
 
 

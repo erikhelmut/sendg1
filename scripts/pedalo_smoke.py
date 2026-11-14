@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """Smoke test of the pedalo env: builds, obs shapes, spawn geometry, finite
-rewards, terminations, mirror maps.
+rewards, terminations.
 
     python scripts/pedalo_smoke.py --num-envs 16 --steps 300
 """
@@ -24,7 +24,6 @@ def main() -> None:
 
   import sendg1.tasks  # noqa: F401
   from sendg1.common.pedalo.mdp import PedaloState
-  from sendg1.common.pedalo.symmetry import maps
 
   cfg = load_env_cfg(args.task)
   cfg.scene.num_envs = args.num_envs
@@ -35,8 +34,6 @@ def main() -> None:
   om = env.observation_manager
   for g in ("actor", "critic"):
     print(g, dict(zip(om.active_terms[g], om.group_obs_term_dim[g])))
-  for g, (src, _) in maps(env).items():
-    print("mirror", g, tuple(src.shape))
 
   st = PedaloState.get(env)
   phi, _ = st.crank()
