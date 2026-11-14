@@ -24,13 +24,19 @@ from dataclasses import replace
 from typing import Literal
 
 import mujoco
-from mjlab.asset_zoo.robots.unitree_g1.g1_constants import FULL_COLLISION
-from mjlab.asset_zoo.robots.unitree_g1.g1_constants import get_spec as _get_g1_spec
+from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
+  FULL_COLLISION,
+  KNEES_BENT_KEYFRAME,
+  get_g1_robot_cfg,
+)
 from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
   G1_ACTION_SCALE as _MJLAB_G1_ACTION_SCALE,
 )
-from mjlab.asset_zoo.robots.unitree_g1.g1_constants import get_g1_robot_cfg
+from mjlab.asset_zoo.robots.unitree_g1.g1_constants import get_spec as _get_g1_spec
 from mjlab.entity import EntityCfg
+
+from sendg1.common.robots.slipper import G1_SOLE_GEOMS, add_slipper
+from sendg1.common.tactile.layout import G1_SOLE_Z, SOLE_Z
 
 DofSet = Literal["full29", "legs12", "legs_waist15"]
 """Which joints the action term drives. Phase 1 uses ``full29``."""
@@ -44,17 +50,28 @@ G1_FOOT_SITES: tuple[str, ...] = ("left_foot", "right_foot")
 """Sites at the sole of each foot, used for clearance/slip rewards and the
 per-foot terrain height scan."""
 
-G1_FOOT_GEOMS: tuple[str, ...] = tuple(
-  f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)
-)
-"""The 7 collision capsules per foot, laid out fore-aft across the sole.
-
-They overlap (1 cm radius, 0.8-1 cm apart), so together they form one rounded
-slab. On flat ground MuJoCo contacts only their two end caps, which is why the
-tactile model (sendg1.common.tactile.model) takes the net wrench from the
-contacts rather than binning contact points onto taxels. Draw them with
-``scripts/show_sole.py``.
+G1_FOOT_GEOMS: tuple[str, ...] = G1_SOLE_GEOMS
+"""One collision box per foot: the slipper's rubber sole
+(``sendg1.common.robots.slipper``). It replaces mjlab's 7 capsules per foot.
+On flat ground MuJoCo contacts its 4 corners, which is why the tactile model
+(sendg1.common.tactile.model) takes the net wrench from the contacts rather
+than binning contact points onto taxels.
 """
+
+SOLE_RE = r"^(left|right)_sole_collision$"
+
+STANDING_BASE_Z = KNEES_BENT_KEYFRAME.pos[2] + (G1_SOLE_Z - SOLE_Z)
+"""Base height with the soles on the floor: mjlab's knees-bent keyframe
+(0.76 m) lifted by the slipper stack (8 mm)."""
+
+SLIPPER_COLLISION = replace(
+  FULL_COLLISION,
+  condim={SOLE_RE: 3, ".*_collision": 1},
+  priority={SOLE_RE: 1, ".*": 0},
+  friction={SOLE_RE: (0.6,)},
+)
+"""mjlab's FULL_COLLISION with its foot-capsule rules moved to the sole box.
+Friction is the stock 0.6; ``foot_friction`` randomises it (0.3-1.2) anyway."""
 
 G1_ACTION_SCALE: dict[str, float] = dict(_MJLAB_G1_ACTION_SCALE)
 """Per-joint action scale, ``0.25 * effort_limit / stiffness``. Keys are regexes."""
@@ -119,9 +136,19 @@ def resolve_action_scale(dof_set: DofSet) -> dict[str, float]:
   }
 
 
+def get_g1_spec() -> mujoco.MjSpec:
+  """mjlab's 29-DoF G1 wearing the tactile slipper."""
+  return add_slipper(_get_g1_spec())
+
+
 def get_g1_cfg() -> EntityCfg:
-  """A fresh 29-DoF G1 entity config (knees-bent keyframe, full collisions)."""
-  return get_g1_robot_cfg()
+  """A fresh 29-DoF G1 entity config (knees-bent keyframe, full collisions),
+  wearing the slipper."""
+  cfg = get_g1_robot_cfg()
+  cfg.spec_fn = get_g1_spec
+  cfg.collisions = (SLIPPER_COLLISION,)
+  cfg.init_state = replace(cfg.init_state, pos=(*cfg.init_state.pos[:2], STANDING_BASE_Z))
+  return cfg
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +193,7 @@ def get_g1_ball_hands_spec() -> mujoco.MjSpec:
   collision rule and sensor pattern still finds it; only its shape changes. The
   rubber-hand visual mesh is swapped for a matching visual sphere.
   """
-  spec = _get_g1_spec()
+  spec = get_g1_spec()
   for side in ("left", "right"):
     body = spec.body(f"{side}_wrist_yaw_link")
     for geom in list(body.geoms):
@@ -192,31 +219,31 @@ def get_g1_ball_hands_spec() -> mujoco.MjSpec:
 
 
 BALL_HANDS_COLLISION = replace(
-  FULL_COLLISION,
+  SLIPPER_COLLISION,
   # Friction needs condim 3: the stock rule makes every non-foot geom
   # frictionless (condim 1), and with the ball's top priority its condim is the
   # one a hand contact uses.
   condim={
-    r"^(left|right)_foot[1-7]_collision$": 3,
+    SOLE_RE: 3,
     r"^(left|right)_hand_collision$": 3,
     ".*_collision": 1,
   },
   priority={
-    r"^(left|right)_foot[1-7]_collision$": 1,
+    SOLE_RE: 1,
     r"^(left|right)_hand_collision$": BALL_HAND_PRIORITY,
     ".*": 0,
   },
   friction={
-    r"^(left|right)_foot[1-7]_collision$": (0.6,),
+    SOLE_RE: (0.6,),
     r"^(left|right)_hand_collision$": (BALL_HAND_FRICTION,),
   },
 )
-"""mjlab's FULL_COLLISION, plus the ball hands' contact settings."""
+"""SLIPPER_COLLISION, plus the ball hands' contact settings."""
 
 
 def get_g1_ball_hands_cfg() -> EntityCfg:
   """A fresh 29-DoF G1 with ball hands (see :func:`get_g1_ball_hands_spec`)."""
-  cfg = get_g1_robot_cfg()
+  cfg = get_g1_cfg()
   cfg.spec_fn = get_g1_ball_hands_spec
   cfg.collisions = (BALL_HANDS_COLLISION,)
   return cfg

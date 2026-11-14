@@ -42,6 +42,7 @@ from sendg1.common.beam.mdp import TACTILE, whole_body_com_xy
 from sendg1.common.pedalo import model as pm
 from sendg1.common.pedalo.variants import CLASSIC, VARIANTS, PedaloVariant
 from sendg1.common.robots.g1 import G1_FOOT_SITES
+from sendg1.common.robots.g1 import STANDING_BASE_Z as G1_STANDING_BASE_Z
 from sendg1.common.tactile.layout import LAYOUTS
 
 if TYPE_CHECKING:
@@ -486,8 +487,8 @@ a foot dx ahead (FK: -0.09 rad moves it +5.4 cm)."""
 SPAWN_CLEARANCE = 0.01
 FOOT_SITE_X = 0.0388
 """Sole-centre site ahead of the base in the default stance."""
-STANDING_BASE_Z = 0.76
-"""G1 init_state base height with the soles on the floor."""
+STANDING_BASE_Z = G1_STANDING_BASE_Z
+"""G1 init_state base height with the soles (slipper on) on the floor."""
 
 
 def reset_on_pedalo(

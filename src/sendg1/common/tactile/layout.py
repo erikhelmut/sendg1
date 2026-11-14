@@ -1,9 +1,9 @@
 """Where the taxels sit on the sole.
 
 Everything is expressed in the **sole frame**, which is the ``*_ankle_roll_link``
-body frame: x forward, y left, z up. The sole plane is the bottom of the 7 foot
-collision capsules (and, to 0.4 mm, of the foot's visual mesh), at
-``SOLE_Z = -0.035`` m.
+body frame: x forward, y left, z up. The sole plane is the bottom of the
+slipper's rubber sole, ``SOLE_Z = -0.043`` m: 8 mm (slipper floor, foil,
+rubber) below the bare G1 sole (see ``sendg1.common.robots.slipper``).
 
 The model uses ``slipper_v1``: the real sensor on the slipper, 26 square
 patches of 12 mm, read from ``layouts/slipper_v1.csv`` (millimetres, exported
@@ -27,13 +27,24 @@ from typing import Literal
 Side = Literal["left", "right"]
 SIDES: tuple[Side, ...] = ("left", "right")
 
-SOLE_Z = -0.035
-"""Sole plane in the ankle-roll-link frame: capsule axis z=-0.025 minus radius
-0.01. The visual mesh bottoms out at -0.0354."""
+G1_SOLE_Z = -0.035
+"""The bare G1 sole in the ankle-roll-link frame: the stock collision capsules'
+axis z=-0.025 minus radius 0.01. The visual mesh bottoms out at -0.0354."""
 
-SOLE_EXTENT_X = (-0.066, 0.142)
-SOLE_EXTENT_Y = (-0.038, 0.038)
-"""Footprint of the G1 foot mesh in the sole frame (metres)."""
+SLIPPER_FLOOR = 0.003
+"""TPU 95A slipper floor under the foot (thicker under the G1's sole cutout)."""
+FOIL = 0.001
+"""Tactile foil plus glue."""
+RUBBER = 0.004
+"""Vibram 75 Shore A protective sole."""
+
+SOLE_Z = G1_SOLE_Z - SLIPPER_FLOOR - FOIL - RUBBER
+"""Sole plane: the bottom of the rubber, which touches the ground."""
+
+SOLE_EXTENT_X = (-0.0706, 0.1471)
+SOLE_EXTENT_Y = (-0.0405, 0.0405)
+"""Footprint of the rubber sole in the sole frame (metres): the bounding box of
+the slipper's flat bottom (``slipper.sole_outline``; a test keeps them equal)."""
 
 
 @dataclass(frozen=True)
@@ -66,9 +77,7 @@ class TaxelLayout:
       return self.centers
     return tuple((x, -y) for x, y in self.centers)
 
-  def sample_points(
-    self, side: Side, per_axis: int
-  ) -> tuple[tuple[float, float], ...]:
+  def sample_points(self, side: Side, per_axis: int) -> tuple[tuple[float, float], ...]:
     """``per_axis`` x ``per_axis`` points spread over each patch, taxel-major.
 
     Used to estimate what fraction of a patch is over supporting ground (a

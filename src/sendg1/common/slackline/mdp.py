@@ -225,7 +225,7 @@ def nonfoot_line_contact_sensor() -> ContactSensorCfg:
       mode="geom",
       pattern=r".*_collision",
       entity="robot",
-      exclude=(r".*_foot\d_collision", r".*_linkage_brace_collision"),
+      exclude=(r".*_sole_collision", r".*_linkage_brace_collision"),
     ),
     secondary=line_match(),
     fields=("found",),
@@ -739,7 +739,7 @@ def _nonfoot_on_flex(env: ManagerBasedRlEnv) -> torch.Tensor:
     m = env.sim.mj_model
     mask = torch.zeros(m.ngeom, dtype=torch.bool, device=env.device)
     pat = re.compile(r"robot/.*_collision")
-    skip = re.compile(r".*_(foot\d|linkage_brace)_collision")
+    skip = re.compile(r".*_(sole|linkage_brace)_collision")
     for g in range(m.ngeom):
       name = m.geom(g).name
       mask[g] = bool(pat.fullmatch(name)) and not skip.fullmatch(name)

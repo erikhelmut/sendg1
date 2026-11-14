@@ -1,14 +1,15 @@
 # Tactile sole
 
 ```bash
-python scripts/show_sole.py          # the sole as simulated: mesh, capsules, taxels
+python scripts/show_sole.py          # taxels on the bare G1 foot (still draws the stock capsules)
+python scripts/make_slipper_asset.py <stl>  # slipper CAD -> robots/assets/g1_slipper.stl
 python scripts/tactile_viewer.py     # MP4 of the robot walking + live taxel readings
 python scripts/export_foot_cad.py    # foot as DXF + STL in the sole frame, mm (needs .[cad])
 python scripts/sweep.py --tasks flat --obs-sets blind tactile --seeds 0
 ```
 
 - **Layout** (`common/tactile/layout.py`): taxel patches in the sole frame
-  (`*_ankle_roll_link`, sole plane at z = -0.035 m). The slipper sensor is one
+  (`*_ankle_roll_link`, sole plane at z = -0.043 m, the bottom of the slipper). The slipper sensor is one
   part used 1:1 on both feet, so taxel `i` sits at the same (x, y) on each
   (`mirror_right=False`).
   Currently `slipper_v1`: 26 patches of 12 mm, loaded from
@@ -17,14 +18,22 @@ python scripts/sweep.py --tasks flat --obs-sets blind tactile --seeds 0
   id `i`. The loader rejects ids that are not 0..N-1, rotated patches, overlaps,
   and patches past the foot outline. A new layout is a new CSV plus one line in
   `LAYOUTS`; nothing downstream assumes a grid.
-- **Why not bin contact points**: the sim foot is 7 rigid capsules, and on flat
-  ground MuJoCo only contacts their end caps -- a line under the heel and one
-  under the toe. Binning would leave the mid-foot taxels at zero while the foot
-  is flat.
+- **Slipper** (`common/robots/slipper.py`): the G1 wears the real slipper in
+  every task, blind included. From the foot down: 3 mm TPU 95A slipper (its
+  CAD, kyber blue), ~1 mm tactile foil (white), 4 mm Vibram 75A rubber (black),
+  so the sole sits 8 mm lower and the robot spawns 8 mm higher. 200 g per foot
+  is added to the ankle-roll link. Collision: mjlab's 7 capsules per foot are
+  replaced by one box under the rubber outline (218 x 81 x 5 mm,
+  `*_sole_collision`); its corners overhang the rounded toe and heel by up to
+  ~1 cm.
+- **Why not bin contact points**: the sim sole is one rigid box, and on flat
+  ground MuJoCo contacts only its 4 corners. Binning would leave every inner
+  taxel at zero while the foot is flat.
 - **Model** (`common/tactile/model.py`, pure torch): the net force and centre of
   pressure come from the per-contact data (`sole_contacts` sensor); which
   patches have ground beneath them comes from 4 rays per taxel
-  (`tactile_rays_{left,right}`), with 4 mm of compliance; the normal force is
+  (`tactile_rays_{left,right}`), with 1 mm of compliance (the rubber stack
+  barely gives; the margin covers MuJoCo's contact penetration); the normal force is
   split over the supported taxels as a plane of pressure (a rigid sole on a
   thin elastic layer) that reproduces the force and CoP exactly, dropping any
   taxel it puts in tension. Shear is shared in proportion to normal load.

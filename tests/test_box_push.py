@@ -33,9 +33,9 @@ def test_g1_mass_constant_matches_model() -> None:
 
 
 def test_feasibility_helpers() -> None:
-  # 0.5 * 33.34 = 16.67 kg-equivalent of traction; a 0.5-mu 20 kg box needs 10.
+  # 0.5 * 33.74 = 16.87 kg-equivalent of traction; a 0.5-mu 20 kg box needs 10.
   assert traction_margin(np.array(0.5), np.array(20.0), np.array(0.5)) == pytest.approx(
-    1 - 10 / 16.67, abs=1e-3
+    1 - 10 / 16.87, abs=1e-3
   )
   assert traction_margin(np.array(0.2), np.array(40.0), np.array(0.8)) < 0
   # d / (2 mu) = 0.5 / 1.0: a push above 0.5 m tips first.
@@ -123,7 +123,7 @@ def test_contact_friction_takes_the_sampled_values() -> None:
     seen_foot = seen_box = 0
     for (w, a, b), mu in _contact_friction(env).items():
       pair = {a, b}
-      if "terrain" in pair and any("foot" in g for g in pair):
+      if "terrain" in pair and any("sole" in g for g in pair):
         assert mu == pytest.approx(float(st.floor_mu[w]), abs=1e-5), (a, b)
         seen_foot += 1
       if pair == {"terrain", "box/box_geom"}:
@@ -220,7 +220,7 @@ def test_patch_friction_applies_to_feet_on_a_patch() -> None:
       env.step(_zero(env))
     on_patch = [
       mu for (w, a, b), mu in _contact_friction(env).items()
-      if w == 0 and patch_geom_name(0) in (a, b) and ("foot" in a or "foot" in b)
+      if w == 0 and patch_geom_name(0) in (a, b) and ("sole" in a or "sole" in b)
     ]
     assert on_patch and all(mu == pytest.approx(0.123, abs=1e-5) for mu in on_patch)
     # The foot contact sensor, which matches the terrain body, sees the patch.

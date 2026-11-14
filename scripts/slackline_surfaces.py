@@ -84,7 +84,7 @@ class Probe:
     dev = env.device
     names = [m.geom(g).name for g in range(m.ngeom)]
     self.foot = torch.tensor(
-      [n.startswith("robot/") and "_foot" in n for n in names], device=dev
+      [n.startswith("robot/") and n.endswith("_sole_collision") for n in names], device=dev
     )
     self.line = torch.tensor(
       [n.startswith("slackline/webbing_") and bool(m.geom_contype[g]) for g, n in enumerate(names)],

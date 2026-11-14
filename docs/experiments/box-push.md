@@ -26,7 +26,7 @@ told where the box is.
   `depth / (2 mu_box)`, which at the first version's 0.4-0.6 m depth was 72% of
   boxes at a 0.7 m push. Now ~3%.
 - **Friction model.** MuJoCo max-mixes friction for equal priorities, and the
-  G1 foot capsules carry priority 1, so priorities are set so each contact
+  G1 sole boxes carry priority 1, so priorities are set so each contact
   takes exactly one sampled value: foot/floor -> floor mu, box/floor -> box mu,
   hand/box -> the ball hand's fixed 0.8. Verified per contact in the solver by
   `tests/test_box_push.py`.

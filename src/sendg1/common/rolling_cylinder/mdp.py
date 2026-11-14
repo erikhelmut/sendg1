@@ -32,6 +32,7 @@ from mjlab.utils.lab_api.math import quat_apply, quat_from_euler_xyz, quat_mul
 from sendg1.common.beam import tactile as tac
 from sendg1.common.beam.mdp import TACTILE, whole_body_com_xy
 from sendg1.common.robots.g1 import G1_FOOT_SITES
+from sendg1.common.robots.g1 import STANDING_BASE_Z as G1_STANDING_BASE_Z
 from sendg1.common.rolling_cylinder import model as cm
 from sendg1.common.tactile.layout import LAYOUTS
 
@@ -434,8 +435,8 @@ def base_too_low(env: ManagerBasedRlEnv, min_height: float = 0.8) -> torch.Tenso
 
 FOOT_SITE_X = 0.0388
 """Sole-centre site ahead of the base in the default stance."""
-STANDING_BASE_Z = 0.76
-"""G1 init_state base height with the soles on the floor."""
+STANDING_BASE_Z = G1_STANDING_BASE_Z
+"""G1 init_state base height with the soles (slipper on) on the floor."""
 SPAWN_CLEARANCE = 0.01
 
 

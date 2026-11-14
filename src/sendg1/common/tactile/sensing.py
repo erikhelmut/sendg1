@@ -39,9 +39,12 @@ class TactileParams:
   layout: str = DEFAULT_LAYOUT
   rays_per_axis: int = 2
   """Support is sampled on a rays_per_axis^2 grid within each patch."""
-  compliance_depth: float = 0.004
-  """Ground this far below a patch still counts as (partly) supporting it:
-  the give of the slipper and sensor. Linear fall-off to zero."""
+  compliance_depth: float = 0.001
+  """Ground this far below a patch still counts as (partly) supporting it.
+  Linear fall-off to zero. The real stack (3 mm TPU 95A, foil, 4 mm 75A
+  rubber) compresses well under 0.1 mm at standing pressure and a few tenths
+  under an edge; 1 mm adds margin for MuJoCo's contact penetration (median
+  ~0.1 mm, 5% beyond 0.5 mm standing) and the ray grid."""
 
 
 def tactile_scene_sensors(

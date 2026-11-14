@@ -31,8 +31,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-G1_MASS_KG = 33.34
-"""Total mass of mjlab's 29-DoF G1 (sum of body_mass; checked in
+G1_MASS_KG = 33.74
+"""Total mass of mjlab's 29-DoF G1 with the slippers on (33.34 kg + 2 x 0.2 kg;
+sum of body_mass; checked in
 tests/test_box_push.py so it cannot drift from the model)."""
 
 GRAVITY = 9.81

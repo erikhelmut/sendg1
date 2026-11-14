@@ -48,6 +48,7 @@ from sendg1.common.box_push.scene import (
   patch_geom_name,
 )
 from sendg1.common.robots.g1 import G1_FOOT_SITES
+from sendg1.common.tactile.layout import SOLE_Z
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -59,9 +60,6 @@ event's params, so there is exactly one copy of it in the env config."""
 FOOT_CONTACT_SENSOR = "feet_ground_contact"
 FOOT_BODIES: tuple[str, ...] = ("left_ankle_roll_link", "right_ankle_roll_link")
 
-SOLE_Z = -0.035
-"""Sole plane in the ankle_roll_link frame (capsule centres at -0.025, radius
-0.01)."""
 HEEL_TOE_X: tuple[float, float] = (-0.04, 0.12)
 """Heel and toe points on the sole, x in the ankle_roll_link frame. The
 collision capsules span about -0.05..0.13."""
@@ -157,8 +155,8 @@ class BoxPushState:
     self.foot_site_ids, _ = self.robot.find_sites(G1_FOOT_SITES, preserve_order=True)
 
     n, dev = env.num_envs, env.device
-    z = lambda: torch.zeros(n, device=dev)  # noqa: E731
-    b = lambda: torch.zeros(n, device=dev, dtype=torch.bool)  # noqa: E731
+    z = lambda: torch.zeros(n, device=dev)
+    b = lambda: torch.zeros(n, device=dev, dtype=torch.bool)
 
     # -- the sampled world ---------------------------------------------------
     self.floor_mu = z()
@@ -744,7 +742,7 @@ def box_push_levels(
   cfg = st.curriculum
   if cfg is not None and env_ids is not None and env.common_step_counter > 0:
     st._window_success += int(st.succeeded[env_ids].sum().item())
-    st._window_count += int(len(env_ids))
+    st._window_count += len(env_ids)
     if st._window_count >= cfg.window:
       rate = st._window_success / st._window_count
       st.window_success_rate = rate

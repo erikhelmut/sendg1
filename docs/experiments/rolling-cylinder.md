@@ -76,5 +76,7 @@ video (EvalVideo, rendered on the workstation, never on the cluster):
 
 Seed 0 of both conditions training on the cluster since 2026-10-20.
 
-Known limitation: MuJoCo makes one contact per capsule-cylinder pair, so each
-sole capsule touches the cylinder at one point.
+Known limitation: each sole is one box (the slipper), which MuJoCo collides
+with the cylinder as a convex pair: a few contact points on the line, not a
+pressure strip. The tactile model spreads the load over the taxels the rays
+find within 1 mm of the cylinder.
