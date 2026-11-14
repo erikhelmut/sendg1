@@ -40,9 +40,9 @@ Built on [mjlab](https://github.com/mujocolab/mjlab), pinned to commit
 
 ## Status
 
-- **Velocity tracking**, flat and rough: blind baselines; the tactile sole is
-  modelled on the slipper's real 26-taxel layout, still idealised (no noise,
-  latency or calibration error), so it is diagnostic for now.
+- **Velocity tracking**, flat and rough: blind vs tactile. Every task's tactile
+  actor uses one sensor model of the slipper's 26 taxels: normal load only,
+  with gain error, dead taxels, noise, frame drops and latency.
 - **Beam walking**: a blind G1 on a beam it cannot see, feeling it underfoot.
 - **Box pushing** under unknown floor friction.
 - **Pedalo**: the G1 rides a Pedalo Classic or Sport at a joystick
@@ -69,7 +69,7 @@ uv run python scripts/sweep.py --dry-run
 - [Install](docs/install.md): environment, first runs, known issues
 - [Cluster](docs/cluster.md): training on the IAS cluster, results back here
 - [Tasks](docs/tasks.md): registered tasks and observation sets
-- [Tactile sole](docs/tactile.md): layout, sensor model, the contact oracle
+- [Tactile sole](docs/tactile.md): layout, sensor model, what the actor sees, the contact oracle
 - [Beam walking](docs/experiments/beam.md),
   [box pushing](docs/experiments/box-push.md),
   [pedalo](src/sendg1/tasks/pedalo/__init__.py),

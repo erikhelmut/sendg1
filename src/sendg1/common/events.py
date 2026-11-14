@@ -12,6 +12,7 @@ from mjlab.envs.mdp import dr
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+from sendg1.common.beam import tactile as tac
 from sendg1.common.robots.g1 import G1_FOOT_GEOMS, G1_TORSO_BODY
 
 
@@ -80,5 +81,12 @@ def build_events() -> dict[str, EventTermCfg]:
         "operation": "add",
         "ranges": {0: (-0.025, 0.025), 1: (-0.025, 0.025), 2: (-0.03, 0.03)},
       },
+    ),
+    # The tactile sensor's per-episode faults (gain, dead taxels). Present in
+    # every obs set so events stay identical; only the tactile actor reads them.
+    "tactile_faults": EventTermCfg(
+      func=tac.reset_tactile_noise,
+      mode="reset",
+      params={"strength": tac.FIXED_STRENGTH},
     ),
   }

@@ -39,7 +39,7 @@ from sendg1.common.box_push.scene import (
 )
 from sendg1.common.events import build_events
 from sendg1.common.obs.groups import build_groups
-from sendg1.common.obs.obs_sets import uses_tactile_array
+from sendg1.common.obs.obs_sets import uses_tactile
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from sendg1.common.rewards import POSE_STD_WALKING, build_rewards
@@ -316,7 +316,7 @@ def make_g1_box_push_env_cfg(
     self_collision_sensor(),
     *box_push_sensors(),
   ]
-  if uses_tactile_array(obs_set):
+  if uses_tactile(obs_set):
     sensors.extend(tactile_scene_sensors())
   cfg.scene.sensors = tuple(sensors)
 

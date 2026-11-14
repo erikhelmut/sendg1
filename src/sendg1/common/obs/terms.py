@@ -13,6 +13,11 @@ Availability
                 current implementation is idealised (noiseless, zero-latency,
                 perfectly calibrated). Legal in an actor group ONLY for obs sets
                 explicitly marked diagnostic.
+``sensor``      The tactile slipper: hardware the robot will carry, but not part
+                of the stock G1. Its term models the real sensor's faults (gain
+                error, dead taxels, noise, frame drops, latency) and reads only
+                what a pressure array can report: no shear. Legal in an actor
+                group.
 ``perceived``   Not measured by the G1 itself, but ASSUMED provided by an
                 external perception stack as part of a task's specification
                 (the box-pushing task's box pose and target). Legal in an actor
@@ -33,14 +38,10 @@ from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
+from sendg1.common.beam import mdp as beam_mdp
 from sendg1.common.box_push import mdp as box_mdp
-from sendg1.common.tactile.sensing import (
-  TactileParams,
-  tactile_aggregate_obs,
-  tactile_array_obs,
-)
 
-Availability = Literal["onboard", "oracle", "perceived", "privileged"]
+Availability = Literal["onboard", "oracle", "sensor", "perceived", "privileged"]
 
 TERRAIN_SCAN_SENSOR = "terrain_scan"
 TERRAIN_SCAN_MAX_DISTANCE = 5.0
@@ -128,28 +129,13 @@ def _foot_contact_forces_ideal() -> ObservationTermCfg:
   )
 
 
-def _tactile_array() -> ObservationTermCfg:
-  # Explicit params, so a change to the sensor model moves the fingerprint.
-  p = TactileParams()
+def _tactile_touch() -> ObservationTermCfg:
+  # The beam task's touch features, the same function every tactile task uses
+  # (``sendg1.common.beam.tactile.touch_features``). Sensor faults live inside
+  # the term (per-taxel and stateful, reset by ``reset_tactile_noise``); one
+  # step of latency on top, as for a sensor read over a bus.
   return ObservationTermCfg(
-    func=tactile_array_obs,
-    params={
-      "layout": p.layout,
-      "rays_per_axis": p.rays_per_axis,
-      "compliance_depth": p.compliance_depth,
-    },
-  )
-
-
-def _tactile_aggregate() -> ObservationTermCfg:
-  p = TactileParams()
-  return ObservationTermCfg(
-    func=tactile_aggregate_obs,
-    params={
-      "layout": p.layout,
-      "rays_per_axis": p.rays_per_axis,
-      "compliance_depth": p.compliance_depth,
-    },
+    func=beam_mdp.tactile_touch_noisy, delay_min_lag=0, delay_max_lag=1
   )
 
 
@@ -265,21 +251,14 @@ TERMS: dict[str, TermSpec] = {
     "a load cell, not a tactile array: no spatial distribution over the sole, "
     "so no centre of pressure and no heel-vs-toe discrimination.",
   ),
-  "tactile_aggregate": TermSpec(
-    _tactile_aggregate,
-    "oracle",
-    "Per-foot net normal force, shear, centre of pressure and shear/normal "
-    "ratio, from the same sole reading as tactile_array. Implied by the array, "
-    "but the ratio -- the foot's distance from its friction cone -- is the "
-    "quantity a slip-aware policy needs, so it is given explicitly.",
-  ),
-  "tactile_array": TermSpec(
-    _tactile_array,
-    "oracle",
-    "Per-taxel normal and 2D shear force on both soles, from the simulated "
-    "contacts via sendg1.common.tactile.model. Oracle until the sensor model "
-    "carries the real array's noise, latency, calibration error and "
-    "saturation; for now it is what a perfect array would read.",
+  # -- sensor ----------------------------------------------------------------
+  "tactile_touch": TermSpec(
+    _tactile_touch,
+    "sensor",
+    "Tactile slipper, per foot: 26-bit taxel touch map, load, CoP, contact "
+    "area, contact flag, from normal load only (a pressure array measures no "
+    "shear); gain error, dead taxels, noise, frame drops, 0-1 step latency. "
+    "The beam task's model, shared by every task.",
   ),
   # -- privileged ------------------------------------------------------------
   "base_lin_vel": TermSpec(

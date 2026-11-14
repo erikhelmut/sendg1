@@ -16,8 +16,8 @@ from sendg1.video import hud, policy_sees_tactile
   [
     ("Sendg1-Velocity-Flat-G1-Blind", False),
     ("Sendg1-Velocity-Flat-G1-ContactOracle", False),
-    ("Sendg1-Velocity-Flat-G1-TactileArray", True),
-    ("Sendg1-BoxPush-G1-TactileArray", True),
+    ("Sendg1-Velocity-Flat-G1-Tactile", True),
+    ("Sendg1-BoxPush-G1-Tactile", True),
     ("G1-Beam-E2E", True),
     ("G1-Beam-Touch-Curved", True),
   ],

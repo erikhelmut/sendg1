@@ -44,11 +44,11 @@ told where the box is.
   the box (99% of episodes), then by falling immediately.
 - **Critic** adds floor mu under each foot, box mass/mu/size, box pose,
   velocity and tilt, sole slip velocities and the push force.
-- **`tactile_array` here also carries 12 aggregate channels**: per foot the net
-  normal force, shear, centre of pressure and the shear/normal ratio -- the
-  foot's distance from its friction cone. Implied by the per-taxel array, but
-  given explicitly so the policy need not learn a division. Actor: 96 + 144 +
-  12 = 252.
+- **Tactile actor** (`Sendg1-BoxPush*-G1-Tactile`): the shared tactile slipper
+  model (`tactile_touch`, [tactile.md](../tactile.md#what-the-actor-sees)),
+  normal load only. Actor: 96 + 62 = 158. Runs before 2026-11-14 used the
+  oracle `tactile_array` (per-taxel normal and shear plus 12 aggregate
+  channels, 252 dims) and are not comparable.
 - **Per-episode log** (`Episode_Metrics/*`; one CSV row per episode in
   evaluation): success, time to target, full-foot slip events (a foot in
   contact whose heel and toe both slide > 0.1 m/s for >= 60 ms), falls split
@@ -68,9 +68,9 @@ told where the box is.
 ```bash
 python scripts/box_push_feasibility.py                 # margins and tipping of the ranges
 python scripts/box_push_video.py --random --episodes 4 # scene check
-python scripts/sweep.py --tasks box_push --obs-sets blind contact_oracle tactile_array --seeds 0 1 2
-python scripts/evaluate_box_push.py --task Sendg1-BoxPush-G1-TactileArray --seed 0
-python scripts/plot_box_push_curves.py runs/box_push__tactile_array/<run> --out curves.png
+python scripts/sweep.py --tasks box_push --obs-sets blind contact_oracle tactile --seeds 0 1 2
+python scripts/evaluate_box_push.py --task Sendg1-BoxPush-G1-Tactile --seed 0
+python scripts/plot_box_push_curves.py runs/box_push__tactile/<run> --out curves.png
 ```
 
 Evaluation (`eval/box_push.py`): floor mu {0.25..0.70} x mass {10..40} kg, 32

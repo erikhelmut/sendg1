@@ -3,7 +3,7 @@
 
     python scripts/tactile_viewer.py                      # blind flat policy, seed 0
     python scripts/tactile_viewer.py --no-policy          # zero actions: stand/sag
-    python scripts/tactile_viewer.py --task Sendg1-Velocity-Flat-G1-TactileArray
+    python scripts/tactile_viewer.py --task Sendg1-Velocity-Flat-G1-Tactile
 
 Writes an MP4 with the robot on the left and both soles on the right: taxel
 colour is normal force, arrows are shear, the dot is the centre of pressure,

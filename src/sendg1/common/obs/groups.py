@@ -15,7 +15,8 @@ Group vocabulary
                   information is deliberately the stable idealised version so
                   that improving tactile fidelity later never perturbs it.
 ``contact_ideal`` Oracle foot contact for the diagnostic set. Actor only.
-``tactile_array`` The modelled taxel array on both soles. Actor only.
+``tactile``       The tactile slipper's touch features (the beam task's sensor
+                  model, shared by every task). Actor only.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ CONTACT_IDEAL_TERMS: tuple[str, ...] = (
   "foot_contact_forces_ideal",
 )
 
-TACTILE_ARRAY_TERMS: tuple[str, ...] = ("tactile_array",)
+TACTILE_TERMS: tuple[str, ...] = ("tactile_touch",)
 
 BOX_PUSH_PERCEIVED_TERMS: tuple[str, ...] = ("pilot_command",)
 """What the box-push actor gets beyond proprioception: the scripted pilot's
@@ -80,7 +81,6 @@ def build_groups(
   has_terrain_scan: bool,
   with_command: bool = True,
   box_push: bool = False,
-  tactile_aggregates: bool = False,
 ) -> dict[str, ObservationGroupCfg]:
   """Build exactly the groups ``obs_set`` needs.
 
@@ -92,19 +92,12 @@ def build_groups(
     with_command: include the operator command in ``proprio``. False for tasks
       that give the robot no velocity command (box pushing).
     box_push: add the box-pushing task's perceived terms to ``proprio`` and its
-      privileged terms to the critic. Implies ``tactile_aggregates``.
-    tactile_aggregates: add the per-foot aggregate channels to the
-      ``tactile_array`` group. On for box pushing and for the low level trained
-      for it, so one policy fits both; off elsewhere, which keeps the flat,
-      and rough tactile actors at the size their results were measured at.
+      privileged terms to the critic.
   """
   if obs_set not in OBS_SETS:
     raise KeyError(f"unknown obs_set {obs_set!r}; known: {sorted(OBS_SETS)}")
   wanted = set(OBS_SETS[obs_set].group_names)
 
-  tactile_terms = TACTILE_ARRAY_TERMS
-  if tactile_aggregates:
-    tactile_terms = tactile_terms + ("tactile_aggregate",)
   proprio = PROPRIO_TERMS
   if not with_command:
     proprio = tuple(t for t in proprio if t != "command")
@@ -115,8 +108,6 @@ def build_groups(
   if box_push:
     proprio = proprio + BOX_PUSH_PERCEIVED_TERMS
     privileged = privileged + BOX_PUSH_PRIVILEGED_TERMS
-    if "tactile_aggregate" not in tactile_terms:
-      tactile_terms = tactile_terms + ("tactile_aggregate",)
 
   builders = {
     "proprio": lambda: ObservationGroupCfg(
@@ -134,9 +125,10 @@ def build_groups(
       concatenate_terms=True,
       enable_corruption=False,
     ),
-    "tactile_array": lambda: ObservationGroupCfg(
-      terms=_terms(tactile_terms),
+    "tactile": lambda: ObservationGroupCfg(
+      terms=_terms(TACTILE_TERMS),
       concatenate_terms=True,
+      # The term models its own sensor faults; the group adds no noise.
       enable_corruption=False,
     ),
   }

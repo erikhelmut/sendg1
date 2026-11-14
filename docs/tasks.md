@@ -8,10 +8,10 @@
 | `Sendg1-Velocity-Rough-G1-Blind` | proprioception only | 96 |
 | `Sendg1-Velocity-Flat-G1-ContactOracle` | + idealised foot contact | 104 |
 | `Sendg1-Velocity-Rough-G1-ContactOracle` | + idealised foot contact | 104 |
-| `Sendg1-Velocity-{Flat,Rough}-G1-TactileArray` | + per-taxel normal & shear | 252 |
-| `Sendg1-BoxPush{,Curriculum,Patches}-G1-Blind` | proprioception, box pose, target | 100 |
-| `Sendg1-BoxPush{,Curriculum,Patches}-G1-ContactOracle` | + idealised foot contact | 108 |
-| `Sendg1-BoxPush{,Curriculum,Patches}-G1-TactileArray` | + per-taxel normal & shear | 256 |
+| `Sendg1-Velocity-{Flat,Rough}-G1-Tactile` | + tactile slipper (`tactile_touch`) | 158 |
+| `Sendg1-BoxPush{,Curriculum,Patches}-G1-Blind` | proprioception, pilot command | 96 |
+| `Sendg1-BoxPush{,Curriculum,Patches}-G1-ContactOracle` | + idealised foot contact | 104 |
+| `Sendg1-BoxPush{,Curriculum,Patches}-G1-Tactile` | + tactile slipper (`tactile_touch`) | 158 |
 
 Because the height scan is gone, flat and rough share a 96-dim actor input
 space: one architecture serves both, and flat->rough transfer stays a
@@ -32,20 +32,22 @@ Defined in `sendg1/common/obs/obs_sets.py` as mappings from rsl_rl observation
 ```python
 "blind":          actor=("proprio",)                  critic=("proprio", "privileged")
 "contact_oracle": actor=("proprio", "contact_ideal")  critic=("proprio", "privileged")
+"tactile":        actor=("proprio", "tactile")        critic=("proprio", "privileged")
 ```
 
 - `proprio` — deployable, 96-dim, actor and critic.
 - `privileged` — critic only, permanently. Holds `base_lin_vel`, `height_scan`,
   unbiased joint positions, and the *idealised* foot contact terms.
 - `contact_ideal` — oracle contact, diagnostic only.
-- `tactile_array` — per-taxel normal and shear force on both soles, actor only.
-  Diagnostic while the sensor model is idealised.
+- `tactile` — the tactile slipper, actor only: the `tactile_touch` term, the
+  same sensor model every task uses ([tactile.md](tactile.md#what-the-actor-sees)).
+  A research set, not diagnostic.
 
-The critic's contact information is deliberately the stable idealised version.
-When `tactile_array` gains a realistic sensor model, the critic is untouched, so
-Phase 1 baselines stay comparable. The tactile sensors are added to a scene only
-for sets that use the group, so every other variant's scene -- and recorded
-fingerprint -- is unchanged.
+The critic's contact information is deliberately the stable idealised version,
+so changes to the tactile sensor model never touch it. The tactile sensors are
+added to a scene only for sets that use the group; the sensor-fault reset event
+(`tactile_faults`) is in every set's events, so the sets differ in the actor's
+input alone.
 
 ## Adding things
 

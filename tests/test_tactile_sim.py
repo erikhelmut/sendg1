@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-TASK = "Sendg1-Velocity-Flat-G1-TactileArray"
+TASK = "Sendg1-Velocity-Flat-G1-Tactile"
 NUM_ENVS = 16
 
 
@@ -50,7 +50,7 @@ def rollout():
       )
       steps.append(
         {
-          "obs": obs["tactile_array"].clone(),
+          "obs": obs["tactile"].clone(),
           "reading": reading,
           "quat": robot.data.body_link_quat_w[:, ids].clone(),
           "raw_net": torch.stack([raw_net_force("left"), raw_net_force("right")], 1),
@@ -64,7 +64,7 @@ def rollout():
 @pytest.mark.slow
 def test_observation_shape_and_finite(rollout) -> None:
   for step in rollout:
-    assert step["obs"].shape == (NUM_ENVS, 156)
+    assert step["obs"].shape == (NUM_ENVS, 62)
     assert torch.isfinite(step["obs"]).all()
 
 

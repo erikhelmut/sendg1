@@ -162,9 +162,25 @@ def test_diagnostic_sets_are_flagged_and_not_default() -> None:
   assert "contact_oracle" in OBS_SETS
   assert OBS_SETS["contact_oracle"].diagnostic
   assert "contact_oracle" not in research_obs_sets()
-  # Diagnostic until the sensor model carries the real array's imperfections.
-  assert OBS_SETS["tactile_array"].diagnostic
-  assert "tactile_array" not in research_obs_sets()
+  # The tactile set is a research claim: its sensor model carries the real
+  # slipper's faults and reads normal load only.
+  assert not OBS_SETS["tactile"].diagnostic
+  assert "tactile" in research_obs_sets()
+
+
+def test_every_tactile_actor_uses_the_shared_sensor_model() -> None:
+  """One tactile model for every task: the tactile set's actor reads exactly
+  the beam task's ``tactile_touch`` term, built from the same function."""
+  from sendg1.common.beam import mdp as beam_mdp
+  from sendg1.common.beam.terms import TERMS as BEAM_TERMS
+
+  assert TERMS["tactile_touch"].availability == "sensor"
+  ours, beams = TERMS["tactile_touch"].build(), BEAM_TERMS["tactile_touch"].build()
+  assert ours.func is beams.func is beam_mdp.tactile_touch_noisy
+  assert (ours.delay_min_lag, ours.delay_max_lag) == (beams.delay_min_lag, beams.delay_max_lag)
+  for task_id, (_, obs_set) in variants().items():
+    if obs_set == "tactile":
+      assert _actor_terms(task_id)["tactile"] == ["tactile_touch"], task_id
 
 
 # ---------------------------------------------------------------------------

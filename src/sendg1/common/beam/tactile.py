@@ -98,6 +98,12 @@ STRENGTH_RANGE = (0.3, 1.0)
 """Noise strength at the lowest and at the highest curriculum level."""
 
 
+FIXED_STRENGTH = 0.5
+"""Noise strength for tasks without a difficulty curriculum to grow it with
+(velocity, box push, pedalo, rolling cylinder, slackline): half way between
+the beam's lowest and highest level."""
+
+
 def noise_strength(level: torch.Tensor, num_levels: int) -> torch.Tensor:
   lo, hi = STRENGTH_RANGE
   return lo + (hi - lo) * level.float() / max(num_levels - 1, 1)
@@ -279,3 +285,15 @@ class TactileNoiseState:
     noisy = torch.where(drop[..., None], self.prev, noisy)
     self.prev = noisy.detach().clone()
     return noisy
+
+
+def reset_tactile_noise(
+  env: ManagerBasedRlEnv, env_ids: torch.Tensor | None, strength: float = FIXED_STRENGTH
+) -> None:
+  """Reset event: resample the sensor faults at a fixed strength. In every
+  observation set's events, blind ones included, so the sets differ in the
+  actor's input alone; without a tactile actor it only draws numbers."""
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  st = TactileNoiseState.get(env, LAYOUTS[TactileParams().layout])
+  st.resample(env_ids, torch.full((len(env_ids),), strength, device=env.device))

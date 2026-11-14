@@ -2,9 +2,9 @@
 """Compare two box-push grid evaluations cell by cell.
 
     python scripts/compare_box_push_grids.py \
-        results/it4000/box_push__tactile_array/box_push_grid_seed0.json \
+        results/it4000/box_push__tactile/box_push_grid_seed0.json \
         results/it4000/box_push__blind/box_push_grid_seed0.json \
-        --labels tactile_array blind --out results/compare.png
+        --labels tactile blind --out results/compare.png
 
 Both runs must use the same protocol, so every cell holds the same pinned
 episodes. Left/middle: the metric per condition, one blue ramp. Right: the

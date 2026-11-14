@@ -30,33 +30,23 @@ BASE_ACTOR_DIM = {
 EXTRA_ACTOR_DIM = {
   "blind": 0,
   "contact_oracle": 8,
-  # 2 feet x 26 taxels (slipper_v1) x (normal, shear_x, shear_y).
-  "tactile_array": 156,
+  # 2 feet x (26 touch bits (slipper_v1), load, CoP x/y, area, contact):
+  # the beam task's tactile_touch.
+  "tactile": 62,
 }
-
-
-BOX_PUSH_TACTILE_EXTRA = 12
-"""The per-foot aggregate channels (normal, shear x/y, CoP x/y, shear/normal
-ratio). Carried by box pushing and by the low level trained for it, so one
-policy fits both; not by flat/rough, whose results predate them."""
-
-AGGREGATE_BASES = ("Sendg1-BoxPush", "Sendg1-VelocityPush")
 
 
 def _expected_actor_dim(task_id: str) -> int:
   base_id, obs_set = variants()[task_id]
-  extra = EXTRA_ACTOR_DIM[obs_set]
-  if base_id.startswith(AGGREGATE_BASES) and obs_set == "tactile_array":
-    extra += BOX_PUSH_TACTILE_EXTRA
-  return BASE_ACTOR_DIM[base_id] + extra
+  return BASE_ACTOR_DIM[base_id] + EXTRA_ACTOR_DIM[obs_set]
 
 
 def test_low_level_actor_matches_box_push_actor() -> None:
   """The point of Sendg1-VelocityPush: a policy trained there drops straight
   into box pushing, so the two actors must have identical dimensions."""
-  for obs_set in ("blind", "contact_oracle", "tactile_array"):
+  for obs_set in ("blind", "contact_oracle", "tactile"):
     slug = {"blind": "Blind", "contact_oracle": "ContactOracle",
-            "tactile_array": "TactileArray"}[obs_set]
+            "tactile": "Tactile"}[obs_set]
     assert _expected_actor_dim(f"Sendg1-VelocityPush-G1-{slug}") == _expected_actor_dim(
       f"Sendg1-BoxPush-G1-{slug}"
     ), obs_set
@@ -67,7 +57,7 @@ def test_expected_variants_registered() -> None:
   expected = {
     f"{base_id}-{slug}"
     for base_id in BASE_ACTOR_DIM
-    for slug in ("Blind", "ContactOracle", "TactileArray")
+    for slug in ("Blind", "ContactOracle", "Tactile")
   }
   assert registered == expected
 

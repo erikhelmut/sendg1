@@ -39,7 +39,7 @@ from sendg1.common.hand_forces import (
   reset_hand_forces,
 )
 from sendg1.common.obs.groups import build_groups
-from sendg1.common.obs.obs_sets import uses_tactile_array
+from sendg1.common.obs.obs_sets import uses_tactile
 from sendg1.common.rewards import build_rewards
 from sendg1.common.robots.g1 import (
   DofSet,
@@ -109,7 +109,7 @@ def make_g1_velocity_env_cfg(
   sensors = [foot_height_sensor(), feet_ground_contact_sensor(), self_collision_sensor()]
   if has_terrain_scan:
     sensors.insert(0, terrain_scan_sensor())
-  if uses_tactile_array(obs_set):
+  if uses_tactile(obs_set):
     sensors.extend(tactile_scene_sensors())
   cfg.scene.sensors = tuple(sensors)
 
@@ -137,14 +137,9 @@ def make_g1_velocity_env_cfg(
   # -- observations --------------------------------------------------------
   # The actor is blind and deployable-only; the critic is identical across
   # every observation set. Enforced by tests/test_actor_allowlist.py.
-  # A low level trained for box pushing must observe what the box-push policy
-  # observes, or it cannot be dropped into that task: same tactile channels,
-  # same 252-dim actor. Plain flat/rough keep their 240.
-  cfg.observations = build_groups(
-    obs_set,
-    has_terrain_scan=has_terrain_scan,
-    tactile_aggregates=hand_forces is not None,
-  )
+  # A low level trained for box pushing observes what the box-push policy
+  # observes (same proprio size, same tactile term), so it drops into that task.
+  cfg.observations = build_groups(obs_set, has_terrain_scan=has_terrain_scan)
 
   # -- actions -------------------------------------------------------------
   cfg.actions = {

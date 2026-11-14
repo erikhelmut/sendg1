@@ -2,8 +2,8 @@
 
 The height scans and ground-contact sensors serve the critic and the reward
 terms; the policies in this study are blind. The tactile sensors at the bottom
-feed only the ``tactile_array`` observation group, and are added to a scene only
-when its observation set uses that group.
+feed the tactile slipper model (``sendg1.common.tactile``); the velocity and
+box-push tasks add them only when the observation set has a ``tactile`` group.
 """
 
 from __future__ import annotations

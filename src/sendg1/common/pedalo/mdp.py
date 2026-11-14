@@ -55,7 +55,7 @@ FOOT_GROUND_SENSOR = "feet_ground_contact"
 
 SETTLE_S = 0.3
 """The robot is spawned a few cm above the higher board; contact terms wait."""
-TACTILE_NOISE_STRENGTH = 0.5
+TACTILE_NOISE_STRENGTH = tac.FIXED_STRENGTH
 """Sensor faults (``beam.tactile.TactileNoiseCfg``) at half the beam task's
 top-level strength: no curriculum yet to grow them."""
 

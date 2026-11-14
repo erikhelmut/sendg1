@@ -85,7 +85,7 @@ SPAWN_ALONG = (-1.2, 0.3)
 """Spawn point along the line (m from mid-span, in the robot's direction):
 from 0.8 m after the first anchor to just past mid-span, so a walking episode
 has 1-2.5 m of line ahead before ``END_MARGIN``."""
-TACTILE_NOISE_STRENGTH = 0.5
+TACTILE_NOISE_STRENGTH = tac.FIXED_STRENGTH
 """Sensor faults at half the beam task's top level, as on the cylinder and
 the pedalo: no curriculum yet to grow them."""
 BODY_WEIGHT_N = 343.0

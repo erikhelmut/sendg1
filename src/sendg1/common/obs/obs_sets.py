@@ -65,15 +65,14 @@ OBS_SETS: dict[str, ObsSet] = {
       "explicitly; never included in a default sweep."
     ),
   ),
-  "tactile_array": ObsSet(
-    actor=("proprio", "tactile_array"),
+  "tactile": ObsSet(
+    actor=("proprio", "tactile"),
     critic=_CRITIC,
-    diagnostic=True,
     description=(
-      "Adds per-taxel normal and shear force on both soles to the actor. "
-      "Diagnostic while the sensor model is idealised (no "
-      "noise, latency or calibration error): it measures what spatially "
-      "resolved sole contact could add over contact_oracle's net force."
+      "Adds the tactile slipper to the actor: per foot a 26-bit taxel touch "
+      "map, load, centre of pressure, contact area and contact flag, from the "
+      "sensor model every task shares (sendg1.common.beam.tactile: gain "
+      "error, dead taxels, noise, frame drops, latency; normal load only)."
     ),
   ),
 }
@@ -90,7 +89,8 @@ def diagnostic_obs_sets() -> tuple[str, ...]:
   return tuple(name for name, s in OBS_SETS.items() if s.diagnostic)
 
 
-def uses_tactile_array(obs_set: str) -> bool:
+def uses_tactile(obs_set: str) -> bool:
   """Whether the scene needs the tactile sensors for this set. Other sets skip
-  them, which keeps their scenes -- and recorded fingerprints -- unchanged."""
-  return "tactile_array" in OBS_SETS[obs_set].group_names
+  them: the sensors only feed the actor's ``tactile`` group, and the rays cost
+  time on every step."""
+  return "tactile" in OBS_SETS[obs_set].group_names
