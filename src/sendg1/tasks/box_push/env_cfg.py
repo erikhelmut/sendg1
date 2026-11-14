@@ -245,6 +245,7 @@ def build_box_push_events(
   # about: the floor and patches outrank them (see params.py). Randomising it
   # would be inert, so it is removed rather than left to mislead.
   events.pop("foot_friction")
+  events[box_mdp.FIELDS_EVENT] = EventTermCfg(func=box_mdp.box_push_fields, mode="startup")
   events[box_mdp.RESET_EVENT] = EventTermCfg(
     func=box_mdp.box_push_reset,
     mode="reset",

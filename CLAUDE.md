@@ -8,7 +8,7 @@ breaks the study. Background is in `docs/`; start with
 
 ## Running things
 
-- Python env: uv, locked in `uv.lock` (Python 3.11, torch cu128). Install with
+- Python env: uv, locked in `uv.lock` (Python 3.11, torch cu130). Install with
   `uv sync --frozen --extra dev`; run with `uv run ...`. Never re-lock or
   upgrade a package as a side effect; version changes are deliberate and
   committed with `uv.lock`.
@@ -19,8 +19,10 @@ breaks the study. Background is in `docs/`; start with
 - Training: mjlab's `train <task-id>`, or `scripts/sweep.py` for
   (task x observation-set x seed) grids. Output goes to `runs/` (gitignored);
   evaluation JSON goes to `results/` and is committed.
-- mjlab is pinned to 1.6.0 (and rsl-rl to 5.4.2) in `pyproject.toml` too, so
-  even an unlocked install cannot move them (`src/sendg1/_pin.py`).
+- mjlab is pinned to an exact commit of its main branch (`1b5c91c`, the first
+  with MuJoCo 4; no release has it yet, and it still reports 1.6.0), and rsl-rl
+  to 5.5.2, in `pyproject.toml` too, so even an unlocked install cannot move
+  them. `src/sendg1/_pin.py` checks the installed commit at import.
 
 ## Rules that tests enforce
 

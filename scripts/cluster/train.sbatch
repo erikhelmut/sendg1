@@ -3,7 +3,7 @@
 #SBATCH --partition=main
 #SBATCH --gres=gpu:1
 #SBATCH --constraint=vram24gb
-# The V100s (sm_70) are not in the cu128 torch build.
+# The V100s (sm_70) are not in the cu130 torch build.
 #SBATCH --exclude=dgx-station
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G

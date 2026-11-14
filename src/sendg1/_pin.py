@@ -20,22 +20,37 @@ Upgrading mjlab is allowed. It is a deliberate act with a checklist:
   3. re-run every baseline whose fingerprint moved.
 """
 
-from importlib.metadata import version
+import json
+from importlib.metadata import distribution, version
 
 MJLAB_VERSION = "1.6.0"
-MJLAB_COMMIT = "0fb8a681136be94ffc636a3dd423cabb97d91f10"
-"""github.com/mujocolab/mjlab tag v1.6.0. The PyPI wheel embeds no SHA; this was
-resolved from the GitHub tags API and is recorded for provenance only."""
+MJLAB_COMMIT = "1b5c91c923ee4bc4159f3dce9cc85b52f88b6bd5"
+"""github.com/mujocolab/mjlab main of 2026-11-13, the first with MuJoCo 4
+(mujoco-core / mujoco-warp 4.0.1, torch >= 2.14, rsl-rl 5.5.2). No release has
+it yet and the package still reports 1.6.0, so the version alone no longer
+identifies the code: the commit is checked too (the 1.6.0 release was 0fb8a68)."""
+
+
+def installed_mjlab_commit() -> str | None:
+  """The commit a git install of mjlab came from (PEP 610 direct_url.json), or
+  None for an install from a wheel or sdist."""
+  raw = distribution("mjlab").read_text("direct_url.json")
+  if raw is None:
+    return None
+  return json.loads(raw).get("vcs_info", {}).get("commit_id")
 
 
 def check_mjlab_version(strict: bool = True) -> str:
-  """Verify the installed mjlab matches the pin. Returns the installed version."""
+  """Verify the installed mjlab matches the pin (version and commit). Returns the
+  installed version."""
   installed = version("mjlab")
-  if installed != MJLAB_VERSION and strict:
+  commit = installed_mjlab_commit()
+  if (installed != MJLAB_VERSION or commit != MJLAB_COMMIT) and strict:
     raise RuntimeError(
-      f"sendg1 is pinned to mjlab=={MJLAB_VERSION} but found {installed}.\n"
+      f"sendg1 is pinned to mjlab {MJLAB_VERSION} at commit {MJLAB_COMMIT[:7]} but "
+      f"found {installed} at {commit[:7] if commit else 'no recorded commit'}.\n"
       "Results are not comparable across mjlab versions. Either reinstall the "
-      f"pinned version (`pip install mjlab=={MJLAB_VERSION}`) or, if the upgrade "
-      "is intentional, follow the checklist in src/sendg1/_pin.py."
+      "pinned version (`uv sync --frozen`) or, if the upgrade is intentional, "
+      "follow the checklist in src/sendg1/_pin.py."
     )
   return installed

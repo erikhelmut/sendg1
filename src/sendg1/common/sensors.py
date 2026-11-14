@@ -168,8 +168,8 @@ def sole_contact_sensor(secondary: ContactMatch | None = TERRAIN_MATCH) -> Conta
 class _GeomOnlyRayCastSensor(RayCastSensor):
   """Casts without the render context's BVH. mujoco_warp 3.11's BVH ray kernel
   reads out of bounds when the model has a flex (its geom and flex leaves are
-  laid out with different strides); the plain kernel tests geoms only, which
-  is all the taxel rays need."""
+  laid out with different strides; not re-checked on 4.0); the plain kernel
+  tests geoms only, which is all the taxel rays need."""
 
   def raycast_kernel(self, rc) -> None:
     rays(

@@ -136,7 +136,7 @@ def test_contact_friction_takes_the_sampled_values() -> None:
 
 @pytest.mark.slow
 def test_analytic_constants_match_set_const() -> None:
-  from mjlab.managers.event_manager import RecomputeLevel
+  from mujoco_warp import SetConstGroup
 
   from sendg1.common.box_push.mdp import BoxPushState
 
@@ -146,7 +146,7 @@ def test_analytic_constants_match_set_const() -> None:
     m = env.sim.model
     fields = ("body_invweight0", "dof_invweight0", "body_subtreemass")
     ours = {f: getattr(m, f).clone() for f in fields}
-    env.sim.recompute_constants(RecomputeLevel.set_const)
+    env.sim.recompute_constants(SetConstGroup.ALL)
     for f in fields:
       theirs = torch.as_tensor(getattr(m, f)[:])
       torch.testing.assert_close(ours[f], theirs, rtol=1e-5, atol=1e-5)

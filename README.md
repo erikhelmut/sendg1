@@ -35,8 +35,8 @@ Every result here is a paired comparison: a baseline policy and a
 tactile-augmented policy, same task, same seeds, same evaluation protocol. The
 unit of work is **(task x observation-set x seed)**.
 
-Built on [mjlab](https://github.com/mujocolab/mjlab), pinned to **1.6.0**
-(commit `0fb8a681`).
+Built on [mjlab](https://github.com/mujocolab/mjlab), pinned to commit
+`1b5c91c` of its main branch (MuJoCo 4.0; no release has it yet).
 
 ## Status
 

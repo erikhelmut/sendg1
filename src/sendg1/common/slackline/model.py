@@ -202,7 +202,6 @@ def _add_flex(spec: mujoco.MjSpec, surface: str, width: float, stiff: bool) -> N
   f.conaffinity = CONAFFINITY
   f.friction = (FRICTION, 0.005, 0.0001)
   f.selfcollide = mujoco.mjtFlexSelf.mjFLEXSELF_NONE
-  f.internal = False
   f.young = 0.0  # the string's springs are the tendons below; the flex is a skin
   f.rgba = WEBBING_RGBA
   f.group = 0

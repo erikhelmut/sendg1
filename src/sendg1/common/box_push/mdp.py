@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import mujoco
 import torch
-from mjlab.managers.event_manager import RecomputeLevel, requires_model_fields
+from mjlab.managers.event_manager import requires_model_fields
 from mjlab.utils.lab_api.math import (
   matrix_from_quat,
   quat_apply,
@@ -392,6 +392,9 @@ def _uniform(lo_hi: tuple[float, float], n: int, device) -> torch.Tensor:
   return lo + (hi - lo) * torch.rand(n, device=device)
 
 
+FIELDS_EVENT = "box_push_fields"
+
+
 @requires_model_fields(
   "geom_size",
   "geom_rbound",
@@ -403,8 +406,15 @@ def _uniform(lo_hi: tuple[float, float], n: int, device) -> torch.Tensor:
   "body_invweight0",
   "dof_invweight0",
   "body_subtreemass",
-  recompute=RecomputeLevel.none,
 )
+def box_push_fields(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) -> None:
+  """Event (mode="startup"), a no-op: declares the model fields ``box_push_reset``
+  writes, so mjlab gives every world its own copy. mjlab (since its MuJoCo 4
+  update) runs set_const after any event that declares fields, with no opt-out;
+  declared on the reset event, that would recompute every world at every reset
+  (2.4x slower collection, see below). Here it runs once, at startup."""
+
+
 def box_push_reset(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,

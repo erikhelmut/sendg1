@@ -38,7 +38,7 @@ Then evaluate and render videos here, from the fetched checkpoints.
 - `submit.sh` passes its arguments to mjlab's `train` unchanged. Default
   resources (`train.sbatch`): one GPU with at least 24 GB (RTX 3090, A5000, A6000,
   RTX 6000 Ada), 8 CPUs, 32 GB, 24 h; the V100 node is excluded because the
-  cu128 torch build does not support it. Override with
+  cu130 torch build does not support it (sm_70). cu130 needs driver >= 580. Override with
   `--sbatch "--time=3-00:00:00"`. A `--video` argument is refused.
 - `fetch.sh` copies only files newer than the local copy and skips `*.mp4`.
 - wandb is logged in on the cluster; runs land in the same project.

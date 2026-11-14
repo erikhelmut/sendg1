@@ -7,18 +7,21 @@ dependencies = [
   # Pinned EXACTLY. mjlab ships breaking changes between minor releases, and this
   # study compares runs made months apart. Upgrading is a deliberate, versioned act
   # that invalidates prior results: see docs in src/sendg1/_pin.py.
-  "mjlab==1.6.0",
+  # No release supports MuJoCo 4 yet: pinned to an exact commit of mjlab's main,
+  # which still calls itself 1.6.0 (so _pin.py checks the commit, not the version).
+  "mjlab @ git+https://github.com/mujocolab/mjlab@1b5c91c923ee4bc4159f3dce9cc85b52f88b6bd5",
   # Pinned transitively by mjlab today, pinned again here so an mjlab bump cannot
   # silently swap the PPO implementation underneath a running study.
-  "rsl-rl-lib==5.4.2",
+  "rsl-rl-lib==5.5.2",
   # rsl-rl 5.4.2 calls wandb.Settings(start_method="thread"); wandb 0.29 turned
   # Settings into a pydantic model that rejects the removed field, so training
   # dies at the first log write. mjlab 1.6.0 declares only "wandb>=0.22.3" and
   # so installs the broken version; mjlab's main branch has since added the same
   # upper bound we set here.
   "wandb>=0.22.3,<0.29",
-  # Direct only so uv can take it from the CUDA 12.8 index ([tool.uv.sources]);
-  # the RTX 50 series (sm_120) needs a cu128 build. uv.lock fixes the version.
+  # Direct only so uv can take it from the CUDA 13.0 index ([tool.uv.sources]);
+  # the RTX 50 series (sm_120) needs CUDA >= 12.8, and torch >= 2.14 (mjlab main)
+  # ships no cu128 build. Needs driver >= 580. uv.lock fixes the version.
   "torch",
 ]
 
@@ -37,16 +40,20 @@ sendg1 = "sendg1.tasks"
 environments = ["sys_platform == 'linux'"]
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cu128" }
+torch = { index = "pytorch-cu130" }
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# mjlab is a git commit (no MuJoCo 4 release yet).
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sendg1"]
