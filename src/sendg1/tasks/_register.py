@@ -60,13 +60,6 @@ def assert_actor_is_legal(
           f"{term_name!r}. The actor may only observe quantities available on "
           f"the real blind G1. Rationale on record: {spec.rationale}"
         )
-      if spec.availability == "oracle" and not obs_set.diagnostic:
-        raise ValueError(
-          f"{task_id}: actor group {group_name!r} contains ORACLE term "
-          f"{term_name!r}, but obs_set {obs_set_name!r} is not marked "
-          "diagnostic. Oracle terms are idealised and do not describe a "
-          "deployable policy."
-        )
 
 
 def register_variants(

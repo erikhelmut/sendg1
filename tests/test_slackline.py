@@ -25,7 +25,7 @@ from sendg1.tasks.slackline import BLIND_TASK, TOUCH_TASK, assert_actor_is_deplo
 
 TASKS = (TOUCH_TASK, BLIND_TASK)
 BLIND_ACTOR_DIM = 3 + 3 + 29 + 29 + 29 + 1
-TOUCH_ACTOR_DIM = BLIND_ACTOR_DIM + 2 * 31
+TOUCH_ACTOR_DIM = BLIND_ACTOR_DIM + 2 * 29  # 26 touch bits, load, CoP x/y
 
 
 def _line_with_load(mass: float, x: float = 0.0) -> tuple[mujoco.MjModel, mujoco.MjData]:

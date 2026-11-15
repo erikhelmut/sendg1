@@ -76,8 +76,6 @@ def _badge(env_cfg, rl_cfg) -> str:
   funcs = _actor_term_funcs(env_cfg, rl_cfg)
   if any("tactile" in n for n in funcs):
     return "TACTILE"
-  if "foot_contact" in funcs:
-    return "CONTACT ORACLE"
   return "BLIND"
 
 

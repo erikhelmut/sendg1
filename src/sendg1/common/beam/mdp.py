@@ -112,8 +112,8 @@ FOOT_BELOW_TOP_TOL = 0.03
 FOOT_OFF_TERMINATE_TOL = 0.10
 """A sole contact this far below the top ends the episode: the foot has dropped
 off the beam (the ground is 0.15-0.30 m down). Brushing a side face higher up is
-only penalised (``foot_side_contact``) and can be recovered from; ending those
-episodes at 3 cm never let a policy learn to."""
+not an episode end and can be recovered from; ending those episodes at 3 cm
+never let a policy learn to."""
 
 TACTILE = TactileParams()
 
@@ -346,20 +346,6 @@ class DelayedJointPositionActionCfg(JointPositionActionCfg):
 # ---------------------------------------------------------------------------
 # Observations
 # ---------------------------------------------------------------------------
-
-
-def tactile_map_noisy(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """The actor's tactile input: faulted sensor, per-taxel contact map
-  (``tactile.features_from_normals``)."""
-  layout = LAYOUTS[TACTILE.layout]
-  normal = tac.canonical_normals(env, TACTILE)
-  noisy = tac.TactileNoiseState.get(env, layout).apply(normal)
-  return tac.features_from_normals(noisy, layout, contact_map=True)
-
-
-def tactile_map_clean(env: ManagerBasedRlEnv) -> torch.Tensor:
-  layout = LAYOUTS[TACTILE.layout]
-  return tac.features_from_normals(tac.canonical_normals(env, TACTILE), layout, contact_map=True)
 
 
 def tactile_touch_noisy(env: ManagerBasedRlEnv) -> torch.Tensor:
@@ -836,72 +822,6 @@ def reach_end_bonus(env: ManagerBasedRlEnv) -> torch.Tensor:
   return ep.new_reach.float() / env.step_dt
 
 
-# -- reward variants (env_cfg.REWARD_VARIANTS): stepping instead of skating ---
-
-
-def stance_slip(env: ManagerBasedRlEnv, command_threshold: float = 0.05) -> torch.Tensor:
-  """Sum over feet in contact of |v_xy| of the foot site, while walking is
-  commanded. Linear, unlike mjlab's ``feet_slip`` (|v|^2): a skating gait
-  slides at about the walking speed, ~0.3 m/s, where the square is ~10x
-  smaller and the first touch-MLP run kept skating (~1.3-2 m of slide per
-  metre walked)."""
-  ep = BeamEpisode.get(env)
-  v = _robot(env).data.site_lin_vel_w[:, ep._foot_sites, :2].norm(dim=-1)
-  r = (v * _feet_in_contact(env).float()).sum(-1)
-  return r * (_forward_cmd(env) > command_threshold).float()
-
-
-def swing_clearance(
-  env: ManagerBasedRlEnv,
-  target_height: float = 0.05,
-  max_gain: float = 0.3,
-  min_air_time: float = 0.1,
-  command_threshold: float = 0.05,
-) -> torch.Tensor:
-  """Metres gained by lifted steps. At each touchdown after at least
-  ``min_air_time`` in the air: min(apex / target_height, 1) x the new ground
-  the landing foot takes beyond the furthest touchdown of the episode so far
-  (clipped to ``max_gain``), apex the foot site's highest point above its
-  lift-off height. Divided by step_dt, so the weight is the reward per metre
-  walked with full clearance. Paid per metre gained like ``feet_in_line``:
-  tapping, stepping in place and scissoring forward and back gain nothing, and
-  a skating gait (no swing) earns nothing at all."""
-  ep = BeamEpisode.get(env)
-  contact = _feet_in_contact(env)
-  z = _robot(env).data.site_pos_w[:, ep._foot_sites, 2]
-  arc = ep.feet_proj().arc
-  st = getattr(env, "_beam_clear", None)
-  if st is None:
-    st = {
-      "c": contact.clone(),
-      "lift_z": z.clone(),
-      "apex": torch.zeros_like(z),
-      "air": torch.zeros_like(z),
-      "frontier": arc.max(-1).values.clone(),
-    }
-    env._beam_clear = st
-  fresh = env.episode_length_buf <= 1
-  st["c"][fresh] = contact[fresh]
-  st["lift_z"][fresh] = z[fresh]
-  st["apex"][fresh] = 0.0
-  st["air"][fresh] = 0.0
-  st["frontier"][fresh] = arc[fresh].max(-1).values
-  off = st["c"] & ~contact
-  on = ~st["c"] & contact
-  st["lift_z"] = torch.where(off, z, st["lift_z"])
-  st["apex"] = torch.where(off, torch.zeros_like(z), torch.maximum(st["apex"], z - st["lift_z"]))
-  st["air"] = torch.where(contact, st["air"], st["air"] + env.step_dt)
-  step = on & (st["air"] >= min_air_time)
-  gained = (arc - st["frontier"][:, None]).clamp(0.0, max_gain)
-  clear = (st["apex"] / target_height).clamp(max=1.0)
-  r = (clear * gained * step.float()).sum(-1)
-  landed = torch.where(on, arc, torch.full_like(arc, -1e9)).max(-1).values
-  st["frontier"] = torch.maximum(st["frontier"], landed)
-  st["air"] = torch.where(contact, torch.zeros_like(z), st["air"])
-  st["c"] = contact.clone()
-  return r * (_forward_cmd(env) > command_threshold).float() / env.step_dt
-
-
 # ---------------------------------------------------------------------------
 # Terminations
 # ---------------------------------------------------------------------------
@@ -917,12 +837,6 @@ def foot_off_support(env: ManagerBasedRlEnv, tol: float = FOOT_BELOW_TOP_TOL) ->
   valid = data.normal.view(b, -1, 3).norm(dim=-1) > 1e-8
   low = pos[..., 2] < BeamGeometry.get(env).top_z()[:, None] - tol
   return (low & valid).any(dim=-1)
-
-
-def foot_side_contact(env: ManagerBasedRlEnv, tol: float = FOOT_BELOW_TOP_TOL) -> torch.Tensor:
-  """1 while a sole touches a beam side face (any contact ``tol`` below the
-  top), the cost that replaces ending the episode for it."""
-  return foot_off_support(env, tol).float()
 
 
 def finished(env: ManagerBasedRlEnv, hold_s: float = FINISH_HOLD_S) -> torch.Tensor:

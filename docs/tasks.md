@@ -6,12 +6,10 @@
 |---|---|---|
 | `Sendg1-Velocity-Flat-G1-Blind` | proprioception only | 96 |
 | `Sendg1-Velocity-Rough-G1-Blind` | proprioception only | 96 |
-| `Sendg1-Velocity-Flat-G1-ContactOracle` | + idealised foot contact | 104 |
-| `Sendg1-Velocity-Rough-G1-ContactOracle` | + idealised foot contact | 104 |
-| `Sendg1-Velocity-{Flat,Rough}-G1-Tactile` | + tactile slipper (`tactile_touch`) | 158 |
+| `Sendg1-Velocity-{Flat,Rough}-G1-Tactile` | + tactile slipper (`tactile_touch`) | 154 |
+| `Sendg1-VelocityPush-G1-{Blind,Tactile}` | as flat velocity, plus a hand-force curriculum | 96 / 154 |
 | `Sendg1-BoxPush{,Curriculum,Patches}-G1-Blind` | proprioception, pilot command | 96 |
-| `Sendg1-BoxPush{,Curriculum,Patches}-G1-ContactOracle` | + idealised foot contact | 104 |
-| `Sendg1-BoxPush{,Curriculum,Patches}-G1-Tactile` | + tactile slipper (`tactile_touch`) | 158 |
+| `Sendg1-BoxPush{,Curriculum,Patches}-G1-Tactile` | + tactile slipper (`tactile_touch`) | 154 |
 
 Because the height scan is gone, flat and rough share a 96-dim actor input
 space: one architecture serves both, and flat->rough transfer stays a
@@ -30,18 +28,18 @@ Defined in `sendg1/common/obs/obs_sets.py` as mappings from rsl_rl observation
 *sets* to our named *groups*:
 
 ```python
-"blind":          actor=("proprio",)                  critic=("proprio", "privileged")
-"contact_oracle": actor=("proprio", "contact_ideal")  critic=("proprio", "privileged")
-"tactile":        actor=("proprio", "tactile")        critic=("proprio", "privileged")
+"blind":   actor=("proprio",)            critic=("proprio", "privileged")
+"tactile": actor=("proprio", "tactile")  critic=("proprio", "privileged")
 ```
 
 - `proprio` — deployable, 96-dim, actor and critic.
 - `privileged` — critic only, permanently. Holds `base_lin_vel`, `height_scan`,
   unbiased joint positions, and the *idealised* foot contact terms.
-- `contact_ideal` — oracle contact, diagnostic only.
 - `tactile` — the tactile slipper, actor only: the `tactile_touch` term, the
   same sensor model every task uses ([tactile.md](tactile.md#what-the-actor-sees)).
-  A research set, not diagnostic.
+
+A third, diagnostic `contact_oracle` set (noiseless foot contact in the actor)
+was removed on 2026-11-15.
 
 The critic's contact information is deliberately the stable idealised version,
 so changes to the tactile sensor model never touch it. The tactile sensors are

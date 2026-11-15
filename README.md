@@ -69,7 +69,7 @@ uv run python scripts/sweep.py --dry-run
 - [Install](docs/install.md): environment, first runs, known issues
 - [Cluster](docs/cluster.md): training on the IAS cluster, results back here
 - [Tasks](docs/tasks.md): registered tasks and observation sets
-- [Tactile sole](docs/tactile.md): layout, sensor model, what the actor sees, the contact oracle
+- [Tactile sole](docs/tactile.md): layout, slipper, sensor model, what the actor sees
 - [Beam walking](docs/experiments/beam.md),
   [box pushing](docs/experiments/box-push.md),
   [pedalo](src/sendg1/tasks/pedalo/__init__.py),

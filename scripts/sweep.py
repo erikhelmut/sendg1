@@ -6,10 +6,6 @@
 
     # the real thing
     python scripts/sweep.py --tasks flat --seeds 0 --max-iterations 3000
-
-Diagnostic observation sets (contact_oracle) are NEVER included unless named
-explicitly with --obs-sets, because their results are not claims about a
-deployable policy.
 """
 
 from __future__ import annotations
@@ -40,7 +36,7 @@ def main() -> None:
     "--obs-sets",
     nargs="+",
     default=None,
-    help=f"default: {list(research_obs_sets())}; diagnostic sets must be named",
+    help=f"default: {list(research_obs_sets())}",
   )
   ap.add_argument("--seeds", nargs="+", type=int, default=[0])
   ap.add_argument("--max-iterations", type=int, default=None)
@@ -55,11 +51,6 @@ def main() -> None:
   for name in obs_sets:
     if name not in OBS_SETS:
       sys.exit(f"unknown obs set {name!r}; known: {sorted(OBS_SETS)}")
-    if OBS_SETS[name].diagnostic:
-      print(
-        f"[sweep] NOTE: {name!r} is a DIAGNOSTIC set. Its actor sees idealised "
-        "signals; results are an upper bound, not a deployable policy."
-      )
 
   if len(args.seeds) == 1:
     print(

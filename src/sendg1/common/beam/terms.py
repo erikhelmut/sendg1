@@ -72,13 +72,9 @@ def _plain(func, noise=None) -> Callable[[], ObservationTermCfg]:
   return lambda: ObservationTermCfg(func=func, noise=noise)
 
 
-def _tactile_map_noisy() -> ObservationTermCfg:
+def _tactile_touch_noisy() -> ObservationTermCfg:
   # Sensor faults live inside the term (they are per-taxel and stateful); one
   # step of latency on top, as for a sensor read over a bus.
-  return ObservationTermCfg(func=mdp.tactile_map_noisy, delay_min_lag=0, delay_max_lag=1)
-
-
-def _tactile_touch_noisy() -> ObservationTermCfg:
   return ObservationTermCfg(func=mdp.tactile_touch_noisy, delay_min_lag=0, delay_max_lag=1)
 
 
@@ -101,22 +97,13 @@ TERMS: dict[str, TermSpec] = {
   "command_vx": TermSpec(
     _plain(mdp.command_vx), "onboard", "Operator forward-speed command (joystick)."
   ),
-  "tactile_map": TermSpec(
-    _tactile_map_noisy,
-    "sensor",
-    "Tactile slipper, per foot: soft per-taxel contact map, load, CoP, contact "
-    "area, edge loading, contact flag; faulted readings, 0-1 step latency.",
-  ),
   "tactile_touch": TermSpec(
     _tactile_touch_noisy,
     "sensor",
-    "Tactile slipper, per foot: 26-bit taxel touch map, load, CoP, contact "
-    "area, contact flag; faulted readings, 0-1 step latency.",
+    "Tactile slipper, per foot: 26-bit taxel touch map, load, CoP; faulted "
+    "readings, 0-1 step latency.",
   ),
   # -- privileged --------------------------------------------------------------
-  "tactile_map_clean": TermSpec(
-    _plain(mdp.tactile_map_clean), "privileged", "Noise-free tactile_map."
-  ),
   "tactile_touch_clean": TermSpec(
     _plain(mdp.tactile_touch_clean), "privileged", "Noise-free tactile_touch."
   ),
@@ -168,39 +155,33 @@ TERMS: dict[str, TermSpec] = {
   ),
 }
 
-ACTOR_TERMS: tuple[str, ...] = (
+TOUCH_ACTOR_TERMS: tuple[str, ...] = (
   "base_ang_vel",
   "projected_gravity",
   "joint_pos",
   "joint_vel",
   "actions",
   "command_vx",
-  "tactile_map",
+  "tactile_touch",
 )
-"""The GRU actor: everything the robot measures, including its previous
-action, with the contact-map tactile features."""
-PRIVILEGED_TERMS: tuple[str, ...] = (
+"""The touch actor: everything the robot measures, including its previous
+action, and the tactile slipper's touch features (``tactile_touch``)."""
+TOUCH_PRIVILEGED_TERMS: tuple[str, ...] = (
   "base_lin_vel",
   "feet_beam_pose",
   "base_beam_pose",
   "beam_progress",
   "beam_params",
-  "tactile_map_clean",
+  "tactile_touch_clean",
   "foot_contact_forces",
   "action_lag",
+  "taxel_forces_clean",
+  "foot_slip_vel",
 )
-"""The critic, on top of the actor's terms (the clean tactile map replacing the
-faulted one): full ground truth. The curved task adds ``beam_ahead``."""
-TOUCH_ACTOR_TERMS: tuple[str, ...] = tuple(
-  "tactile_touch" if n == "tactile_map" else n for n in ACTOR_TERMS
-)
-"""The touch-feature actor: as ``ACTOR_TERMS`` with ``tactile_touch`` (binary
-taxel map, load, CoP, area, contact) for the soft contact map."""
-TOUCH_PRIVILEGED_TERMS: tuple[str, ...] = tuple(
-  "tactile_touch_clean" if n == "tactile_map_clean" else n for n in PRIVILEGED_TERMS
-) + ("taxel_forces_clean", "foot_slip_vel")
-"""Its critic adds the clean per-taxel normal and shear forces and the foot
-slip velocity. Friction is in ``beam_params``."""
+"""The critic, on top of the actor's terms (the clean touch features replacing
+the faulted ones): full ground truth, the clean per-taxel normal and shear
+forces and the foot slip velocity. Friction is in ``beam_params``. The curved
+tasks add ``beam_ahead``."""
 BLIND_ACTOR_TERMS: tuple[str, ...] = tuple(n for n in TOUCH_ACTOR_TERMS if n != "tactile_touch")
 """The blind baseline: the touch actor without its tactile sole, so
 proprioception only. Its critic is the touch critic, so the two differ in the

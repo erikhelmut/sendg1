@@ -21,11 +21,11 @@ as on the workstation. The mirrors are never edited on the cluster;
 ## Workflow
 
 ```bash
-scripts/cluster/sync.sh ~/sendg1-beam          # code, uncommitted edits included
-scripts/cluster/submit.sh ~/sendg1-beam G1-Beam-E2E-Curved \
-  --agent.run-name blind_s0 --agent.seed 0       # sync + sbatch one `train` run
+scripts/cluster/sync.sh ~/sendg1               # code, uncommitted edits included
+scripts/cluster/submit.sh ~/sendg1 G1-Beam-Touch-Curved-Plain \
+  --agent.run-name touch_s0 --agent.seed 0       # sync + sbatch one `train` run
 ssh mn.ias.informatik.tu-darmstadt.de squeue --me
-scripts/cluster/fetch.sh ~/sendg1-beam         # logs/, runs/, results/, slurm/
+scripts/cluster/fetch.sh ~/sendg1              # logs/, runs/, results/, slurm/
 ```
 
 Then evaluate and render videos here, from the fetched checkpoints.

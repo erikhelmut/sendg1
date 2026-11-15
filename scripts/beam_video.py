@@ -3,7 +3,7 @@
 
     python scripts/beam_video.py --checkpoint <pt> --width 0.10 --want success
     python scripts/beam_video.py --checkpoint <pt> --width 0.05 --want failure
-    python scripts/beam_video.py --task G1-Beam-E2E-Curved --path bend --checkpoint <pt> --width 0.20
+    python scripts/beam_video.py --task G1-Beam-Touch-Curved-Plain --path bend --checkpoint <pt> --width 0.20
 
 Runs one env per try (same protocol as ``beam_eval.py``: start platform,
 constant forward command) until an episode with the wanted outcome turns up,
@@ -28,9 +28,9 @@ def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--label", default="", help="caption title, e.g. the run name (default: the task)")
   ap.add_argument("--path", choices=["straight", "bend", "turn"], default="straight",
-                  help="beam shape (bend / turn need G1-Beam-E2E-Curved)")
+                  help="beam shape (bend / turn need a curved task)")
   ap.add_argument("--checkpoint", required=True)
-  ap.add_argument("--task", default="G1-Beam-E2E")
+  ap.add_argument("--task", default="G1-Beam-Touch-Curved-Plain")
   ap.add_argument("--start-lateral", type=float, default=0.08, help="platform start offset (+/- m)")
   ap.add_argument("--start-yaw", type=float, default=0.08, help="start yaw offset (+/- rad)")
   ap.add_argument("--width", type=float, required=True)
@@ -76,7 +76,7 @@ def main() -> None:
   kind = lambda n: next((k for k in ("bend", "turn") if n.endswith(k)), "straight")  # noqa: E731
   same_kind = [i for i, n in enumerate(columns) if kind(n) == args.path]
   if not same_kind:
-    raise SystemExit(f"{task} has no {args.path} beams (use G1-Beam-E2E-Curved)")
+    raise SystemExit(f"{task} has no {args.path} beams (use G1-Beam-Touch-Curved-Plain)")
   cfg.scene.num_envs = 1
   cfg.seed = args.seed
   cfg.curriculum = {}

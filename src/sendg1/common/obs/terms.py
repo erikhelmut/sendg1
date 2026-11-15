@@ -9,10 +9,6 @@ policy by forgetting to register it.
 Availability
 ------------
 ``onboard``     Measurable on the real blind G1 today. Legal in an actor group.
-``oracle``      A quantity the tactile sensor WILL make measurable, but whose
-                current implementation is idealised (noiseless, zero-latency,
-                perfectly calibrated). Legal in an actor group ONLY for obs sets
-                explicitly marked diagnostic.
 ``sensor``      The tactile slipper: hardware the robot will carry, but not part
                 of the stock G1. Its term models the real sensor's faults (gain
                 error, dead taxels, noise, frame drops, latency) and reads only
@@ -41,7 +37,9 @@ from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from sendg1.common.beam import mdp as beam_mdp
 from sendg1.common.box_push import mdp as box_mdp
 
-Availability = Literal["onboard", "oracle", "sensor", "perceived", "privileged"]
+Availability = Literal["onboard", "sensor", "perceived", "privileged"]
+"""An ``oracle`` class (idealised tactile stand-ins, legal only in diagnostic
+obs sets) existed until 2026-11-15."""
 
 TERRAIN_SCAN_SENSOR = "terrain_scan"
 TERRAIN_SCAN_MAX_DISTANCE = 5.0
@@ -110,10 +108,6 @@ def _command() -> ObservationTermCfg:
     params={"command_name": "twist"},
   )
 
-
-# ---------------------------------------------------------------------------
-# Oracle terms -- idealised stand-ins for the tactile array, diagnostic use only.
-# ---------------------------------------------------------------------------
 
 def _foot_contact_ideal() -> ObservationTermCfg:
   return ObservationTermCfg(
@@ -237,30 +231,27 @@ TERMS: dict[str, TermSpec] = {
     "onboard",
     "Operator velocity command (vx, vy, wz).",
   ),
-  # -- oracle ----------------------------------------------------------------
-  "foot_contact_ideal": TermSpec(
-    _foot_contact_ideal,
-    "oracle",
-    "Binary per-foot ground contact, noiseless and zero-latency. A real tactile "
-    "array measures this, but not this cleanly. Diagnostic upper bound only.",
-  ),
-  "foot_contact_forces_ideal": TermSpec(
-    _foot_contact_forces_ideal,
-    "oracle",
-    "Net 3D contact force per foot (reduce='netforce'), noiseless. Note this is "
-    "a load cell, not a tactile array: no spatial distribution over the sole, "
-    "so no centre of pressure and no heel-vs-toe discrimination.",
-  ),
   # -- sensor ----------------------------------------------------------------
   "tactile_touch": TermSpec(
     _tactile_touch,
     "sensor",
-    "Tactile slipper, per foot: 26-bit taxel touch map, load, CoP, contact "
-    "area, contact flag, from normal load only (a pressure array measures no "
-    "shear); gain error, dead taxels, noise, frame drops, 0-1 step latency. "
+    "Tactile slipper, per foot: 26-bit taxel touch map, load, CoP, from normal "
+    "load only (a pressure array measures no shear); gain error, dead taxels, "
+    "noise, frame drops, 0-1 step latency. "
     "The beam task's model, shared by every task.",
   ),
   # -- privileged ------------------------------------------------------------
+  "foot_contact_ideal": TermSpec(
+    _foot_contact_ideal,
+    "privileged",
+    "Binary per-foot ground contact, noiseless and zero-latency. Critic only: "
+    "the actor's contact information comes from the tactile slipper.",
+  ),
+  "foot_contact_forces_ideal": TermSpec(
+    _foot_contact_forces_ideal,
+    "privileged",
+    "Net 3D contact force per foot (reduce='netforce'), noiseless. Critic only.",
+  ),
   "base_lin_vel": TermSpec(
     _base_lin_vel,
     "privileged",

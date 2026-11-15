@@ -29,10 +29,9 @@ BASE_ACTOR_DIM = {
 }
 EXTRA_ACTOR_DIM = {
   "blind": 0,
-  "contact_oracle": 8,
-  # 2 feet x (26 touch bits (slipper_v1), load, CoP x/y, area, contact):
+  # 2 feet x (26 touch bits (slipper_v1), load, CoP x/y):
   # the beam task's tactile_touch.
-  "tactile": 62,
+  "tactile": 58,
 }
 
 
@@ -44,9 +43,8 @@ def _expected_actor_dim(task_id: str) -> int:
 def test_low_level_actor_matches_box_push_actor() -> None:
   """The point of Sendg1-VelocityPush: a policy trained there drops straight
   into box pushing, so the two actors must have identical dimensions."""
-  for obs_set in ("blind", "contact_oracle", "tactile"):
-    slug = {"blind": "Blind", "contact_oracle": "ContactOracle",
-            "tactile": "Tactile"}[obs_set]
+  for obs_set in ("blind", "tactile"):
+    slug = {"blind": "Blind", "tactile": "Tactile"}[obs_set]
     assert _expected_actor_dim(f"Sendg1-VelocityPush-G1-{slug}") == _expected_actor_dim(
       f"Sendg1-BoxPush-G1-{slug}"
     ), obs_set
@@ -57,7 +55,7 @@ def test_expected_variants_registered() -> None:
   expected = {
     f"{base_id}-{slug}"
     for base_id in BASE_ACTOR_DIM
-    for slug in ("Blind", "ContactOracle", "Tactile")
+    for slug in ("Blind", "Tactile")
   }
   assert registered == expected
 

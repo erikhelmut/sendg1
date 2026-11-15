@@ -1,40 +1,33 @@
-"""Per-foot tactile features for beam walking, on top of the existing taxel model.
+"""What a policy sees of the tactile slipper: the touch features every tactile
+actor gets (``touch_features``), and the sensor faults applied first.
 
-The physics -> taxel step is ``sendg1.common.tactile.sensing.read_tactile``
-unchanged: per-contact forces give net force and CoP, 4 rays per taxel give
-which patches have support, and a Winkler plane splits the normal force over
-the supported taxels. This module only decides what a policy gets to see of it.
+The physics -> taxel step is ``sendg1.common.tactile.sensing.read_tactile``:
+per-contact forces give net force and CoP, 4 rays per taxel give which patches
+have support, and a Winkler plane splits the normal force over the supported
+taxels. This module only decides what a policy gets to see of it.
 
-Representation (per foot, 33 dims; both feet 66)
+Representation (per foot, 29 dims; both feet 58)
 ------------------------------------------------
-``shape[26]``   per-taxel normal force divided by the foot's total normal force:
-                WHERE the load is, independent of how much. Under a global gain
-                error (an uncalibrated sensor) these do not move at all.
+``bits[26]``    1 where a taxel reads above ``TOUCH_BIT_N`` (3 N): which part of
+                the sole touches. A thresholded map barely moves under gain errors.
 ``load``        total normal force / body weight (343 N), clipped to [0, 1.5]:
                 HOW MUCH, the one quantity a gain error does move.
 ``cop[2]``      centre of pressure from the taxel readings (not the simulator's
                 exact CoP -- the real sensor can only compute it this way),
                 x and y normalised to the sole's half extents.
-``area``        fraction of taxels above 2 N: how much of the sole is on support.
-``edge[2]``     share of the load on the lateral and on the medial edge taxels
-                (|y| >= 15 mm). On a beam narrower than the sole these are the
-                direct signature of a foot hanging over an edge, and of which one.
-``contact``     total normal force above 15 N.
 
 Normal force only. The simulated shear is the net tangential force split in
-proportion to normal load, so it carries no spatial information the shape does
+proportion to normal load, so it carries no spatial information the normals do
 not, and it is the channel least likely to survive contact with real hardware.
 
 Both feet in one frame. The slipper layout is mirror-symmetric in y, so the
 right foot's taxels are re-indexed into the left foot's mirror image and its
-y features flipped: for both feet +y is lateral. One layer of weights (or one
-encoder, if the actor grows one) then serves both feet.
+y features flipped: for both feet +y is lateral. One layer of weights then
+serves both feet.
 
-Why hand-designed features rather than a learned encoder: the derived terms are
-physical quantities that are invariant or graceful under the sensor faults we
-randomise (gain, dead taxels, noise), and they are what makes the feature
-vector small enough for a GRU actor. The per-taxel shape is kept alongside,
-so a network can still find patterns the derived terms miss.
+A soft per-taxel contact map with load, CoP, area, edge loading and a contact
+flag (``tactile_map``, 33 per foot) was the beam E2E tasks' input until
+2026-11-15; contact area and the contact flag left the touch features then too.
 
 Sensor model (actor only; the critic's copy is noise-free)
 ---------------------------------------------------------------------
@@ -61,21 +54,14 @@ if TYPE_CHECKING:
 BODY_WEIGHT_N = 343.0
 """Nominal G1 weight (35 kg). A known constant on the real robot."""
 CONTACT_N = 15.0
-TAXEL_ON_N = 2.0
-EDGE_Y = 0.0145
-"""Taxels with |y| at or beyond this (15 mm rows and the 25-29 mm outriggers)
-count as edge taxels."""
-
-FEATURES_PER_FOOT_EXTRA = 7  # load, cop x/y, area, edge lat/med, contact
+"""Below this total normal force a foot counts as not in contact (CoP reads 0)."""
 TOUCH_BIT_N = 3.0
 """A taxel counts as touching above 3 N (``touch_features``). Standing on the
 widest beam a loaded taxel reads ~6 N (median; 10th percentile 4 N), so the
 threshold sits halfway between nothing and a typical load. At full noise
 strength (3 N std) ~16% of unloaded taxels flicker on; at level 0 (0.9 N std)
 almost none."""
-TOUCH_PER_FOOT = 26 + 5  # bits, load, cop x/y, area, contact
-CONTACT_MAP_RAMP_N = (2.0, 6.0)
-"""Soft contact map: a taxel reads 0 at or below 2 N and 1 at or above 6 N."""
+TOUCH_PER_FOOT = 26 + 3  # bits, load, cop x/y
 
 
 @dataclass(frozen=True)
@@ -134,9 +120,7 @@ def _layout_consts(layout: TaxelLayout, device: str) -> tuple[torch.Tensor, ...]
   x_mid = 0.5 * (xs.max() + xs.min())
   x_half = 0.5 * (xs.max() - xs.min())
   y_half = ys.abs().max()
-  lateral = (ys >= EDGE_Y).float()
-  medial = (ys <= -EDGE_Y).float()
-  return centers, perm, x_mid, x_half, y_half, lateral, medial
+  return centers, perm, x_mid, x_half, y_half
 
 
 def canonical_normals(env: ManagerBasedRlEnv, params: TactileParams) -> torch.Tensor:
@@ -150,52 +134,19 @@ def canonical_normals(env: ManagerBasedRlEnv, params: TactileParams) -> torch.Te
   return torch.stack([normal[:, 0], normal[:, 1, perm]], dim=1)
 
 
-def features_from_normals(
-  normal: torch.Tensor, layout: TaxelLayout, contact_map: bool = False
-) -> torch.Tensor:
-  """[B, 2, T] canonical normals -> [B, 2 * (T + 7)] features.
-
-  ``contact_map``: the T per-taxel entries are a soft 0-1 "this taxel touches"
-  map (``CONTACT_MAP_RAMP_N``) instead of each taxel's share of the foot's
-  load. Which taxels touch is the beam edge's footprint under the sole, and a
-  thresholded map is barely moved by gain errors."""
-  centers, _, x_mid, x_half, y_half, lateral, medial = _layout_consts(
-    layout, str(normal.device)
-  )
-  total = normal.sum(-1, keepdim=True)  # [B, 2, 1]
-  # Fades to zero below CONTACT_N rather than amplifying noise on an unloaded foot.
-  denom = total.clamp(min=CONTACT_N)
-  shape = normal / denom
-  load = (total / BODY_WEIGHT_N).clamp(0.0, 1.5)
-  w = normal / total.clamp(min=1e-6)
-  cop_x = ((w * centers[:, 0]).sum(-1, keepdim=True) - x_mid) / x_half
-  cop_y = (w * centers[:, 1]).sum(-1, keepdim=True) / y_half
-  in_contact = (total > CONTACT_N).float()
-  cop_x, cop_y = cop_x * in_contact, cop_y * in_contact
-  area = (normal > TAXEL_ON_N).float().mean(-1, keepdim=True)
-  edge_lat = (shape * lateral).sum(-1, keepdim=True)
-  edge_med = (shape * medial).sum(-1, keepdim=True)
-  if contact_map:
-    lo, hi = CONTACT_MAP_RAMP_N
-    shape = ((normal - lo) / (hi - lo)).clamp(0.0, 1.0)
-  per_foot = torch.cat(
-    [shape, load, cop_x, cop_y, area, edge_lat, edge_med, in_contact], dim=-1
-  )
-  return per_foot.flatten(start_dim=1)
-
-
 def touch_features(normal: torch.Tensor, layout: TaxelLayout) -> torch.Tensor:
-  """[B, 2, T] canonical normals -> [B, 2 * (T + 5)] features, per foot:
+  """[B, 2, T] canonical normals -> [B, 2 * (T + 3)] features, per foot:
 
   ``bits[T]``  1 where a taxel reads above ``TOUCH_BIT_N``, else 0: which part of
                the sole touches.
   ``load``     total normal force / body weight, clipped to [0, 1.5].
   ``cop[2]``   centre of pressure from the taxels, x and y scaled to the sole's
-               half extents (+-1), 0 while the foot is not in contact.
-  ``area``     fraction of taxels touching (the mean of ``bits``).
-  ``contact``  1 if total normal force is above ``CONTACT_N``.
+               half extents (+-1), 0 while the total normal force is at or
+               below ``CONTACT_N`` (foot not in contact).
 
-  Frames as in ``features_from_normals``: +y is lateral on both feet."""
+Contact area and a contact flag were features too until 2026-11-15.
+
+  Canonical frame (``canonical_normals``): +y is lateral on both feet."""
   centers, _, x_mid, x_half, y_half, *_ = _layout_consts(layout, str(normal.device))
   total = normal.sum(-1, keepdim=True)
   bits = (normal > TOUCH_BIT_N).float()
@@ -204,8 +155,7 @@ def touch_features(normal: torch.Tensor, layout: TaxelLayout) -> torch.Tensor:
   in_contact = (total > CONTACT_N).float()
   cop_x = (((w * centers[:, 0]).sum(-1, keepdim=True) - x_mid) / x_half).clamp(-1, 1) * in_contact
   cop_y = ((w * centers[:, 1]).sum(-1, keepdim=True) / y_half).clamp(-1, 1) * in_contact
-  area = bits.mean(-1, keepdim=True)
-  return torch.cat([bits, load, cop_x, cop_y, area, in_contact], dim=-1).flatten(start_dim=1)
+  return torch.cat([bits, load, cop_x, cop_y], dim=-1).flatten(start_dim=1)
 
 
 def canonical_forces(env: ManagerBasedRlEnv, params: TactileParams) -> torch.Tensor:

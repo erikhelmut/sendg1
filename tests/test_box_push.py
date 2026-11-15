@@ -435,8 +435,10 @@ def test_hand_force_curriculum_loads_the_hands_backward() -> None:
     forward = torch.stack([heading.cos(), heading.sin()], dim=-1)
     horiz = total[:, :2] / total[:, :2].norm(dim=-1, keepdim=True).clamp_min(1e-6)
     assert torch.all((horiz * forward).sum(-1) <= -0.49), "load must oppose the heading"
-    # The ramp starts at zero, so the shipped config is gentle at iteration 0.
-    assert force_level(env, HandForceCfg()) == 0.0
+    # The ramp starts at zero, so the shipped config is gentle at iteration 0
+    # (after the 5 steps above: 5 / ramp_steps).
+    shipped = HandForceCfg()
+    assert force_level(env, shipped) == pytest.approx(5 / shipped.ramp_steps)
   finally:
     env.close()
 

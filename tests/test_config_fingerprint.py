@@ -23,22 +23,16 @@ from sendg1.tasks._register import variants
 EXPECTED: dict[str, tuple[str, str]] = {
   # task_id: (env_fingerprint, rl_fingerprint)
   "Sendg1-BoxPush-G1-Blind": ("ce9384031658ef67", "c16b31a0a6530469"),
-  "Sendg1-BoxPush-G1-ContactOracle": ("c9a59f010fd39429", "60a8f3e89832aa13"),
   "Sendg1-BoxPush-G1-Tactile": ("4b0d1b6c4555b884", "06be4eaf3e4d3ce8"),
   "Sendg1-BoxPushCurriculum-G1-Blind": ("09953bcccd9d544e", "e98b9cbb19a07132"),
-  "Sendg1-BoxPushCurriculum-G1-ContactOracle": ("17b9012a9b98a547", "721027b642ad80c8"),
   "Sendg1-BoxPushCurriculum-G1-Tactile": ("35ef61a46cd76e09", "3286945506885d8f"),
   "Sendg1-BoxPushPatches-G1-Blind": ("bddd7fddae4db332", "e51d215245977ada"),
-  "Sendg1-BoxPushPatches-G1-ContactOracle": ("90f84414891ff12b", "2d2fe677a07f7c74"),
   "Sendg1-BoxPushPatches-G1-Tactile": ("c835ca55909ea0d3", "5ed81f293074d7b2"),
   "Sendg1-Velocity-Flat-G1-Blind": ("912f562976564235", "4eca2b5efbd3cacf"),
-  "Sendg1-Velocity-Flat-G1-ContactOracle": ("749e5d6497f1b988", "ef6cb7888e840c6e"),
   "Sendg1-Velocity-Flat-G1-Tactile": ("2cd95a2d14a7cbb7", "f37b879819fe3569"),
   "Sendg1-Velocity-Rough-G1-Blind": ("9e4a616371d70df4", "f9c4880fbb9131ba"),
-  "Sendg1-Velocity-Rough-G1-ContactOracle": ("d56bf871a3aff876", "bbe10c74e54dce3c"),
   "Sendg1-Velocity-Rough-G1-Tactile": ("081e6e612cb7313d", "351907bde540e06b"),
   "Sendg1-VelocityPush-G1-Blind": ("712d67743087b88b", "c10fe67780511509"),
-  "Sendg1-VelocityPush-G1-ContactOracle": ("440002d06098c736", "e9076274d270ebd5"),
   "Sendg1-VelocityPush-G1-Tactile": ("69ea67fcc3a0cf4f", "8423d0976865d29c"),
 }
 

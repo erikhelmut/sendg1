@@ -3,7 +3,7 @@
 terminations, curriculum movement.
 
     python scripts/beam_smoke.py --num-envs 16 --steps 300
-    python scripts/beam_smoke.py --task G1-Beam-E2E-Curved
+    python scripts/beam_smoke.py --task G1-Beam-Touch-Curved-Plain
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import argparse
 
 def main() -> None:
   ap = argparse.ArgumentParser()
-  ap.add_argument("--task", default="G1-Beam-E2E")
+  ap.add_argument("--task", default="G1-Beam-Touch-Curved-Plain")
   ap.add_argument("--num-envs", type=int, default=16)
   ap.add_argument("--steps", type=int, default=300)
   ap.add_argument("--zero-actions", action="store_true")

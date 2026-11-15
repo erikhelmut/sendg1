@@ -14,7 +14,6 @@ Group vocabulary
                   *idealised* foot contact terms: the critic's contact
                   information is deliberately the stable idealised version so
                   that improving tactile fidelity later never perturbs it.
-``contact_ideal`` Oracle foot contact for the diagnostic set. Actor only.
 ``tactile``       The tactile slipper's touch features (the beam task's sensor
                   model, shared by every task). Actor only.
 """
@@ -40,11 +39,6 @@ PRIVILEGED_TERMS_FLAT: tuple[str, ...] = (
   "joint_pos_true",
   "foot_height",
   "foot_air_time",
-  "foot_contact_ideal",
-  "foot_contact_forces_ideal",
-)
-
-CONTACT_IDEAL_TERMS: tuple[str, ...] = (
   "foot_contact_ideal",
   "foot_contact_forces_ideal",
 )
@@ -117,11 +111,6 @@ def build_groups(
     ),
     "privileged": lambda: ObservationGroupCfg(
       terms=_terms(privileged),
-      concatenate_terms=True,
-      enable_corruption=False,
-    ),
-    "contact_ideal": lambda: ObservationGroupCfg(
-      terms=_terms(CONTACT_IDEAL_TERMS),
       concatenate_terms=True,
       enable_corruption=False,
     ),

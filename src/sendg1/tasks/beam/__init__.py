@@ -1,42 +1,34 @@
-"""Beam walking, plain PPO: ``G1-Beam-E2E`` (straight beams) and
-``G1-Beam-E2E-Curved`` (straight and bent beams), with the ``map`` tactile
-input (``env_cfg.Tactile``).
+"""Beam walking, plain PPO, on straight and bent beams.
 
-Touch-feature experiments, on curved beams: ``G1-Beam-Touch-Curved-Plain``,
-with the ``touch`` tactile input. Same rewards, curriculum and PPO settings
-as ``G1-Beam-E2E-Curved``. Its blind baseline, ``G1-Beam-Curved-Blind``, is
-the same task without the tactile actor input.
+``G1-Beam-Touch-Curved-Plain``: a GRU actor on the robot's own signals and
+the tactile slipper's touch features (``tactile_touch``). Its blind baseline,
+``G1-Beam-Curved-Blind``, is the same task without the tactile actor input.
 
 Memoryless actors, an MLP on the current observation only (``rl_cfg.ActorKind``),
 touch or blind: ``G1-Beam-Touch-Curved-MLP-Plain``, ``G1-Beam-Curved-Blind-MLP-Plain``.
 
-Reward study on the touch MLP: ``G1-Beam-Touch-Curved-MLP-Plain-R-<Variant>``,
-one per ``env_cfg.REWARD_VARIANTS`` entry (``R-Base`` is the unchanged reward),
-everything else as ``G1-Beam-Touch-Curved-MLP-Plain``.
+LSTM(256) actors with 64-step rollouts (gradients over 1.28 s, about one gait
+cycle) and a 4e-4 starting learning rate (adaptive schedule), touch or blind:
+``G1-Beam-Touch-Curved-LSTM``, ``G1-Beam-Curved-Blind-LSTM``.
 
-``G1-Beam-Touch-Curved-Plain-R64``: ``G1-Beam-Touch-Curved-Plain`` with
-64-step rollouts (the GRU learns over 1.28 s, about one full gait cycle,
-instead of 0.64 s).
-
-Round two's rules with round three's 35 s episodes, GRU, touch input:
-``G1-Beam-Touch-Curved-Plain-R2-35s`` (32-step rollouts) and ``...-R64``
-(``make_beam_env_cfg(round2=True)``). Both round-three runs climbed to ~0.25 m
-and fell back; these tell whether the long episodes alone do that.
-``G1-Beam-Touch-Curved-LSTM-R2-35s`` (and ``-R64``) are the same with an
-LSTM(256) in place of the GRU.
+One reward for every task, ``beam_reward`` (``env_cfg.build_beam_reward``),
+first trained in the ``touch_plain_s0`` runs (2026-10-17/20). The reward study
+that followed (``-R-<Variant>`` tasks, ``foot_side_contact``) was removed on
+2026-11-15.
 
 Every task has an evaluation-only twin, ``<task>-Eval``: held-out beams
 (``make_beam_env_cfg(evaluation=True)``), same observations and episode
 length, so its training checkpoints load. Not for training. Every task trains
 with ``runner.BeamRunner``, whose checkpoints carry the curriculum.
 
-Actors are rsl_rl's own GRU, LSTM or MLP; the symmetric (mirror-equivariant)
-actors and the transformer were removed on 2026-11-14, so checkpoints of
-``G1-Beam-Touch-Curved``, ``-Blind-Sym``, ``-MLP-Sym``, ``-Transformer`` and
-of the symmetric ``G1-Beam-E2E{,-Curved}`` runs no longer load.
+Removed, with their checkpoints no longer loading:
+- 2026-11-14: the symmetric (mirror-equivariant) actors and the transformer
+  (``G1-Beam-Touch-Curved``, ``-Blind-Sym``, ``-MLP-Sym``, ``-Transformer``).
+- 2026-11-15: ``G1-Beam-E2E{,-Curved}`` (the old soft contact-map tactile
+  input), and the round-three experiments ``-Plain-R64``, ``-Plain-R2-35s``,
+  ``-Plain-R2-35s-R64``, ``-LSTM-R2-35s``, ``-LSTM-R2-35s-R64``.
 
-A recurrent actor on the robot's own signals and the tactile slipper, a
-privileged critic. Trained with mjlab's ``train``; evaluated with
+A privileged critic. Trained with mjlab's ``train``; evaluated with
 ``scripts/beam_eval.py``.
 """
 
@@ -45,21 +37,18 @@ from __future__ import annotations
 from mjlab.tasks.registry import register_mjlab_task
 
 from sendg1.common.beam.terms import DEPLOYABLE, TERMS
-from sendg1.tasks.beam.env_cfg import REWARD_VARIANTS, make_beam_env_cfg
+from sendg1.tasks.beam.env_cfg import make_beam_env_cfg
 from sendg1.tasks.beam.rl_cfg import beam_ppo_cfg
 from sendg1.tasks.beam.runner import BeamRunner
 
-TASK = "G1-Beam-E2E"
-CURVED_TASK = "G1-Beam-E2E-Curved"
 TOUCH_PLAIN_TASK = "G1-Beam-Touch-Curved-Plain"
 BLIND_TASK = "G1-Beam-Curved-Blind"
 TOUCH_MLP_PLAIN_TASK = "G1-Beam-Touch-Curved-MLP-Plain"
 BLIND_MLP_PLAIN_TASK = "G1-Beam-Curved-Blind-MLP-Plain"
-TOUCH_PLAIN_R64_TASK = "G1-Beam-Touch-Curved-Plain-R64"
-TOUCH_PLAIN_R2_TASK = "G1-Beam-Touch-Curved-Plain-R2-35s"
-TOUCH_PLAIN_R2_R64_TASK = "G1-Beam-Touch-Curved-Plain-R2-35s-R64"
-TOUCH_LSTM_R2_TASK = "G1-Beam-Touch-Curved-LSTM-R2-35s"
-TOUCH_LSTM_R2_R64_TASK = "G1-Beam-Touch-Curved-LSTM-R2-35s-R64"
+TOUCH_LSTM_TASK = "G1-Beam-Touch-Curved-LSTM"
+BLIND_LSTM_TASK = "G1-Beam-Curved-Blind-LSTM"
+LSTM_ROLLOUT_STEPS = 64
+LSTM_LEARNING_RATE = 4.0e-4
 
 
 def assert_actor_is_deployable(observations: dict, groups: tuple[str, ...] = ("actor",)) -> None:
@@ -75,37 +64,18 @@ def assert_actor_is_deployable(observations: dict, groups: tuple[str, ...] = ("a
         )
 
 
+_LSTM = {"num_steps_per_env": LSTM_ROLLOUT_STEPS, "learning_rate": LSTM_LEARNING_RATE}
 _TASKS = (
-  # task, curves, tactile, actor, experiment
-  (TASK, False, "map", "gru", "beam_e2e"),
-  (CURVED_TASK, True, "map", "gru", "beam_e2e_curved"),
-  (TOUCH_PLAIN_TASK, True, "touch", "gru", "beam_touch_curved_plain"),
-  (BLIND_TASK, True, "none", "gru", "beam_curved_blind"),
-  (TOUCH_MLP_PLAIN_TASK, True, "touch", "mlp", "beam_touch_curved_mlp_plain"),
-  (BLIND_MLP_PLAIN_TASK, True, "none", "mlp", "beam_curved_blind_mlp_plain"),
+  # task, tactile, actor, experiment, extra PPO settings
+  (TOUCH_PLAIN_TASK, "touch", "gru", "beam_touch_curved_plain", {}),
+  (BLIND_TASK, "none", "gru", "beam_curved_blind", {}),
+  (TOUCH_MLP_PLAIN_TASK, "touch", "mlp", "beam_touch_curved_mlp_plain", {}),
+  (BLIND_MLP_PLAIN_TASK, "none", "mlp", "beam_curved_blind_mlp_plain", {}),
+  (TOUCH_LSTM_TASK, "touch", "lstm", "beam_touch_curved_lstm", _LSTM),
+  (BLIND_LSTM_TASK, "none", "lstm", "beam_curved_blind_lstm", _LSTM),
 )
-
-def reward_task(variant: str) -> str:
-  return f"{TOUCH_MLP_PLAIN_TASK}-R-" + "-".join(w.title() for w in variant.split("_"))
-
-
-_REWARD_TASKS = tuple(
-  (reward_task(v), True, "touch", "mlp", f"beam_touch_mlp_plain_r_{v}", v) for v in REWARD_VARIANTS
-)
-# task, curves, tactile, actor, experiment, reward, rollout steps, round2
-_ALL_TASKS = (
-  *((*t, "base", 32, False) for t in _TASKS),
-  *((*t, 32, False) for t in _REWARD_TASKS),
-  (TOUCH_PLAIN_R64_TASK, True, "touch", "gru", "beam_touch_curved_plain_r64", "base", 64, False),
-  (TOUCH_PLAIN_R2_TASK, True, "touch", "gru", "beam_touch_curved_plain_r2_35s", "base", 32, True),
-  (TOUCH_PLAIN_R2_R64_TASK, True, "touch", "gru", "beam_touch_curved_plain_r2_35s_r64", "base",
-   64, True),
-  (TOUCH_LSTM_R2_TASK, True, "touch", "lstm", "beam_touch_curved_lstm_r2_35s", "base", 32, True),
-  (TOUCH_LSTM_R2_R64_TASK, True, "touch", "lstm", "beam_touch_curved_lstm_r2_35s_r64", "base",
-   64, True),
-)
-for _task, _curves, _tactile, _actor, _experiment, _reward, _steps, _r2 in _ALL_TASKS:
-  _kw = dict(curves=_curves, tactile=_tactile, reward=_reward, round2=_r2)
+for _task, _tactile, _actor, _experiment, _ppo in _TASKS:
+  _kw = {"curves": True, "tactile": _tactile}
   for _suffix, _evaluation in (("", False), ("-Eval", True)):
     _env = make_beam_env_cfg(evaluation=_evaluation, **_kw)
     assert_actor_is_deployable(_env.observations)
@@ -113,6 +83,6 @@ for _task, _curves, _tactile, _actor, _experiment, _reward, _steps, _r2 in _ALL_
       task_id=_task + _suffix,
       env_cfg=_env,
       play_env_cfg=make_beam_env_cfg(play=True, evaluation=_evaluation, **_kw),
-      rl_cfg=beam_ppo_cfg(experiment_name=_experiment, actor=_actor, num_steps_per_env=_steps),
+      rl_cfg=beam_ppo_cfg(experiment_name=_experiment, actor=_actor, **_ppo),
       runner_cls=BeamRunner,
     )

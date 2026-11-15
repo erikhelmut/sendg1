@@ -10,7 +10,7 @@ paired policies look the same:
 - **Logos**, top left: the IAS logo on a white plate, on every clip
   (`logo=`, default `IAS_LOGO`; a list of paths or `LOGOS` names draws several
   left to right; `NO_LOGO` / `--logo none` drops it).
-- **Caption**, right of the logo and as tall as it: a badge (`TACTILE`, `BLIND`, `CONTACT ORACLE`,
+- **Caption**, right of the logo and as tall as it: a badge (`TACTILE` or `BLIND`,
   read off the actor's observation terms), the task, and the script's lines.
   `caption=False` / `--no-caption` drops it (the showcase look).
 - **Tactile feet card**, bottom right: both soles from above, toe up, with

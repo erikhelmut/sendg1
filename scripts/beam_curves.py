@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Extract training curves of a beam run to JSON.
 
-    python scripts/beam_curves.py runs/beam_e2e/<run> --out results/beam/e2e_vN_curves.json
+    python scripts/beam_curves.py runs/beam_touch_curved_plain/<run> --out results/beam/<name>_curves.json
 
 Keeps every Curriculum/*, Episode_Termination/*, Episode_Reward/*, Loss/* and
 Train/* scalar, downsampled to at most ``--points`` points per tag.

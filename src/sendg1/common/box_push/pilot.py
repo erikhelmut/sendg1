@@ -9,7 +9,7 @@ Why scripted: in simulation the box and target poses are known, so the
 high-level geometry -- stand on the far side of the box, then push along the
 box-to-target line -- is a closed-form calculation, not something worth
 learning. Scripting it also makes it a control variable: byte-identical for the
-blind, contact-oracle and tactile policies, so it cannot absorb any of the
+blind and tactile policies, so it cannot absorb any of the
 difference between them. What remains to be learned is exactly what this study
 is about: executing a walking command while pushing a heavy box on a floor of
 unknown friction, without the feet slipping out.

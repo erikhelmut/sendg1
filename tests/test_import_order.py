@@ -16,17 +16,13 @@ import pytest
 ENTRY_POINTS = [
   "import sendg1",
   "import sendg1.tasks",
-  "from sendg1.common.obs.obs_sets import OBS_SETS",
-  "from sendg1.common.obs.groups import build_groups",
+  # A deep start: the term registry pulls in the beam and box-push mdp modules
+  # (and through them robots, sensors, tactile) before sendg1.tasks exists.
   "from sendg1.common.obs.terms import TERMS",
-  "from sendg1.common.robots.g1 import get_g1_cfg",
-  "from sendg1.common.rewards import build_rewards",
-  "from sendg1.eval.protocol import EvalProtocol",
-  "from sendg1.fingerprint import fingerprint",
-  "from sendg1.tasks.velocity.env_cfg import make_g1_velocity_env_cfg",
-  "from sendg1.common.beam.mdp import BeamEpisode",
-  "from sendg1.tasks.beam.env_cfg import make_beam_env_cfg",
 ]
+"""Each costs a fresh interpreter (~4 s); 12 entry points were trimmed to these
+three on 2026-11-15, which between them start the import at the package root,
+at the task registry, and deep inside ``common``."""
 
 
 @pytest.mark.parametrize("stmt", ENTRY_POINTS)

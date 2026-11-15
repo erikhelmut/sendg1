@@ -10,8 +10,8 @@ Every script that writes a policy video goes through :class:`EvalVideo`:
 
 Each frame is the robot, rendered in a dark studio theme, plus a HUD with both
 soles' taxels. The HUD shows what the tactile sole measures when the policy's
-actor reads tactile input, and stays at zero for blind policies (and contact
-oracles), so paired clips line up panel for panel.
+actor reads tactile input, and stays at zero for blind policies, so paired
+clips line up panel for panel.
 """
 
 from sendg1.video.recorder import (

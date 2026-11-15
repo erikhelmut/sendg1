@@ -8,6 +8,8 @@ is taken before mjlab's post-step forward pass and can differ by solver noise.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 import torch
 
@@ -64,7 +66,7 @@ def rollout():
 @pytest.mark.slow
 def test_observation_shape_and_finite(rollout) -> None:
   for step in rollout:
-    assert step["obs"].shape == (NUM_ENVS, 62)
+    assert step["obs"].shape == (NUM_ENVS, 58)
     assert torch.isfinite(step["obs"]).all()
 
 
@@ -98,7 +100,18 @@ def test_taxels_conserve_normal_force_and_are_non_negative(rollout) -> None:
 
 @pytest.mark.slow
 def test_loaded_foot_on_flat_ground_sees_support(rollout) -> None:
+  """A loaded foot resting (nearly) flat has ground under some taxel. A foot
+  tilted onto the sole box's rim or corner may not: the box reaches ~5 mm past
+  the outer taxels (more at its corners), and with 1 mm of compliance a few
+  degrees lift every taxel clear; the model then falls back to a spread around
+  the CoP (force still conserved, tested above)."""
+  checked = 0
   for step in rollout:
     r = step["reading"]
-    loaded = r.net_force[..., 2] > 50.0
+    q = step["quat"]
+    up_z = 1 - 2 * (q[..., 1] ** 2 + q[..., 2] ** 2)  # sole normal's world z
+    flat = up_z > math.cos(math.radians(1.5))
+    loaded = (r.net_force[..., 2] > 50.0) & flat
+    checked += int(loaded.sum())
     assert (r.support.amax(-1)[loaded] > 0).all()
+  assert checked > 20

@@ -2,8 +2,8 @@
 # Sync a checkout to the cluster and queue one training run there.
 #
 #   scripts/cluster/submit.sh [--sbatch "<sbatch flags>"] <checkout> <train args...>
-#   scripts/cluster/submit.sh ~/sendg1-beam G1-Beam-E2E-Curved \
-#     --agent.run-name blind_s0 --agent.seed 0
+#   scripts/cluster/submit.sh ~/sendg1 G1-Beam-Touch-Curved-Plain \
+#     --agent.run-name touch_s0 --agent.seed 0
 #
 # <train args> go to mjlab's `train` unchanged; the job runs in the cluster
 # worktree with its src on PYTHONPATH and writes logs/ there as it does here.

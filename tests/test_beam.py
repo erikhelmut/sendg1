@@ -9,7 +9,7 @@ import math
 import numpy as np
 import pytest
 import torch
-from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
+from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg
 
 import sendg1.tasks  # noqa: F401
 from sendg1.common.beam import tactile as tac
@@ -24,45 +24,33 @@ from sendg1.common.beam.terrain import (
 from sendg1.common.tactile.layout import LAYOUTS
 from sendg1.tasks.beam import (
   BLIND_MLP_PLAIN_TASK,
+  BLIND_LSTM_TASK,
   BLIND_TASK,
-  CURVED_TASK,
-  TASK,
+  TOUCH_LSTM_TASK,
   TOUCH_MLP_PLAIN_TASK,
-  TOUCH_LSTM_R2_R64_TASK,
-  TOUCH_LSTM_R2_TASK,
-  TOUCH_PLAIN_R2_R64_TASK,
-  TOUCH_PLAIN_R2_TASK,
-  TOUCH_PLAIN_R64_TASK,
   TOUCH_PLAIN_TASK,
   assert_actor_is_deployable,
-  reward_task,
 )
-from sendg1.tasks.beam.env_cfg import REWARD_VARIANTS
 
-ACTOR_EXPECTED = {
+BLIND_ACTOR_EXPECTED = {
   "base_ang_vel",
   "projected_gravity",
   "joint_pos",
   "joint_vel",
   "actions",
   "command_vx",
-  "tactile_map",
 }
-ACTOR_DIM = 3 + 3 + 29 + 29 + 29 + 1 + 2 * 33
-TOUCH_ACTOR_DIM = ACTOR_DIM - 2 * 33 + 2 * 31
-BLIND_ACTOR_DIM = ACTOR_DIM - 2 * 33
-BLIND_TASKS = (BLIND_TASK, BLIND_MLP_PLAIN_TASK)
-TOUCH_TASKS = (TOUCH_PLAIN_TASK, TOUCH_MLP_PLAIN_TASK)
-ALL_TASKS = [TASK, CURVED_TASK, *TOUCH_TASKS, *BLIND_TASKS]
-TOUCH_CRITIC_TASKS = (*TOUCH_TASKS, *BLIND_TASKS)
+BLIND_ACTOR_DIM = 3 + 3 + 29 + 29 + 29 + 1
+TOUCH_ACTOR_DIM = BLIND_ACTOR_DIM + 2 * tac.TOUCH_PER_FOOT
+BLIND_TASKS = (BLIND_TASK, BLIND_MLP_PLAIN_TASK, BLIND_LSTM_TASK)
+TOUCH_TASKS = (TOUCH_PLAIN_TASK, TOUCH_MLP_PLAIN_TASK, TOUCH_LSTM_TASK)
+ALL_TASKS = [*TOUCH_TASKS, *BLIND_TASKS]
 
 
 def _actor_expected(task: str) -> tuple[set[str], int]:
   if task in BLIND_TASKS:
-    return ACTOR_EXPECTED - {"tactile_map"}, BLIND_ACTOR_DIM
-  if task in TOUCH_TASKS:
-    return (ACTOR_EXPECTED - {"tactile_map"}) | {"tactile_touch"}, TOUCH_ACTOR_DIM
-  return ACTOR_EXPECTED, ACTOR_DIM
+    return BLIND_ACTOR_EXPECTED, BLIND_ACTOR_DIM
+  return BLIND_ACTOR_EXPECTED | {"tactile_touch"}, TOUCH_ACTOR_DIM
 
 
 @pytest.mark.parametrize("task", ALL_TASKS)
@@ -73,10 +61,8 @@ def test_actor_sees_only_deployable_signals(task: str) -> None:
   assert terms == _actor_expected(task)[0]
   assert terms <= DEPLOYABLE
   critic = {t for g in rl_cfg.obs_groups["critic"] for t in env_cfg.observations[g].terms}
-  assert {"base_beam_pose", "feet_beam_pose", "base_lin_vel"} <= critic
-  assert ("beam_ahead" in critic) == (task != TASK)
-  touch_critic = {"tactile_touch_clean", "taxel_forces_clean", "foot_slip_vel", "beam_params"}
-  assert (touch_critic <= critic) == (task in TOUCH_CRITIC_TASKS)
+  assert {"base_beam_pose", "feet_beam_pose", "base_lin_vel", "beam_ahead"} <= critic
+  assert {"tactile_touch_clean", "taxel_forces_clean", "foot_slip_vel", "beam_params"} <= critic
 
 
 def test_every_actor_is_an_rsl_rl_model() -> None:
@@ -86,12 +72,11 @@ def test_every_actor_is_an_rsl_rl_model() -> None:
   for task in list_tasks():
     if task.startswith(("G1-Beam", "G1-Pedalo", "G1-RollingCylinder", "G1-Slackline")):
       assert load_rl_cfg(task).actor.class_name in ("RNNModel", "MLPModel"), task
-  assert load_env_cfg(TOUCH_PLAIN_TASK).rewards.keys() == load_env_cfg(CURVED_TASK).rewards.keys()
 
 
 def test_touch_features() -> None:
-  """Bits are binary, area is their mean, CoP is zero on an unloaded foot and
-  lateral (+y) on both feet for a lateral-edge load."""
+  """Bits are binary, CoP is zero on an unloaded foot (and under the 15 N
+  contact threshold) and lateral (+y) on both feet for a lateral-edge load."""
   layout = LAYOUTS["slipper_v1"]
   t = layout.num_taxels
   lateral = torch.tensor([float(y > 0.01) for _, y in layout.centers])
@@ -100,17 +85,17 @@ def test_touch_features() -> None:
   normal[0, 1] = 40.0 * lateral
   normal[1, 0] = 3.0  # below the bit threshold everywhere, 78 N in total
   f = tac.touch_features(normal, layout).view(2, 2, tac.TOUCH_PER_FOOT)
-  bits, load, cop, area, contact = f[..., :t], f[..., t], f[..., t + 1 : t + 3], f[..., t + 3], f[..., t + 4]
+  assert tac.TOUCH_PER_FOOT == t + 3
+  bits, load, cop = f[..., :t], f[..., t], f[..., t + 1 : t + 3]
   assert set(bits.unique().tolist()) <= {0.0, 1.0}
-  torch.testing.assert_close(area, bits.mean(-1))
   torch.testing.assert_close(f[0, 0], f[0, 1])
-  assert cop[0, 0, 1] > 0.5 and contact[0, 0] == 1
-  assert torch.all(cop[1, 1] == 0) and contact[1, 1] == 0 and load[1, 1] == 0
-  assert bits[1, 0].sum() == 0 and contact[1, 0] == 1
+  assert cop[0, 0, 1] > 0.5
+  assert torch.all(cop[1, 1] == 0) and load[1, 1] == 0
+  assert bits[1, 0].sum() == 0 and load[1, 0] > 0
 
 
 def test_leak_guard_fires() -> None:
-  env_cfg = load_env_cfg(TASK)
+  env_cfg = load_env_cfg(TOUCH_PLAIN_TASK)
   with pytest.raises(ValueError, match="privileged"):
     assert_actor_is_deployable(env_cfg.observations, ("critic",))
   env_cfg.observations["actor"].terms["feet_beam_pose"] = TERMS["feet_beam_pose"].build()
@@ -118,19 +103,11 @@ def test_leak_guard_fires() -> None:
     assert_actor_is_deployable(env_cfg.observations)
 
 
-def test_curved_task_keeps_the_straight_actor() -> None:
-  """Same actor inputs and network, so a straight-beam actor loads into the
-  curved task."""
-  a, b = load_env_cfg(TASK), load_env_cfg(CURVED_TASK)
-  assert list(a.observations["actor"].terms) == list(b.observations["actor"].terms)
-  assert load_rl_cfg(TASK).actor == load_rl_cfg(CURVED_TASK).actor
-
-
 def test_play_cfg_has_no_curriculum_or_state_bank() -> None:
-  cfg = load_env_cfg(TASK, play=True)
+  cfg = load_env_cfg(TOUCH_PLAIN_TASK, play=True)
   assert cfg.curriculum == {}
   assert "spawn_from_bank" not in cfg.events
-  assert "spawn_from_bank" in load_env_cfg(TASK).events
+  assert "spawn_from_bank" in load_env_cfg(TOUCH_PLAIN_TASK).events
 
 
 # -- terrain -----------------------------------------------------------------
@@ -189,22 +166,6 @@ def test_mirror_permutation_is_an_involution() -> None:
   assert all(perm[perm[i]] == i for i in range(layout.num_taxels))
 
 
-def test_features_are_mirror_consistent() -> None:
-  """A load on the left foot's lateral edge and the same load on the right
-  foot's lateral edge give identical canonical features."""
-  layout = LAYOUTS["slipper_v1"]
-  t = layout.num_taxels
-  lateral_left = torch.tensor([float(y > 0.01) for _, y in layout.centers])
-  normal = torch.zeros(1, 2, t)
-  normal[0, 0] = 50.0 * lateral_left
-  # Canonical right foot uses the mirrored indexing already, so feed the same.
-  normal[0, 1] = 50.0 * lateral_left
-  f = tac.features_from_normals(normal, layout).view(2, -1)
-  assert torch.allclose(f[0], f[1])
-  edge_lat = f[0, t + 4]
-  assert edge_lat > 0.9
-
-
 def test_projection_on_bent_path() -> None:
   # Right-angle bend at (1, 0): a point inside the corner projects onto the
   # second leg, with the second leg's heading.
@@ -221,8 +182,6 @@ def test_projection_on_bent_path() -> None:
 def test_env_builds_steps_and_obs_are_finite(task: str) -> None:
   from mjlab.envs import ManagerBasedRlEnv
 
-  from sendg1.common.beam.mdp import beam_ahead_obs
-
   cfg = load_env_cfg(task)
   cfg.scene.num_envs = 8
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
@@ -233,8 +192,6 @@ def test_env_builds_steps_and_obs_are_finite(task: str) -> None:
       obs, rew, *_ = env.step(torch.zeros(8, env.action_manager.total_action_dim, device=env.device))
       assert torch.isfinite(rew).all()
       assert all(torch.isfinite(v).all() for v in obs.values())
-    if task == TASK:
-      assert torch.all(beam_ahead_obs(env) == 0)
   finally:
     env.close()
 
@@ -248,7 +205,7 @@ def test_beam_ahead_sees_bends() -> None:
   from sendg1.common.beam.geometry import BeamGeometry
   from sendg1.common.beam.mdp import _point_at_arc, beam_ahead_obs
 
-  cfg = load_env_cfg(CURVED_TASK)
+  cfg = load_env_cfg(TOUCH_PLAIN_TASK)
   cfg.scene.num_envs = 48
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
   try:
@@ -310,6 +267,7 @@ def test_plain_actor_trains_one_iteration(tmp_path) -> None:
   [
     (TOUCH_PLAIN_TASK, BLIND_TASK),
     (TOUCH_MLP_PLAIN_TASK, BLIND_MLP_PLAIN_TASK),
+    (TOUCH_LSTM_TASK, BLIND_LSTM_TASK),
   ],
 )
 def test_blind_twin_differs_only_in_the_tactile_input(touch: str, blind: str) -> None:
@@ -347,68 +305,27 @@ def test_mlp_actor_trains_one_iteration(tmp_path) -> None:
     env.close()
 
 
-@pytest.mark.parametrize("variant", sorted(REWARD_VARIANTS))
-def test_reward_variant_changes_only_the_reward(variant: str) -> None:
-  """The reward study compares rewards: observations, events, terminations,
-  terrain, curriculum and PPO are the touch plain MLP's."""
+def test_every_beam_task_uses_beam_reward() -> None:
+  """The reward study was removed: every beam task trains on beam_reward."""
+  from sendg1.fingerprint import fingerprint
+  from sendg1.tasks.beam.env_cfg import build_beam_reward
+
+  ref = fingerprint(build_beam_reward())
+  tasks = [t for t in list_tasks() if t.startswith("G1-Beam")]
+  assert tasks and not [t for t in tasks if "-R-" in t]
+  for t in tasks:
+    assert fingerprint(load_env_cfg(t).rewards) == ref, t
+  assert "foot_side_contact" not in build_beam_reward()
+
+
+def test_lstm_tasks_use_64_steps_and_a_4e4_start_lr() -> None:
+  """The LSTM pair: LSTM(256), 64-step rollouts in 8 minibatches (the GRU's
+  minibatch size), adaptive schedule starting at 4e-4; env as the GRU's."""
   from sendg1.fingerprint import fingerprint
 
-  v, ref = load_env_cfg(reward_task(variant)), load_env_cfg(TOUCH_MLP_PLAIN_TASK)
-  for part in ("observations", "events", "terminations", "curriculum", "commands", "actions"):
-    assert fingerprint(getattr(v, part)) == fingerprint(getattr(ref, part)), part
-  assert fingerprint(v.scene.terrain) == fingerprint(ref.scene.terrain)
-  v_rl, ref_rl = load_rl_cfg(reward_task(variant)), load_rl_cfg(TOUCH_MLP_PLAIN_TASK)
-  assert v_rl.actor == ref_rl.actor and v_rl.critic == ref_rl.critic and v_rl.algorithm == ref_rl.algorithm
-  same = fingerprint(v.rewards) == fingerprint(ref.rewards)
-  assert same == (variant == "base")
-
-
-def test_r64_task_changes_only_the_rollout_length() -> None:
-  """The 64-step GRU differs from the touch plain GRU only in its rollout
-  length (and the minibatch count that keeps the minibatch size)."""
-  from sendg1.fingerprint import fingerprint
-
-  ref, ref_rl = load_env_cfg(TOUCH_PLAIN_TASK), load_rl_cfg(TOUCH_PLAIN_TASK)
-  v = load_env_cfg(TOUCH_PLAIN_R64_TASK)
-  for part in ("rewards", "terminations", "curriculum", "commands", "actions", "events"):
-    assert fingerprint(getattr(v, part)) == fingerprint(getattr(ref, part)), part
-  assert fingerprint(v.scene.terrain) == fingerprint(ref.scene.terrain)
-  r64, r64_rl = load_env_cfg(TOUCH_PLAIN_R64_TASK), load_rl_cfg(TOUCH_PLAIN_R64_TASK)
-  assert fingerprint(r64.observations) == fingerprint(ref.observations)
-  assert r64_rl.actor == ref_rl.actor
-  assert (r64_rl.num_steps_per_env, ref_rl.num_steps_per_env) == (64, 32)
-  # Same minibatch size: twice the samples in twice the minibatches.
-  assert (r64_rl.algorithm.num_mini_batches, ref_rl.algorithm.num_mini_batches) == (8, 4)
-  r64_rl.algorithm.num_mini_batches = 4
-  assert r64_rl.algorithm == ref_rl.algorithm
-
-
-def test_round2_tasks_keep_round_two_rules_but_35s_episodes() -> None:
-  """The R2-35s GRUs are the touch plain GRU (and its R64 twin) under round
-  two's widths, curriculum, terminations and reward, with 35 s episodes."""
-  from sendg1.fingerprint import fingerprint
-  from sendg1.tasks.beam.env_cfg import EPISODE_S, ROUND2_CURRICULUM, ROUND2_WIDTHS
-
-  for task, ref_task in ((TOUCH_PLAIN_R2_TASK, TOUCH_PLAIN_TASK),
-                         (TOUCH_PLAIN_R2_R64_TASK, TOUCH_PLAIN_R64_TASK)):
-    v, ref = load_env_cfg(task), load_env_cfg(ref_task)
-    assert v.episode_length_s == EPISODE_S == 35.0
-    assert fingerprint(v.observations) == fingerprint(ref.observations)
-    assert load_rl_cfg(task).actor == load_rl_cfg(ref_task).actor
-    assert load_rl_cfg(task).num_steps_per_env == load_rl_cfg(ref_task).num_steps_per_env
-    gen = v.scene.terrain.terrain_generator
-    assert all(t.widths == ROUND2_WIDTHS for t in gen.sub_terrains.values())
-    assert "finished" not in v.terminations and "foot_side_contact" not in v.rewards
-    assert v.terminations["foot_off_beam"].params == {}
-    assert v.events["push"].params["from_level"] == 3
-    params = v.curriculum["beam_levels"].params
-    assert {k: params[k] for k in ROUND2_CURRICULUM} == ROUND2_CURRICULUM
-    assert set(v.rewards) | {"foot_side_contact"} == set(ref.rewards)
-  # The LSTM twins differ from the R2 GRUs only in the recurrent cell.
-  for lstm, gru in ((TOUCH_LSTM_R2_TASK, TOUCH_PLAIN_R2_TASK),
-                    (TOUCH_LSTM_R2_R64_TASK, TOUCH_PLAIN_R2_R64_TASK)):
-    assert fingerprint(load_env_cfg(lstm)) == fingerprint(load_env_cfg(gru))
-    a, b = load_rl_cfg(lstm), load_rl_cfg(gru)
-    assert (a.actor.rnn_type, b.actor.rnn_type) == ("lstm", "gru")
-    a.actor.rnn_type = "gru"
-    assert (a.actor, a.algorithm, a.num_steps_per_env) == (b.actor, b.algorithm, b.num_steps_per_env)
+  for task, gru in ((TOUCH_LSTM_TASK, TOUCH_PLAIN_TASK), (BLIND_LSTM_TASK, BLIND_TASK)):
+    rl, ref = load_rl_cfg(task), load_rl_cfg(gru)
+    assert rl.actor.rnn_type == "lstm" and rl.num_steps_per_env == 64
+    assert rl.algorithm.learning_rate == 4.0e-4 and rl.algorithm.schedule == "adaptive"
+    assert rl.algorithm.num_mini_batches == 2 * ref.algorithm.num_mini_batches
+    assert fingerprint(load_env_cfg(task)) == fingerprint(load_env_cfg(gru))

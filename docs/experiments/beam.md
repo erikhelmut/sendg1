@@ -8,48 +8,41 @@ observations and episode length, so its checkpoints load).
 
 | Task id | Beams | Actor sees | Actor dim |
 |---|---|---|---|
-| `G1-Beam-E2E` | straight | IMU, joints, previous action, forward command, tactile contact map | 160 |
-| `G1-Beam-E2E-Curved` | straight, `bend` (joints up to 25°), `turn` (up to 60°) | same | 160 |
-| `G1-Beam-Touch-Curved-Plain` | as `-Curved` | same, tactile as touch features | 156 |
-| `G1-Beam-Curved-Blind` | as `-Curved` | as `Touch-Curved-Plain` without tactile input (blind baseline) | 94 |
-| `G1-Beam-Touch-Curved-MLP-Plain` | as `-Curved` | touch features; plain MLP, no memory | 156 |
-| `G1-Beam-Curved-Blind-MLP-Plain` | as `-Curved` | no tactile; plain MLP, no memory | 94 |
-| `G1-Beam-Touch-Curved-Plain-R64` | as `-Curved` | as `Touch-Curved-Plain`, 64-step rollouts | 156 |
-| `G1-Beam-Touch-Curved-Plain-R2-35s` | round-two widths | as `Touch-Curved-Plain`, round-two rules, 35 s episodes | 156 |
-| `G1-Beam-Touch-Curved-Plain-R2-35s-R64` | round-two widths | as `-R2-35s`, 64-step rollouts | 156 |
-| `G1-Beam-Touch-Curved-LSTM-R2-35s` | round-two widths | as `-R2-35s`, LSTM(256) instead of the GRU | 156 |
-| `G1-Beam-Touch-Curved-LSTM-R2-35s-R64` | round-two widths | as `-LSTM-R2-35s`, 64-step rollouts | 156 |
+| `G1-Beam-Touch-Curved-Plain` | straight, `bend` (joints up to 25°), `turn` (up to 60°) | IMU, joints, previous action, forward command, tactile touch features; GRU | 152 |
+| `G1-Beam-Curved-Blind` | same | as `Touch-Curved-Plain` without tactile input (blind baseline) | 94 |
+| `G1-Beam-Touch-Curved-MLP-Plain` | same | touch features; plain MLP, no memory | 152 |
+| `G1-Beam-Curved-Blind-MLP-Plain` | same | no tactile; plain MLP, no memory | 94 |
+| `G1-Beam-Touch-Curved-LSTM` | same | touch features; LSTM(256), 64-step rollouts, LR 4e-4 at start (adaptive) | 152 |
+| `G1-Beam-Curved-Blind-LSTM` | same | no tactile; as `Touch-Curved-LSTM` | 94 |
+
+Removed on 2026-11-15: `G1-Beam-E2E{,-Curved}` (the old soft contact-map
+tactile input) and the round-three experiments `-Plain-R64`, `-Plain-R2-35s`,
+`-Plain-R2-35s-R64`, `-LSTM-R2-35s`, `-LSTM-R2-35s-R64`. Their results below
+stay as a record; their checkpoints no longer load.
 
 - **Terrain** (`common/beam/terrain.py`): a 4 m beam between two 1 m platforms,
   0.15-0.30 m above the ground (one height per column). Rows are width levels:
   0.40, 0.30, 0.25, 0.20, 0.175, 0.15, 0.125, 0.10, 0.085, 0.07, 0.05 m
-  (seven levels, 0.40-0.05 m, before round three). The curved task adds a `bend` and
-  a `turn` column per height: straight pieces of 0.6-1.4 m joined at random
+  (seven levels, 0.40-0.05 m, before round three). Next to the straight beams
+  every task has a `bend` and a `turn` column per height: straight pieces of 0.6-1.4 m joined at random
   heading changes, a disc filling each joint. Every bent tile has its own path.
 - **Actor**: rsl_rl's `RNNModel`, a GRU(256) -> MLP(256, 128). It sees only
   `onboard` / `sensor` terms (`common/beam/terms.py`); registration fails
-  otherwise. Tactile input: per foot a soft per-taxel contact map, load, CoP,
-  contact area, edge loading, contact flag, with gain errors, dead taxels,
-  noise, frame drops and 0-1 step latency. The `Touch` tasks instead give per
-  foot a 26-bit "taxel above 3 N" map, load / body weight, CoP (+-1, 0 in the
-  air), contact area and a contact flag, under the same sensor faults (the
-  model every task now shares, [tactile.md](../tactile.md#what-the-actor-sees)).
-  The `-MLP-Plain` tasks drop the memory: rsl_rl's `MLPModel` (512, 256, 128)
-  on the current observation only. `-R64` is the GRU with 64-step rollouts (in
-  8 minibatches, so each keeps the other runs' size): its gradients span
-  1.28 s instead of 0.64 s, under one step of the slow beam gait. `-LSTM-*`
-  swap the GRU for an LSTM(256).
+  otherwise. Tactile input (`Touch` tasks): per foot a 26-bit "taxel above
+  3 N" map, load / body weight and CoP (+-1, 0 in the air), with gain errors,
+  dead taxels, noise, frame drops and 0-1 step latency: the model every task
+  shares ([tactile.md](../tactile.md#what-the-actor-sees)). The `-MLP-Plain`
+  tasks drop the memory: rsl_rl's `MLPModel` (512, 256, 128) on the current
+  observation only. `rl_cfg.ActorKind` also offers an LSTM(256).
 - **Removed actors** (2026-11-14): the mirror-equivariant GRU and MLP
-  (`G1-Beam-Touch-Curved`, `-Curved-Blind-Sym`, `-MLP-Sym`, and the symmetric
-  actor `G1-Beam-E2E{,-Curved}` used to have) and the causal transformer
-  (`-Transformer`: 64 frames, 4 frames per token, 2 layers). Their results
-  below stay as a record; their checkpoints no longer load, and
-  `G1-Beam-E2E{,-Curved}` now train a plain GRU.
-- **Critic**: MLP on the actor's terms plus ground truth: base velocity, feet
-  and base pose relative to the beam, beam progress, width, height and friction,
-  the clean tactile map, contact forces, actuation lag; on curved beams also
-  how far the beam turns 0.25-1.5 m ahead. The `Touch` critics also get the
-  clean per-taxel normal and shear forces and the feet's slip velocity.
+  (`G1-Beam-Touch-Curved`, `-Curved-Blind-Sym`, `-MLP-Sym`) and the causal
+  transformer (`-Transformer`: 64 frames, 4 frames per token, 2 layers). Their
+  results below stay as a record; their checkpoints no longer load.
+- **Critic** (the same for touch and blind): MLP on the actor's
+  proprioception plus ground truth: base velocity, feet and base pose relative
+  to the beam, beam progress, width, height and friction, the clean touch
+  features, clean per-taxel normal and shear forces, the feet's slip velocity,
+  contact forces, actuation lag, and how far the beam turns 0.25-1.5 m ahead.
 - **Curriculum** (per env): each env keeps its last 3 results on its level, a
   success (a walking episode that reaches the end or covers 2 m of beam
   without falling) or a fall; 2 successes move it one width narrower, 2 falls
@@ -63,22 +56,20 @@ observations and episode length, so its checkpoints load).
   before), ending 2 s after the robot reaches the end platform (a time-out,
   not a fall). A fall ends one early: tilt over 40 deg, pelvis low, a non-foot
   contact, or a sole 10 cm below the beam top (a foot that has dropped off; 3
-  cm before, which also ended episodes where a sole only brushed the beam side
-  and now costs `foot_side_contact`).
-- **Reward** (one table in `tasks/beam/env_cfg.py`): forward progress with
+  cm before, which also ended episodes where a sole only brushed the beam side;
+  that is now neither ended nor penalised).
+- **Reward**, `beam_reward` (one table, `build_beam_reward` in
+  `tasks/beam/env_cfg.py`; first trained in the `touch_plain_s0` runs): forward progress with
   slack, reaching the end, feet and CoM over the centreline, light first
   touches (`load_off_support`, `early_contact_overload`), heel-to-toe steps
   paid per metre gained (`feet_in_line`), posture with shoulder roll left free
   for balancing with the arms out, and the walking regularisers.
 
 ```bash
-train G1-Beam-E2E --env.scene.num-envs 3072 --agent.logger tensorboard
 train G1-Beam-Touch-Curved-Plain --env.scene.num-envs 3072 --agent.run-name touch_plain_s0
 train G1-Beam-Curved-Blind --env.scene.num-envs 3072 --agent.run-name blind_s0
 python scripts/beam_eval.py --task G1-Beam-Touch-Curved-Plain-Eval --checkpoint <pt> --out results/beam/<name>_eval.json
-python scripts/beam_eval.py --checkpoint runs/beam_e2e/<run>/model_X.pt --out results/beam/<name>.json
-python scripts/beam_eval.py --task G1-Beam-E2E-Curved --checkpoint <pt> --out results/beam/<name>_curved.json
-python scripts/beam_video.py --task G1-Beam-E2E-Curved --path bend --checkpoint <pt> --width 0.20
+python scripts/beam_video.py --task G1-Beam-Touch-Curved-Plain --path bend --checkpoint <pt> --width 0.20
 python scripts/render_terrain.py --terrain-set beam --prefix beam --row 2
 ```
 
@@ -88,47 +79,24 @@ are contact chatter, and stance slide in cm per metre travelled. Success alone
 hides a skating gait (no swings, high slide), and such a gait depends on
 friction on hardware, so read both.
 
-## Reward study (touch plain MLP)
+## Reward study (touch plain MLP, removed)
 
-The first touch-MLP run skated: almost no swings, 1.3-2 m of foot slide per
-metre walked. `G1-Beam-Touch-Curved-MLP-Plain-R-<Variant>` changes only the
-reward (`env_cfg.REWARD_VARIANTS`, test-enforced), built from six parts:
+The first touch-MLP run skated (almost no swings, 1.3-2 m of foot slide per
+metre walked), so rounds one and two tried reward variants on the touch MLP
+(`-R-<Variant>` tasks): a linear stance-slip cost, pay per metre gained by
+lifted steps (`swing_clearance`), more air time, softer touchdowns, freer
+arms, a wider heel-to-toe reward, and combinations. Best at 40k (held-out,
+seeds 0/1): `step` (slip + clearance), 89/86/79/60 % and 82/75/56/17 % at
+0.40-0.15 m; base 51/44/1/0 and 50/39/0/0. The study and the variants were
+removed on 2026-11-15: every beam task uses `beam_reward`, the reward of the
+`touch_plain_s0` GRU runs (2026-10-17/20), without the later
+`foot_side_contact` cost.
 
-| part | change |
-|---|---|
-| `slip` | `foot_slip` (-0.1, \|v\|^2) -> `stance_slip` (-1.0, \|v\| of feet in contact) |
-| `clear` | `swing_clearance` +5 per metre gained by steps with >= 5 cm apex |
-| `air` | `feet_air_time` 0.25 -> 1.0 |
-| `soft` | `touchdown_force_rate` -5 -> -2, swing-foot speed cap 1.2 -> 1.6 m/s |
-| `arms` | posture on legs + waist only, `arm_posture` / `arm_joint_vel` -0.02 -> -0.005 |
-| `tandem` | `feet_in_line` gap std 8 -> 15 cm (partial credit for a narrower stance) |
-| `walk` | `stance_slip` -0.3 on top of `foot_slip`, `swing_clearance` +2 for >= 3 cm apex |
+## Round three: memory over a gait cycle (tasks removed)
 
-Variants: `base`, `slip`, `clear`, `step` (slip + clear), `step_air`,
-`step_soft`, `arms`, `tandem`, `step_arms`, `step_tandem`, `all`, and from
-round two `walk`, `walk_arms`. Seed 0 runs
-on the normal QoS, seed 1 on `--qos=scavenger`. A preempted scavenger job is
-requeued and resumes from its newest checkpoint (`train.sbatch`), so it
-saves every 250 iterations.
+A record: the tasks below were removed on 2026-11-15.
 
-Round one (seed 0, held-out, 20k): every `slip`/`clear` variant steps (5-10
-swings/m, 3-6 cm apex, half the slide) but loses narrow-beam success; best
-`step_arms` 57/61/26/2 % at 0.40-0.15 m vs base 86/85/59/21 %, and base itself
-switches to low (1.4 cm) steps between 15k and 20k (95/91/72/30 % at 15k while
-it still skated). `step_air`, `step_tandem` and `all` never leave the widest
-beam. Round two tries the gentler `walk` and continues base, `step`,
-`step_arms` and `tandem` to 40k.
-
-Round two (held-out, 40k, seeds 0/1): `step` keeps its 6-7 cm steps and
-recovers, 89/86/79/60 % and 82/75/56/17 % at 0.40-0.15 m, the best 0.15 m
-result so far and still rising at 40k. Base gets worse with its own late
-switch to low steps (51/44/1/0, 50/39/0/0). `step_arms` splits by seed
-(96/83/73/38 vs 19/13/0/0), `tandem` stays near 55/60/5/0, and `walk`
-(20k) steps lower (4 cm) for 65/61/10/0 and 82/83/41/1 %.
-
-## Round three: memory over a gait cycle
-
-Unchanged base reward, touch input, seed 0, under the round-three episodes,
+`beam_reward`, touch input, seed 0, under the round-three episodes,
 terminations and curriculum above: `-Transformer` against `-Plain-R64`. Their
 results are not comparable with earlier rounds' (different widths, episodes
 and curriculum); for a reference, re-evaluate old checkpoints with the current

@@ -45,14 +45,14 @@ python scripts/sweep.py --tasks flat --obs-sets blind tactile --seeds 0
 One sensor model and one observation term for every task: `tactile_touch`
 (`common/beam/tactile.py`, `touch_features`), in the beam, pedalo,
 rolling-cylinder and slackline actors and in the `tactile` obs set of the
-velocity and box-push tasks. Per foot, 31 dims, both feet 62:
+velocity and box-push tasks. Per foot, 29 dims, both feet 58:
 
 - `bits[26]`: 1 where a taxel reads above 3 N, so which part of the sole touches;
 - `load`: total normal force / body weight (343 N), clipped to [0, 1.5];
 - `cop[2]`: centre of pressure from the taxel readings, scaled to the sole's
-  half extents, 0 while the foot is not in contact;
-- `area`: fraction of taxels touching;
-- `contact`: total normal force above 15 N.
+  half extents, 0 while the foot is not in contact (15 N or less in total).
+
+Contact area and a contact flag were features until 2026-11-15.
 
 The right foot is re-indexed into the left foot's mirror image, so +y is
 lateral on both feet.
@@ -61,7 +61,7 @@ lateral on both feet.
 vectors, so the actor gets no shear. The model's shear is the net tangential
 force shared in proportion to load, and only the critic sees it, where a task's
 critic carries it at all. Most features are unaffected by a global gain error
-(the bits, CoP, area and contact flag); `load` is the one a calibration error
+(the bits and CoP); `load` is the one a calibration error
 moves.
 
 **Sensor faults** (`TactileNoiseState`, actor only; the critic's copies are
@@ -73,19 +73,8 @@ strength: from 0.3 to 1.0 over the beam's curriculum levels, a fixed 0.5
 every obs set's events, blind included.
 
 **Not modelled yet**: the real sensor's pressure response (nonlinearity,
-saturation, hysteresis, drift), crosstalk, quantisation; the slipper's
-thickness and friction.
+saturation, hysteresis, drift), crosstalk, quantisation; the rubber sole's own
+friction (the feet use the randomised 0.3-1.2 of every task).
 
-## `contact_oracle` is diagnostic, and off by default
-
-Its actor gets noiseless, zero-latency, perfectly-calibrated foot contact and net
-contact force — an **upper bound** on what any real tactile array could deliver,
-not a deployable policy. It exists to answer the question that gates the project:
-*is there room for foot contact information to help this policy at all?* If it
-does not beat `blind`, a noisy 26-taxel sensor will not either.
-
-It is never in a default sweep. Request it explicitly:
-
-```bash
-python scripts/sweep.py --tasks flat --obs-sets contact_oracle --seeds 0
-```
+A diagnostic `contact_oracle` obs set, whose actor got noiseless foot contact
+and net contact force as an upper bound, was removed on 2026-11-15.

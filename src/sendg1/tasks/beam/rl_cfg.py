@@ -53,10 +53,13 @@ def _actor_cfg(actor: ActorKind) -> RslRlModelCfg:
 def beam_ppo_cfg(
   seed: int = 0,
   max_iterations: int = 20_000,
-  experiment_name: str = "beam_e2e",
+  experiment_name: str = "beam_touch_curved_plain",
   actor: ActorKind = "gru",
   num_steps_per_env: int = 32,
+  learning_rate: float = 1.0e-3,
 ) -> RslRlOnPolicyRunnerCfg:
+  """``learning_rate`` is the adaptive schedule's starting value (it then
+  follows the KL target)."""
   return RslRlOnPolicyRunnerCfg(
     seed=seed,
     obs_groups={"actor": ("actor",), "critic": ("critic",)},
@@ -72,7 +75,7 @@ def beam_ppo_cfg(
       # 64-step rollout in 4 minibatches doubled the update's memory and ran
       # the simulator out of GPU memory on a 24 GB card.
       num_mini_batches=4 * num_steps_per_env // 32,
-      learning_rate=1.0e-3,
+      learning_rate=learning_rate,
       schedule="adaptive",
       gamma=0.99,
       lam=0.95,

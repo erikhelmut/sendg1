@@ -46,7 +46,7 @@ told where the box is.
   velocity and tilt, sole slip velocities and the push force.
 - **Tactile actor** (`Sendg1-BoxPush*-G1-Tactile`): the shared tactile slipper
   model (`tactile_touch`, [tactile.md](../tactile.md#what-the-actor-sees)),
-  normal load only. Actor: 96 + 62 = 158. Runs before 2026-11-14 used the
+  normal load only. Actor: 96 + 58 = 154. Runs before 2026-11-14 used the
   oracle `tactile_array` (per-taxel normal and shear plus 12 aggregate
   channels, 252 dims) and are not comparable.
 - **Per-episode log** (`Episode_Metrics/*`; one CSV row per episode in
@@ -68,7 +68,7 @@ told where the box is.
 ```bash
 python scripts/box_push_feasibility.py                 # margins and tipping of the ranges
 python scripts/box_push_video.py --random --episodes 4 # scene check
-python scripts/sweep.py --tasks box_push --obs-sets blind contact_oracle tactile --seeds 0 1 2
+python scripts/sweep.py --tasks box_push --obs-sets blind tactile --seeds 0 1 2
 python scripts/evaluate_box_push.py --task Sendg1-BoxPush-G1-Tactile --seed 0
 python scripts/plot_box_push_curves.py runs/box_push__tactile/<run> --out curves.png
 ```

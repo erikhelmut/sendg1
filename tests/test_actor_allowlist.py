@@ -5,11 +5,10 @@ Constraint: the actor may only observe quantities available on the real G1
 action, user command). The critic may use privileged information.
 
 This test fails if a non-deployable term ends up in a policy observation group.
-It checks three distinct failure modes:
+It checks two distinct failure modes:
 
   1. a privileged term reaching an actor group;
-  2. an oracle term reaching an actor group of a non-diagnostic obs set;
-  3. a term appearing anywhere without being declared in TERMS -- which closes
+  2. a term appearing anywhere without being declared in TERMS -- which closes
      the bypass where someone adds an observation and simply forgets to
      register its availability.
 """
@@ -64,7 +63,6 @@ def _actor_terms(task_id: str) -> dict[str, list[str]]:
 
 @pytest.mark.parametrize("task_id", ALL_VARIANTS)
 def test_actor_contains_no_privileged_terms(task_id: str) -> None:
-  obs_set = OBS_SETS[variants()[task_id][1]]
   for group, terms in _actor_terms(task_id).items():
     for term in terms:
       spec = TERMS[term]
@@ -72,11 +70,6 @@ def test_actor_contains_no_privileged_terms(task_id: str) -> None:
         f"{task_id}: actor group {group!r} contains privileged term {term!r}. "
         f"Rationale on record: {spec.rationale}"
       )
-      if spec.availability == "oracle":
-        assert obs_set.diagnostic, (
-          f"{task_id}: actor group {group!r} contains oracle term {term!r} but "
-          "the obs set is not marked diagnostic."
-        )
 
 
 @pytest.mark.parametrize("task_id", ALL_VARIANTS)
@@ -155,17 +148,13 @@ def test_critic_is_identical_across_obs_sets() -> None:
     )
 
 
-def test_diagnostic_sets_are_flagged_and_not_default() -> None:
+def test_the_study_has_exactly_two_conditions() -> None:
+  """Blind vs tactile, nothing else; blind is the default."""
   from sendg1.common.obs.obs_sets import DEFAULT_OBS_SET, research_obs_sets
 
-  assert not OBS_SETS[DEFAULT_OBS_SET].diagnostic
-  assert "contact_oracle" in OBS_SETS
-  assert OBS_SETS["contact_oracle"].diagnostic
-  assert "contact_oracle" not in research_obs_sets()
-  # The tactile set is a research claim: its sensor model carries the real
-  # slipper's faults and reads normal load only.
-  assert not OBS_SETS["tactile"].diagnostic
-  assert "tactile" in research_obs_sets()
+  assert set(OBS_SETS) == {"blind", "tactile"}
+  assert DEFAULT_OBS_SET == "blind"
+  assert set(research_obs_sets()) == {"blind", "tactile"}
 
 
 def test_every_tactile_actor_uses_the_shared_sensor_model() -> None:
@@ -218,24 +207,14 @@ def test_guard_rejects_base_lin_vel_in_actor() -> None:
     assert_actor_is_legal("Fake-Task", "blind", obs_set, bad)
 
 
-def test_guard_rejects_oracle_term_in_non_diagnostic_set() -> None:
+def test_guard_rejects_ideal_foot_contact_in_actor() -> None:
+  """The noiseless foot contact is critic-only now (the contact oracle is gone)."""
   from sendg1.tasks._register import assert_actor_is_legal
 
   obs_set = OBS_SETS["blind"]
   bad = {"proprio": _fake_group("base_ang_vel", "foot_contact_ideal")}
-  with pytest.raises(ValueError, match="ORACLE"):
+  with pytest.raises(ValueError, match="PRIVILEGED"):
     assert_actor_is_legal("Fake-Task", "blind", obs_set, bad)
-
-
-def test_guard_accepts_oracle_term_in_diagnostic_set() -> None:
-  from sendg1.tasks._register import assert_actor_is_legal
-
-  obs_set = OBS_SETS["contact_oracle"]
-  ok = {
-    "proprio": _fake_group("base_ang_vel"),
-    "contact_ideal": _fake_group("foot_contact_ideal"),
-  }
-  assert_actor_is_legal("Fake-Task", "contact_oracle", obs_set, ok)
 
 
 def test_guard_rejects_undeclared_term() -> None:

@@ -1,5 +1,5 @@
 """Beam walking: a blind G1 follows a narrow, straight or curved beam by touch
-(``G1-Beam-E2E``, ``G1-Beam-E2E-Curved``).
+(``tasks/beam``).
 
 - ``terrain``   the beam tile: start/end platforms, a beam along a straight or
                 bent centreline path, ground below.
