@@ -76,5 +76,6 @@ uv run python scripts/sweep.py --dry-run
   [rolling cylinder](docs/experiments/rolling-cylinder.md),
   [slackline](docs/experiments/slackline.md)
 - [Evaluation videos](docs/videos.md): one renderer for every clip
+- [Gait analysis](docs/gait.md): human-style gait comparison, tactile vs blind
 - [Design](docs/design.md): the three rules, decisions on record, open items
 - [CLAUDE.md](CLAUDE.md): working notes for coding agents

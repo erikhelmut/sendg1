@@ -18,6 +18,7 @@ ALL_VARIANTS = sorted(variants())
 
 BASE_ACTOR_DIM = {
   "Sendg1-Velocity-Flat-G1": 96,
+  "Sendg1-Velocity-Flat-G1-LSTM": 96,
   "Sendg1-Velocity-Rough-G1": 96,
   # The FALCON-style low level: flat velocity plus a hand-force curriculum.
   "Sendg1-VelocityPush-G1": 96,
@@ -138,3 +139,17 @@ def test_blind_actor_dim_matches_across_terrains() -> None:
 def test_obs_set_descriptions_are_informative() -> None:
   for name, obs_set in OBS_SETS.items():
     assert len(obs_set.description) > 40, f"{name}: describe what this set is for"
+
+
+@pytest.mark.parametrize("obs_set", ["Blind", "Tactile"])
+def test_walking_lstm_tasks_use_the_beam_lstm_settings(obs_set: str) -> None:
+  from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
+
+  task = f"Sendg1-Velocity-Flat-G1-LSTM-{obs_set}"
+  rl = load_rl_cfg(task)
+  assert rl.actor.class_name == "RNNModel" and rl.actor.rnn_type == "lstm"
+  assert rl.actor.rnn_hidden_dim == 256 and tuple(rl.actor.hidden_dims) == (256, 128)
+  assert rl.num_steps_per_env == 64
+  assert rl.algorithm.learning_rate == 4.0e-4 and rl.algorithm.schedule == "adaptive"
+  assert rl.algorithm.num_mini_batches == 8
+  assert load_env_cfg(task).scene.num_envs == 4096

@@ -13,22 +13,35 @@ locomotion usually benefits from memory. A cheaper first step than an RNN is
 per-term ``history_length`` on the proprio group (frame stacking), which is a
 config change rather than a new model.
 
-Recurrent variant (``recurrent=True``, used by the retired first beam task): the actor becomes
-GRU(256) -> MLP (256, 128); the critic stays the same MLP, since it reads
-privileged state and has nothing to remember.
+Recurrent variant (``recurrent=True``): the actor becomes ``rnn_type``(256) ->
+MLP (256, 128), the beam actor's network; the critic stays the same MLP, since
+it reads privileged state and has nothing to remember. The ``-LSTM`` walking
+tasks use it with the beam LSTM's PPO settings (``LSTM_PPO``).
 """
 
 from __future__ import annotations
+
+from typing import Literal
 
 from mjlab.rl import RslRlModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
 
 HIDDEN_DIMS: tuple[int, ...] = (512, 256, 128)
 ACTIVATION = "elu"
 
-RNN_TYPE = "gru"
+RnnType = Literal["gru", "lstm"]
 RNN_HIDDEN_DIM = 256
 RNN_HEAD_DIMS: tuple[int, ...] = (256, 128)
 """MLP head after the GRU in the recurrent actor."""
+
+LSTM_PPO = {
+  "recurrent": True,
+  "rnn_type": "lstm",
+  "num_steps_per_env": 64,
+  "learning_rate": 4.0e-4,
+  "num_mini_batches": 8,
+}
+"""The beam LSTM tasks' settings (``tasks/beam``): 64-step rollouts (1.28 s,
+about one gait cycle), adaptive LR starting at 4e-4, 8 minibatches."""
 
 SAVE_INTERVAL = 2000
 """Iterations between checkpoints."""
@@ -41,13 +54,16 @@ def build_ppo_cfg(
   seed: int = 0,
   max_iterations: int = 30_000,
   recurrent: bool = False,
+  rnn_type: RnnType = "gru",
   num_steps_per_env: int = 24,
   entropy_coef: float = 0.01,
+  learning_rate: float = 1.0e-3,
+  num_mini_batches: int = 4,
 ) -> RslRlOnPolicyRunnerCfg:
   recurrent_kwargs = (
     dict(
       class_name="RNNModel",
-      rnn_type=RNN_TYPE,
+      rnn_type=rnn_type,
       rnn_hidden_dim=RNN_HIDDEN_DIM,
       rnn_num_layers=1,
     )
@@ -79,8 +95,8 @@ def build_ppo_cfg(
       clip_param=0.2,
       entropy_coef=entropy_coef,
       num_learning_epochs=5,
-      num_mini_batches=4,
-      learning_rate=1.0e-3,
+      num_mini_batches=num_mini_batches,
+      learning_rate=learning_rate,
       schedule="adaptive",
       gamma=0.99,
       lam=0.95,

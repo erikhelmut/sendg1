@@ -7,13 +7,16 @@
 | `Sendg1-Velocity-Flat-G1-Blind` | proprioception only | 96 |
 | `Sendg1-Velocity-Rough-G1-Blind` | proprioception only | 96 |
 | `Sendg1-Velocity-{Flat,Rough}-G1-Tactile` | + tactile slipper (`tactile_touch`) | 154 |
+| `Sendg1-Velocity-Flat-G1-LSTM-{Blind,Tactile}` | as flat velocity; the beam LSTM's actor and PPO: LSTM(256) -> MLP (256, 128), 64-step rollouts, LR 4e-4 at start (adaptive), 4096 envs | 96 / 154 |
 | `Sendg1-VelocityPush-G1-{Blind,Tactile}` | as flat velocity, plus a hand-force curriculum | 96 / 154 |
 | `Sendg1-BoxPush{,Curriculum,Patches}-G1-Blind` | proprioception, pilot command | 96 |
 | `Sendg1-BoxPush{,Curriculum,Patches}-G1-Tactile` | + tactile slipper (`tactile_touch`) | 154 |
 
 Because the height scan is gone, flat and rough share a 96-dim actor input
 space: one architecture serves both, and flat->rough transfer stays a
-meaningful experiment.
+meaningful experiment. The plain velocity tasks use a memoryless MLP actor
+(512, 256, 128), 24-step rollouts, LR 1e-3 at start and 8192 envs on flat
+ground.
 
 Beam walking, box pushing, rolling-cylinder balance and the slackline have
 their own pages:

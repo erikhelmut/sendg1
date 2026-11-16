@@ -1,0 +1,324 @@
+<title>Tactile Gait Lab</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: a lab report — one column of plane-by-plane small multiples, a sticky control strip on top. */
+:root {
+  --bg: #0d1117; --panel: #141a22; --line: #253041; --grid: #1c2430;
+  --fg: #e6edf3; --muted: #8b98a8; --faint: #5b6778;
+  --tactile: #4cc9f0; --blind: #fac055; --accent: #4cc9f0; --hit: rgba(76, 201, 240, .14);
+  --display: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #f6f8fa; --panel: #ffffff; --line: #d5dce4; --grid: #e8edf2;
+  --fg: #16202b; --muted: #536173; --faint: #8a96a5;
+  --tactile: #1f8fbf; --blind: #b07a12; --accent: #1f8fbf; --hit: rgba(31, 143, 191, .12);
+  color-scheme: light; } }
+:root[data-theme="light"] {
+  --bg: #f6f8fa; --panel: #ffffff; --line: #d5dce4; --grid: #e8edf2;
+  --fg: #16202b; --muted: #536173; --faint: #8a96a5;
+  --tactile: #1f8fbf; --blind: #b07a12; --accent: #1f8fbf; --hit: rgba(31, 143, 191, .12);
+  color-scheme: light; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1 { font-family: var(--display); font-weight: 600; font-size: clamp(24px, 4vw, 34px); margin: 0; letter-spacing: -.01em; text-wrap: balance; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 20px; margin: 0; text-wrap: balance; }
+h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; }
+p { margin: 0; max-width: 72ch; }
+.lede { color: var(--muted); margin-top: 8px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 14px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.meta b { color: var(--fg); font-weight: 500; }
+.controls { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg);
+  display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; padding-block: 14px; margin-top: 18px; border-bottom: 1px solid var(--line); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: 500 13px var(--mono); color: var(--muted); background: transparent; border: 0; padding: 6px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--hit); color: var(--fg); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ctl { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.legend { display: flex; gap: 16px; margin-left: auto; font-size: 13px; align-items: center; flex-wrap: wrap; }
+.key { display: inline-flex; align-items: center; gap: 6px; }
+.key svg { width: 26px; height: 10px; }
+section { margin-top: 40px; display: grid; gap: 14px; }
+.note { color: var(--muted); font-size: 13px; }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.chart { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 12px 6px; min-width: 0; position: relative; }
+.chart .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.chart .t { font-weight: 600; font-size: 13px; }
+.chart .u { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.chart .p { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .empty { color: var(--faint); font-size: 12px; padding: 40px 4px; text-align: center; }
+.tip { position: absolute; pointer-events: none; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 8px; font: 12px var(--mono); white-space: nowrap; z-index: 3; }
+.tip[hidden] { display: none !important; }
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 7px 12px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+th:first-child, td:first-child { text-align: left; white-space: normal; min-width: 180px; }
+thead th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+tbody tr.grp td { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); padding-top: 14px; border-bottom: 1px solid var(--grid); }
+td.num { font-family: var(--mono); font-size: 12.5px; }
+td .sd { color: var(--faint); }
+.pill { display: inline-block; font: 500 11px var(--mono); padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.pill.big { border-color: var(--accent); color: var(--fg); background: var(--hit); }
+.clips { display: grid; gap: 14px; }
+.clip { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.clip video { display: block; width: 100%; height: auto; aspect-ratio: 1920 / 540; background: #000; }
+.clip .cap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 12px; font-size: 13px; }
+.clip .cap span:last-child { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.callout { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--panel); display: grid; gap: 6px; }
+.callout ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+code { font-family: var(--mono); font-size: 12.5px; }
+@media (max-width: 560px) { .legend { margin-left: 0; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1 id="title">Flat walking gait: tactile vs blind</h1>
+    <p class="lede">Human-style gait analysis of the G1 walking straight on flat ground. Same robot, rewards and network (LSTM); the only difference is whether the policy feels its soles. Every number is simulator ground truth.</p>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <div class="controls" role="toolbar" aria-label="Report filters">
+    <div class="ctl"><span>Speed</span><div class="seg" id="speed"></div></div>
+    <div class="ctl"><span>Condition</span><div class="seg" id="cond"></div></div>
+    <div class="legend" aria-label="Legend">
+      <span class="key"><svg viewBox="0 0 26 10"><line x1="1" y1="5" x2="25" y2="5" stroke="var(--tactile)" stroke-width="2.5" fill="none"/></svg>Tactile</span>
+      <span class="key"><svg viewBox="0 0 26 10"><line x1="1" y1="5" x2="25" y2="5" stroke="var(--blind)" stroke-width="2.5" stroke-dasharray="5 3" fill="none"/></svg>Blind</span>
+      <span class="key note">band: ±1 SD across seeds</span>
+    </div>
+  </div>
+
+  <section id="videos-sec" hidden>
+    <h2>Walking forward</h2>
+    <p class="note" id="video-note"></p>
+    <div class="clips" id="clips"></div>
+  </section>
+
+  <section>
+    <h2>Key measures</h2>
+    <p class="note" id="statnote"></p>
+    <div class="tbl"><table id="scalars"><thead><tr><th>Measure</th><th>Tactile</th><th>Blind</th><th>Δ</th><th>Hedges g</th><th>p</th></tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>Joint angles over the gait cycle</h2>
+    <p class="note">0 % is the foot's touchdown, 100 % its next touchdown; the vertical line is toe-off. Clinical signs: flexion, dorsiflexion, adduction, inversion and internal rotation positive. Left and right strides are pooled.</p>
+    <h3>Sagittal plane · side view · flexion / extension</h3>
+    <div class="grid" id="g-sag"></div>
+    <h3>Frontal plane · front view · ab- / adduction</h3>
+    <div class="grid" id="g-front"></div>
+    <h3>Transverse plane · top view · rotation</h3>
+    <div class="grid" id="g-trans"></div>
+  </section>
+
+  <section>
+    <h2>Joint torque and power</h2>
+    <p class="note">Actuator torque per kg robot mass, with the same signs as the angles (a positive hip torque is a flexion moment). Dashed lines mark the motor's torque limit. Power is torque times joint speed: positive when the motor drives the joint, negative when it brakes.</p>
+    <h3>Torque</h3>
+    <div class="grid" id="g-torque"></div>
+    <h3>Power (sagittal)</h3>
+    <div class="grid" id="g-power"></div>
+  </section>
+
+  <section>
+    <h2>Ankle and effort</h2>
+    <p class="note">The G1's ankle motors are limited to 50 Nm, against 88 Nm at the hip pitch and 139 Nm at the knee. Saturated: share of the stride spent at 95 % of the limit or more.</p>
+    <div class="tbl"><table id="effort"><thead><tr><th>Joint</th><th>Peak / limit</th><th>Saturated %</th><th>Positive work J/kg</th><th>Negative work J/kg</th><th>Torque rate RMS Nm/s</th></tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>Foot contact</h2>
+    <p class="note">Over stance only (touchdown to toe-off). Centre of pressure from the sole's true contact forces: 0 % is the heel edge of the sole, 100 % the toe. Ground reaction in body weights, along the foot.</p>
+    <div class="grid" id="g-foot"></div>
+  </section>
+
+  <section>
+    <h2>Method</h2>
+    <div class="callout">
+      <ul id="method"></ul>
+    </div>
+  </section>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const SOLE = { x0: -0.0706, len: 0.2177 };
+const state = { speed: null, cond: null };
+let tryStore = (k, v) => { try { v === undefined ? (v = localStorage.getItem(k)) : localStorage.setItem(k, v); } catch (e) { v = null; } return v; };
+
+const fmt = (x, d = 2) => (x == null || Number.isNaN(x)) ? "–" : (Math.abs(x) >= 100 ? x.toFixed(0) : x.toFixed(d));
+const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
+const sd = a => a.length < 2 ? 0 : Math.sqrt(a.reduce((s, x) => s + (x - mean(a)) ** 2, 0) / (a.length - 1));
+const el = (tag, attrs = {}, kids = []) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); kids.forEach(c => e.appendChild(c)); return e; };
+
+function seg(id, options, key, label) {
+  const box = document.getElementById(id); box.innerHTML = "";
+  options.forEach(o => { const b = document.createElement("button"); b.type = "button"; b.id = `${id}-${o}`;
+    b.textContent = label(o); b.setAttribute("aria-pressed", String(state[key] === o));
+    b.onclick = () => { state[key] = o; tryStore("gait-" + key, o); render(); }; box.appendChild(b); });
+}
+
+function niceTicks(lo, hi, n = 4) {
+  const span = hi - lo || 1, step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= step0);
+  const t = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) t.push(+v.toFixed(10)); return t;
+}
+
+/* One small-multiple line chart: two series with ±SD bands over 0-100 %. */
+function lineChart(host, o) {
+  const card = document.createElement("div"); card.className = "chart";
+  const hd = document.createElement("div"); hd.className = "hd";
+  hd.innerHTML = `<span class="t">${o.title}</span><span class="u">${o.unit}</span>`; card.appendChild(hd);
+  host.appendChild(card);
+  if (!o.series.length || !o.series[0].mean.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "no data"; card.appendChild(e); return; }
+  const W = 300, H = 170, L = 38, R = 8, T = 10, B = 24;
+  let lo = Infinity, hi = -Infinity;
+  o.series.forEach(s => s.mean.forEach((m, i) => { lo = Math.min(lo, m - s.sd[i]); hi = Math.max(hi, m + s.sd[i]); }));
+  (o.refs || []).forEach(r => { if (r.y >= lo - (hi - lo) * 0.6 && r.y <= hi + (hi - lo) * 0.6) { lo = Math.min(lo, r.y); hi = Math.max(hi, r.y); } });
+  const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
+  const n = o.series[0].mean.length, xs = i => L + (W - L - R) * i / (n - 1), ys = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${o.title}: tactile vs blind over the ${o.xlabel || "gait cycle"}` });
+  const ticks = niceTicks(lo, hi), td = ticks.length > 1 && ticks[1] - ticks[0] < 1 ? (ticks[1] - ticks[0] < 0.1 ? 2 : 1) : 0;
+  ticks.forEach(t => { svg.appendChild(el("line", { x1: L, x2: W - R, y1: ys(t), y2: ys(t), stroke: "var(--grid)", "stroke-width": 1 }));
+    const tx = el("text", { x: L - 6, y: ys(t) + 3.5, "text-anchor": "end", "font-size": 10, fill: "var(--faint)", "font-family": "var(--mono)" }); tx.textContent = t.toFixed(td); svg.appendChild(tx); });
+  if (lo < 0 && hi > 0) svg.appendChild(el("line", { x1: L, x2: W - R, y1: ys(0), y2: ys(0), stroke: "var(--line)", "stroke-width": 1 }));
+  [0, 25, 50, 75, 100].forEach(p => { const tx = el("text", { x: xs((n - 1) * p / 100), y: H - 8, "text-anchor": p === 0 ? "start" : p === 100 ? "end" : "middle", "font-size": 10, fill: "var(--faint)", "font-family": "var(--mono)" }); tx.textContent = p + "%"; svg.appendChild(tx); });
+  if (o.sig) { o.sig.forEach((s, i) => { if (s && i < n - 1) svg.appendChild(el("rect", { x: xs(i), y: T, width: xs(i + 1) - xs(i) + 0.5, height: H - T - B, fill: "var(--hit)" })); }); }
+  (o.refs || []).forEach(r => { if (r.y < lo || r.y > hi) return; svg.appendChild(el("line", { x1: L, x2: W - R, y1: ys(r.y), y2: ys(r.y), stroke: "var(--muted)", "stroke-width": 1, "stroke-dasharray": "3 3" }));
+    const tx = el("text", { x: W - R - 2, y: ys(r.y) - 3, "text-anchor": "end", "font-size": 9.5, fill: "var(--muted)", "font-family": "var(--mono)" }); tx.textContent = r.label; svg.appendChild(tx); });
+  (o.vlines || []).forEach(v => { if (v.x == null || Number.isNaN(v.x)) return; const x = xs((n - 1) * v.x / 100);
+    svg.appendChild(el("line", { x1: x, x2: x, y1: T, y2: H - B, stroke: v.color, "stroke-width": 1, "stroke-dasharray": v.dash || "none", opacity: .7 })); });
+  o.series.forEach(s => {
+    const up = s.mean.map((m, i) => `${xs(i)},${ys(m + s.sd[i])}`), dn = s.mean.map((m, i) => `${xs(i)},${ys(m - s.sd[i])}`).reverse();
+    svg.appendChild(el("polygon", { points: up.concat(dn).join(" "), fill: s.color, opacity: .14 }));
+  });
+  o.series.forEach(s => svg.appendChild(el("polyline", { points: s.mean.map((m, i) => `${xs(i)},${ys(m)}`).join(" "), fill: "none", stroke: s.color, "stroke-width": 2, "stroke-dasharray": s.dash || "none", "stroke-linejoin": "round" })));
+  const cross = el("line", { y1: T, y2: H - B, stroke: "var(--muted)", "stroke-width": 1, visibility: "hidden" }); svg.appendChild(cross);
+  const dots = o.series.map(s => { const c = el("circle", { r: 4, fill: s.color, stroke: "var(--panel)", "stroke-width": 2, visibility: "hidden" }); svg.appendChild(c); return c; });
+  const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" }); svg.appendChild(hit);
+  card.appendChild(svg);
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true; card.appendChild(tip);
+  const move = ev => { const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) / r.width * W;
+    const i = Math.max(0, Math.min(n - 1, Math.round((px - L) / (W - L - R) * (n - 1))));
+    cross.setAttribute("x1", xs(i)); cross.setAttribute("x2", xs(i)); cross.setAttribute("visibility", "visible");
+    o.series.forEach((s, k) => { dots[k].setAttribute("cx", xs(i)); dots[k].setAttribute("cy", ys(s.mean[i])); dots[k].setAttribute("visibility", "visible"); });
+    tip.innerHTML = `${Math.round(i / (n - 1) * 100)}%<br>` + o.series.map(s => `<span style="color:${s.color}">■</span> ${s.name} ${fmt(s.mean[i])}`).join("<br>");
+    tip.hidden = false; const cx = xs(i) / W * r.width; tip.style.left = (cx > r.width / 2 ? cx - tip.offsetWidth - 10 : cx + 10) + "px"; tip.style.top = "34px"; };
+  hit.addEventListener("pointermove", move); hit.addEventListener("pointerleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); dots.forEach(d => d.setAttribute("visibility", "hidden")); });
+  if (o.test) { const p = document.createElement("div"); p.className = "p";
+    p.textContent = o.test.min_p > 0.05 ? `curve test: p ${fmt(o.test.p)} (needs ≥4 seeds per group for p<0.05)` : `curve test: p ${fmt(o.test.p, 3)}${o.test.p < 0.05 ? " · shaded where different" : ""}`; card.appendChild(p); }
+}
+
+function curveSeries(sp, name, k, f = v => v) {
+  const c = sp.curves[name]; if (!c) return [];
+  return [["tactile", "Tactile", "var(--tactile)", null], ["blind", "Blind", "var(--blind)", "5 3"]].map(([g, label, color, dash]) => ({
+    name: label, color, dash, mean: c[g].mean.map(r => f(r[k])), sd: c[g].sd.map((r, i) => Math.abs(f(c[g].mean[i][k] + r[k]) - f(c[g].mean[i][k]))) }));
+}
+
+const SCALARS = [
+  ["Walking", [["speed", "Actual speed", "m/s", 2], ["cadence", "Cadence", "steps/min", 0], ["stride_length", "Stride length", "m", 2], ["step_width", "Step width", "m", 3],
+    ["stance_pct", "Stance", "% cycle", 1], ["double_support_pct", "Double support", "% cycle", 1], ["clearance", "Foot clearance", "m", 3]]],
+  ["Consistency (stride-to-stride CV)", [["cv_stride_time", "Stride time CV", "%", 1], ["cv_stride_length", "Stride length CV", "%", 1], ["cv_step_width", "Step width CV", "%", 1]]],
+  ["Foot contact", [["touchdown_vz", "Touchdown speed, vertical", "m/s", 2], ["loading_rate", "Loading rate", "BW/s", 1], ["grf_peak", "Peak vertical force", "BW", 2],
+    ["cop_start", "CoP at touchdown", "% sole", 0, v => (v - SOLE.x0) / SOLE.len * 100], ["cop_range_x", "CoP travel along foot", "cm", 1, v => v * 100], ["cop_range_y", "CoP travel sideways", "cm", 1, v => v * 100], ["stance_slide", "Foot slide in stance", "cm", 1, v => v * 100]]],
+  ["Ankle", [["ankle_pitch_peak_frac", "Ankle pitch peak / limit", "", 2], ["ankle_pitch_saturated_pct", "Ankle pitch saturated", "% stride", 1], ["ankle_pitch_work_pos", "Ankle push-off work", "J/kg", 3], ["ankle_dorsiflexion_rom", "Ankle range of motion", "deg", 1]]],
+  ["Effort and smoothness", [["cot_mech", "Mechanical cost of transport", "", 3], ["qdd_rms", "Leg joint acceleration RMS", "rad/s²", 0], ["knee_flexion_rom", "Knee range of motion", "deg", 1], ["hip_flexion_rom", "Hip range of motion", "deg", 1]]],
+];
+
+function scalarTable(sp) {
+  const tb = document.querySelector("#scalars tbody"); tb.innerHTML = "";
+  SCALARS.forEach(([group, rows]) => {
+    tb.insertAdjacentHTML("beforeend", `<tr class="grp"><td colspan="6">${group}</td></tr>`);
+    rows.forEach(([k, label, unit, d, f = v => v]) => { const s = sp.scalars[k]; if (!s) return;
+      const a = s.tactile.map(f), b = s.blind.map(f), ma = mean(a), mb = mean(b);
+      const delta = Math.abs(mb) > 1e-9 ? (ma - mb) / Math.abs(mb) * 100 : NaN, big = Math.abs(s.g) >= 0.8;
+      tb.insertAdjacentHTML("beforeend", `<tr><td>${label} <span class="u note">${unit}</span></td>
+        <td class="num">${fmt(ma, d)} <span class="sd">± ${fmt(sd(a), d)}</span></td><td class="num">${fmt(mb, d)} <span class="sd">± ${fmt(sd(b), d)}</span></td>
+        <td class="num">${Number.isNaN(delta) ? "–" : (delta > 0 ? "+" : "") + delta.toFixed(0) + " %"}</td>
+        <td class="num"><span class="pill${big ? " big" : ""}">${fmt(s.g)}</span></td><td class="num">${fmt(s.p, 3)}</td></tr>`); });
+  });
+}
+
+function effortTable(sp, meta) {
+  const tb = document.querySelector("#effort tbody"); tb.innerHTML = "";
+  meta.leg_joints.forEach((j, i) => { const cell = (k, d) => { const s = sp.scalars[`${j}_${k}`];
+      return `<td class="num"><span style="color:var(--tactile)">${fmt(mean(s.tactile), d)}</span> · <span style="color:var(--blind)">${fmt(mean(s.blind), d)}</span></td>`; };
+    tb.insertAdjacentHTML("beforeend", `<tr><td>${j.replace("_", " ")} <span class="u note">${meta.torque_limits_nm[i]} Nm</span></td>${cell("peak_frac", 2)}${cell("saturated_pct", 1)}${cell("work_pos", 3)}${cell("work_neg", 3)}${cell("torque_rate_rms", 0)}</tr>`); });
+}
+
+function render() {
+  const C = DATA.conditions[state.cond], sp = C.speeds[state.speed], meta = DATA.meta;
+  seg("speed", Object.keys(C.speeds), "speed", v => `${(+v).toFixed(1)} m/s`);
+  seg("cond", Object.keys(DATA.conditions), "cond", v => v);
+  const ns = g => C.seeds[g].length, st = g => sp.strides[g].reduce((a, b) => a + b, 0), fl = g => sp.falls[g].reduce((a, b) => a + b, 0);
+  document.getElementById("statnote").textContent = `One sample per seed (tactile n=${ns("tactile")}, blind n=${ns("blind")}; ${st("tactile")} and ${st("blind")} strides; falls ${fl("tactile")} and ${fl("blind")}). Δ is tactile relative to blind. Hedges g: effect size in pooled between-seed SDs, highlighted from 0.8. p: Welch t-test across seeds; with three seeds per group read it as a guide only.`;
+  scalarTable(sp); effortTable(sp, meta);
+  const to = g => mean(sp.scalars.stance_pct[g]);
+  const vl = [{ x: to("tactile"), color: "var(--tactile)" }, { x: to("blind"), color: "var(--blind)", dash: "4 3" }];
+  const A = meta.angles, ai = n => A.indexOf(n), test = (c, k) => sp.curves[c].test[k];
+  const angle = (host, name, title) => { const k = ai(name); lineChart(host, { title, unit: "deg", series: curveSeries(sp, "angle", k), vlines: vl, test: test("angle", k), sig: test("angle", k)?.significant }); };
+  const pelvis = (host, k, title) => lineChart(host, { title, unit: "deg", series: curveSeries(sp, "pelvis", k), vlines: vl, test: test("pelvis", k), sig: test("pelvis", k)?.significant });
+  const clear = id => { const h = document.getElementById(id); h.innerHTML = ""; return h; };
+  let h = clear("g-sag"); angle(h, "hip_flexion", "Hip flexion"); angle(h, "knee_flexion", "Knee flexion"); angle(h, "ankle_dorsiflexion", "Ankle dorsiflexion"); pelvis(h, 0, "Pelvis tilt (anterior +)");
+  h = clear("g-front"); angle(h, "hip_adduction", "Hip adduction"); angle(h, "ankle_inversion", "Ankle inversion"); pelvis(h, 1, "Pelvis obliquity (up +)");
+  h = clear("g-trans"); angle(h, "hip_internal_rotation", "Hip internal rotation"); pelvis(h, 2, "Pelvis rotation (forward +)");
+  const lim = j => meta.torque_limits_nm[meta.leg_joints.indexOf(j)] / meta.mass_kg;
+  const torque = (host, name, joint, title) => { const k = ai(name), l = lim(joint);
+    lineChart(host, { title, unit: "Nm/kg", series: curveSeries(sp, "torque", k), vlines: vl, test: test("torque", k), sig: test("torque", k)?.significant,
+      refs: [{ y: l, label: `limit ${fmt(l)}` }, { y: -l, label: `limit −${fmt(l)}` }] }); };
+  h = clear("g-torque"); torque(h, "hip_flexion", "hip_pitch", "Hip flexion torque"); torque(h, "hip_adduction", "hip_roll", "Hip adduction torque"); torque(h, "knee_flexion", "knee", "Knee flexion torque");
+  torque(h, "ankle_dorsiflexion", "ankle_pitch", "Ankle dorsiflexion torque"); torque(h, "ankle_inversion", "ankle_roll", "Ankle inversion torque");
+  h = clear("g-power"); [["hip_flexion", "Hip power"], ["knee_flexion", "Knee power"], ["ankle_dorsiflexion", "Ankle power"]].forEach(([n, t]) => { const k = ai(n);
+    lineChart(h, { title: t, unit: "W/kg", series: curveSeries(sp, "power", k), vlines: vl, test: test("power", k), sig: test("power", k)?.significant }); });
+  h = clear("g-foot");
+  lineChart(h, { title: "CoP along the foot", unit: "% sole, heel → toe", series: curveSeries(sp, "cop_stance", 0, v => (v - SOLE.x0) / SOLE.len * 100), test: test("cop_stance", 0), sig: test("cop_stance", 0)?.significant, xlabel: "stance" });
+  lineChart(h, { title: "CoP sideways", unit: "mm, lateral +", series: curveSeries(sp, "cop_stance", 1, v => v * 1000), test: test("cop_stance", 1), sig: test("cop_stance", 1)?.significant, xlabel: "stance" });
+  lineChart(h, { title: "Vertical ground force", unit: "BW", series: curveSeries(sp, "grf_stance", 1), refs: [{ y: 1, label: "body weight" }], test: test("grf_stance", 1), sig: test("grf_stance", 1)?.significant, xlabel: "stance" });
+  lineChart(h, { title: "Fore-aft ground force", unit: "BW, forward +", series: curveSeries(sp, "grf_stance", 0), test: test("grf_stance", 0), sig: test("grf_stance", 0)?.significant, xlabel: "stance" });
+}
+
+function init() {
+  document.getElementById("title").textContent = DATA.title;
+  document.title = "Tactile Gait Lab";
+  const conds = Object.keys(DATA.conditions);
+  state.cond = conds.includes(tryStore("gait-cond")) ? tryStore("gait-cond") : (conds.includes("clean") ? "clean" : conds[0]);
+  const speeds = Object.keys(DATA.conditions[state.cond].speeds);
+  state.speed = speeds.includes(tryStore("gait-speed")) ? tryStore("gait-speed") : (speeds.includes("1.00") ? "1.00" : speeds[0]);
+  const m = DATA.meta, ck = Object.values(m.checkpoints.tactile)[0] || "";
+  const pr = m.protocol;
+  document.getElementById("meta").innerHTML = [
+    ["policy", "LSTM(256), 64-step PPO"], ["checkpoint", (ck.match(/model_(\d+)/) || [, "?"])[1] + " it"],
+    ["seeds", `tactile ${Object.keys(m.checkpoints.tactile).join(",")} · blind ${Object.keys(m.checkpoints.blind).join(",")}`],
+    ["robots", `${pr.num_envs / Object.keys(DATA.conditions[state.cond].speeds).length} per speed`], ["measured", `${pr.duration_s} s after ${pr.warmup_s} s warm-up`], ["mass", `${m.mass_kg.toFixed(1)} kg`],
+  ].map(([k, v]) => `<span>${k} <b>${v}</b></span>`).join("");
+  document.getElementById("method").innerHTML = [
+    "Each policy walks straight at a fixed forward command on the evaluation protocol's flat ground and seed, so tactile and blind policies face the same robots and the same randomisation. <b>clean</b>: no observation noise, no tactile sensor faults or noise, no pushes (the gait itself). <b>perturbed</b>: training's noise, sensor faults and pushes.",
+    "Strides are cut at touchdowns of the sole's true contact force (on above 30 N, off below 10 N, breaks under 60 ms ignored) and resampled to 0–100 %. Strides that touch the warm-up or a fall are dropped.",
+    "The blind policy's scene gets the same sole contact sensors for the measurement; they never reach its actor.",
+    "Angles are joint angles with clinical signs; the G1 knee is a single hinge, so there is no knee ab/adduction. The real G1 ankle is a two-motor linkage, the simulator's two serial joints, so ankle torques are approximate for hardware.",
+    "Recorded at the 50 Hz policy rate: loading rate and touchdown speed are coarse (20 ms bins).",
+    "Statistics treat each seed as one sample. Curve tests: permutation test on the maximum Welch t over the cycle (nonparametric SPM), exact over all relabellings.",
+  ].map(t => `<li>${t}</li>`).join("");
+  if (DATA.videos && DATA.videos.length) {
+    document.getElementById("videos-sec").hidden = false;
+    document.getElementById("video-note").textContent = DATA.video_note || "";
+    const box = document.getElementById("clips");
+    DATA.videos.forEach(v => box.insertAdjacentHTML("beforeend", `<figure class="clip" style="margin:0">
+      <video src="${v.src}" controls muted loop playsinline preload="metadata" aria-label="${v.label}: tactile left, blind right"></video>
+      <figcaption class="cap"><span>${v.label}</span><span>tactile · blind</span></figcaption></figure>`));
+  }
+  render();
+}
+init();
+</script>

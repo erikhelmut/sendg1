@@ -78,6 +78,11 @@ def main() -> None:
   ap.add_argument("--start-yaw", type=float, default=None,
                   help="pin the robot's starting yaw [deg] (0 = along the floor grid); "
                        "default: the task's random yaw")
+  ap.add_argument("--elevation", type=float, default=-12.0,
+                  help="camera elevation [deg]; -89 looks straight down (top view)")
+  ap.add_argument("--forward", type=float, default=None,
+                  help="instead of the schedule: stand 1 s, then walk straight at this speed [m/s]")
+  ap.add_argument("--seconds", type=float, default=8.0, help="walking time with --forward")
   ap.add_argument("--no-caption", action="store_true", help="drop the top-left caption card")
   ap.add_argument("--logo", action="append", default=[],
                   help="top-left logo, repeatable (left to right): an image path, 'ias' or 'flexoo'; default ias, 'none' for no logo")
@@ -145,7 +150,7 @@ def main() -> None:
   # Default distance 3.0 with the torso as origin puts the head and the command
   # arrow drawn above it right at the top edge. Pull back and raise the eye line.
   env_cfg.viewer.distance = args.distance
-  env_cfg.viewer.elevation = -12.0
+  env_cfg.viewer.elevation = args.elevation
 
   # Enlarge the commanded-velocity arrow drawn above the robot. At the default
   # scale it is a few pixels and reads as a speck against the sky.
@@ -201,6 +206,11 @@ def main() -> None:
   # Tasks without a velocity command just run for the schedule's length.
   cmd_term = env.command_manager.get_term("twist") if twist_cfg is not None else None
   schedule = SCHEDULE_SHORT if args.short else SCHEDULE
+  if args.forward is not None:
+    schedule = [
+      (1.0, 0.0, 0.0, 0.0, "stand"),
+      (args.seconds, args.forward, 0.0, 0.0, "forward"),
+    ]
   if cmd_term is None:
     schedule = [(sum(s[0] for s in schedule), 0.0, 0.0, 0.0, "")]
   obs, _ = wrapped.reset()

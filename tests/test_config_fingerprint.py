@@ -29,6 +29,8 @@ EXPECTED: dict[str, tuple[str, str]] = {
   "Sendg1-BoxPushPatches-G1-Blind": ("bddd7fddae4db332", "e51d215245977ada"),
   "Sendg1-BoxPushPatches-G1-Tactile": ("c835ca55909ea0d3", "5ed81f293074d7b2"),
   "Sendg1-Velocity-Flat-G1-Blind": ("912f562976564235", "4eca2b5efbd3cacf"),
+  "Sendg1-Velocity-Flat-G1-LSTM-Blind": ("2d63d92cbb2b0f7e", "4a38bab624ee0752"),
+  "Sendg1-Velocity-Flat-G1-LSTM-Tactile": ("adfe463c9a4a8f94", "3e22c878ad54b7fb"),
   "Sendg1-Velocity-Flat-G1-Tactile": ("2cd95a2d14a7cbb7", "f37b879819fe3569"),
   "Sendg1-Velocity-Rough-G1-Blind": ("9e4a616371d70df4", "f9c4880fbb9131ba"),
   "Sendg1-Velocity-Rough-G1-Tactile": ("081e6e612cb7313d", "351907bde540e06b"),
