@@ -1,0 +1,36 @@
+[project]
+name = "g1-tactile"
+version = "0.1.0"
+description = "Tactile slipper and sole sensor model for the Unitree G1 (MuJoCo / mjlab)"
+requires-python = ">=3.11"
+dependencies = [
+  # Developed and tested against this mjlab commit (MuJoCo 4); mjlab's sensor
+  # and entity APIs change between versions.
+  "mjlab @ git+https://github.com/mujocolab/mjlab@1b5c91c923ee4bc4159f3dce9cc85b52f88b6bd5",
+  "torch",
+  "numpy",
+  "scipy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+viz = ["matplotlib", "trimesh"]
+# scripts/export_foot_cad.py only.
+cad = ["ezdxf>=1.4", "matplotlib", "trimesh"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/g1_tactile"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 90
+indent-width = 2
