@@ -14,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-viz = ["matplotlib", "trimesh"]
+video = ["mediapy", "pillow", "trimesh", "matplotlib"]
 # scripts/export_foot_cad.py only.
 cad = ["ezdxf>=1.4", "matplotlib", "trimesh"]
 

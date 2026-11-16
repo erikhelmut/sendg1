@@ -8,5 +8,6 @@
 - ``sensing``   runs the model on a live env (``read_tactile``).
 - ``features``  the policy observation (``tactile_touch``) and sensor faults.
 - ``env_cfg``   ``wear_tactile_slipper(cfg)``: everything into an mjlab env config.
-- ``viz``       matplotlib drawings of the sole and taxels.
+- ``foot``      the bare G1 foot mesh and capsules, from mjlab's MJCF.
+- ``video``     clips with a live tactile HUD (``TactileVideo``).
 """

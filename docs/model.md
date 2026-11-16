@@ -1,7 +1,7 @@
 # The tactile sole model
 
 ```bash
-python scripts/show_sole.py                 # taxels on the G1 foot -> media/tactile_sole_layout.png
+python scripts/demo_video.py                # demo clip with the tactile HUD -> media/tactile_demo.mp4
 python scripts/make_slipper_asset.py <stl>  # slipper CAD -> src/g1_tactile/assets/g1_slipper.stl
 python scripts/export_foot_cad.py           # foot as DXF + STL in the sole frame, mm (needs .[cad])
 ```

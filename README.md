@@ -13,9 +13,9 @@ Python 3.11+, Linux, an NVIDIA GPU for mjlab/MuJoCo Warp. Tested against the
 mjlab commit pinned in `pyproject.toml` (MuJoCo 4).
 
 ```bash
-pip install -e ".[dev,viz]"     # or: uv pip install -e ".[dev,viz]"
+pip install -e ".[dev,video]"   # or: uv pip install -e ".[dev,video]"
 pytest
-python scripts/show_sole.py     # -> media/tactile_sole_layout.png
+MUJOCO_GL=egl python scripts/demo_video.py   # -> media/tactile_demo.mp4
 ```
 
 ## Use in an mjlab env
@@ -47,6 +47,35 @@ The pieces can also be used one by one: `robot.get_g1_cfg()`,
 `sensing.tactile_scene_sensors()`, `features.tactile_touch`,
 `features.reset_tactile_noise`.
 
+## Videos with the tactile HUD
+
+`g1_tactile.video.TactileVideo` renders env 0 in a dark studio theme with
+a live card of both soles (taxels, per-foot load, force trace, "sensor by
+Flexoo") and a caption card with the IAS logo:
+
+```python
+from g1_tactile.video import TactileVideo, prepare_video_cfg
+
+prepare_video_cfg(cfg, 1280, 720)                  # before building the env
+env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0", render_mode="rgb_array")
+video = TactileVideo(env, title="My policy")
+obs, _ = env.reset()
+for _ in range(500):
+  obs, *_ = env.step(policy(obs))
+  video.capture(["walking 1.0 m/s"])               # caption lines, optional
+video.save("media/clip.mp4")
+```
+
+Logos: `logo=` takes `"ias"`, `"flexoo"`, image paths or a list of them, or
+`"none"`; `sensor_brand=` sets the logo in the card's "sensor by" row
+(default Flexoo). `tactile=False` draws the card at zero with an OFF chip,
+e.g. for a policy without touch input; `theme=` is `studio`, `gray` or
+`mujoco`. Needs ffmpeg (through mediapy).
+
+`scripts/demo_video.py` runs without a policy: the G1 holds its default pose
+in a virtual harness that sways it from side to side, so the load moves from
+foot to foot.
+
 ## Files
 
 | Path | What |
@@ -60,6 +89,8 @@ The pieces can also be used one by one: `robot.get_g1_cfg()`,
 | `src/g1_tactile/sensing.py` | Runs the model on a live env: `tactile_scene_sensors()`, `read_tactile()` |
 | `src/g1_tactile/features.py` | The observation term and the sensor-fault model |
 | `src/g1_tactile/env_cfg.py` | `wear_tactile_slipper(cfg)`: all of the above into an mjlab env config |
-| `src/g1_tactile/viz.py`, `scripts/show_sole.py` | Drawings of the sole and taxels |
+| `src/g1_tactile/video/` | `TactileVideo`: themed render, tactile HUD, IAS and Flexoo logos |
+| `src/g1_tactile/foot.py` | The bare G1 foot mesh and capsules from mjlab's MJCF |
+| `scripts/demo_video.py` | A demo clip without a policy |
 | `scripts/make_slipper_asset.py` | Rebuild the slipper STL from a CAD export |
 | `scripts/export_foot_cad.py` | The G1 foot in the sole frame (DXF/STL), to design around |

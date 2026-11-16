@@ -130,7 +130,7 @@ def export(side: str, out_dir: Path) -> list[Path]:
   from ezdxf.enums import TextEntityAlignment
   from ezdxf.render import MeshBuilder
 
-  from g1_tactile import viz
+  from g1_tactile import foot as viz
   from g1_tactile.layout import LAYOUTS, SOLE_Z
   from g1_tactile.sensing import TactileParams
 
