@@ -39,7 +39,7 @@ TERMS: dict[str, TermSpec] = {
     for n in (
       *TOUCH_ACTOR_TERMS,
       "tactile_touch_clean",
-      "taxel_forces_clean",
+      "taxel_normal_clean",
       "base_lin_vel",
       "action_lag",
     )
@@ -75,7 +75,7 @@ PRIVILEGED_TERMS: tuple[str, ...] = (
   "feet_cylinder_pose",
   "base_cylinder_pose",
   "tactile_touch_clean",
-  "taxel_forces_clean",
+  "taxel_normal_clean",
   "foot_slip_on_cylinder",
   "foot_cylinder_forces",
   "action_lag",

@@ -33,8 +33,8 @@ Sensor model (actor only; the critic's copy is noise-free)
 ---------------------------------------------------------------------
 Per episode: a per-foot gain, a per-taxel gain, dead taxels (read 0). Per step:
 additive Gaussian noise on each taxel, and a frame drop that holds a foot's
-previous reading. Everything scales with :func:`noise_strength` of the env's
-curriculum level.
+previous reading. Everything scales with one strength, the same in every task
+(``FAULT_STRENGTH``), and is off unless ``FAULTS_ENABLED``.
 """
 
 from __future__ import annotations
@@ -58,9 +58,9 @@ CONTACT_N = 15.0
 TOUCH_BIT_N = 3.0
 """A taxel counts as touching above 3 N (``touch_features``). Standing on the
 widest beam a loaded taxel reads ~6 N (median; 10th percentile 4 N), so the
-threshold sits halfway between nothing and a typical load. At full noise
-strength (3 N std) ~16% of unloaded taxels flicker on; at level 0 (0.9 N std)
-almost none."""
+threshold sits halfway between nothing and a typical load. With faults at
+strength 1 (3 N std) ~16% of unloaded taxels flicker on; at 0.5 (1.5 N std)
+about 5 %."""
 TOUCH_PER_FOOT = 26 + 3  # bits, load, cop x/y
 
 
@@ -80,19 +80,16 @@ class TactileNoiseCfg:
   """Per step and foot, probability of repeating the previous frame."""
 
 
-STRENGTH_RANGE = (0.3, 1.0)
-"""Noise strength at the lowest and at the highest curriculum level."""
-
-
-FIXED_STRENGTH = 0.5
-"""Noise strength for tasks without a difficulty curriculum to grow it with
-(velocity, box push, pedalo, rolling cylinder, slackline): half way between
-the beam's lowest and highest level."""
-
-
-def noise_strength(level: torch.Tensor, num_levels: int) -> torch.Tensor:
-  lo, hi = STRENGTH_RANGE
-  return lo + (hi - lo) * level.float() / max(num_levels - 1, 1)
+FAULTS_ENABLED = False
+"""Whether the actor's tactile readings carry sensor faults, in every task.
+Off for the first runs (2026-11-25): the 0-1 step latency stays, everything
+else is clean. Switch on per run with the ``tactile_faults`` event's
+``enabled`` parameter, or here for every task."""
+FAULT_STRENGTH = 0.5
+"""Fault strength when enabled, the same in every task and on every
+curriculum level: 0.5 scales ``TactileNoiseCfg``'s ranges by half (foot gain
++/-10 %, taxel gain +/-12.5 %, 4 % dead taxels, 1.5 N noise, 2.5 % frame
+drops)."""
 
 
 @lru_cache(maxsize=4)
@@ -220,12 +217,28 @@ class TactileNoiseState:
 
 
 def reset_tactile_noise(
-  env: ManagerBasedRlEnv, env_ids: torch.Tensor | None, strength: float = FIXED_STRENGTH
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  enabled: bool = FAULTS_ENABLED,
+  strength: float = FAULT_STRENGTH,
 ) -> None:
-  """Reset event: resample the sensor faults at a fixed strength. In every
-  observation set's events, blind ones included, so the sets differ in the
-  actor's input alone; without a tactile actor it only draws numbers."""
+  """Reset event of every task: resample the sensor faults, at ``strength``
+  when ``enabled``, else none (strength 0: unit gains, no dead taxels, no
+  noise, no frame drops). In every observation set's events, blind ones
+  included, so the sets differ in the actor's input alone."""
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device)
   st = TactileNoiseState.get(env, LAYOUTS[TactileParams().layout])
-  st.resample(env_ids, torch.full((len(env_ids),), strength, device=env.device))
+  s = strength if enabled else 0.0
+  st.resample(env_ids, torch.full((len(env_ids),), s, device=env.device))
+
+
+def tactile_faults_event():
+  """The ``tactile_faults`` reset event, as every task registers it."""
+  from mjlab.managers.event_manager import EventTermCfg
+
+  return EventTermCfg(
+    func=reset_tactile_noise,
+    mode="reset",
+    params={"enabled": FAULTS_ENABLED, "strength": FAULT_STRENGTH},
+  )

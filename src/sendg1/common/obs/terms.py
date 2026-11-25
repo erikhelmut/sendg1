@@ -33,6 +33,7 @@ from mjlab.envs import mdp as envs_mdp
 from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
+from mjlab.utils.noise.noise_cfg import NoiseModelWithAdditiveBiasCfg
 
 from sendg1.common.beam import mdp as beam_mdp
 from sendg1.common.box_push import mdp as box_mdp
@@ -59,11 +60,24 @@ class TermSpec:
 # Deployable (onboard) terms -- the blind G1's real sensor suite.
 # ---------------------------------------------------------------------------
 
+# Proprioception: the one definition every task's actor uses. Per step, uniform
+# noise on every channel; per episode, an IMU bias (here) and a +/-0.015 rad
+# encoder offset (the ``encoder_bias`` event, read through ``biased=True``).
+
+IMU_GYRO_BIAS = 0.05
+"""rad/s, uniform +/-, per episode."""
+IMU_GRAVITY_BIAS = 0.03
+"""Per component of the unit gravity vector, per episode (~1.7 deg of tilt)."""
+
+
 def _base_ang_vel() -> ObservationTermCfg:
   return ObservationTermCfg(
     func=envs_mdp.builtin_sensor,
     params={"sensor_name": "robot/imu_ang_vel"},
-    noise=Unoise(n_min=-0.2, n_max=0.2),
+    noise=NoiseModelWithAdditiveBiasCfg(
+      noise_cfg=Unoise(n_min=-0.2, n_max=0.2),
+      bias_noise_cfg=Unoise(n_min=-IMU_GYRO_BIAS, n_max=IMU_GYRO_BIAS),
+    ),
   )
 
 
@@ -75,7 +89,10 @@ def _projected_gravity() -> ObservationTermCfg:
   return ObservationTermCfg(
     func=envs_mdp.projected_gravity_from_sensor,
     params={"sensor_name": "robot/imu_upvector"},
-    noise=Unoise(n_min=-0.05, n_max=0.05),
+    noise=NoiseModelWithAdditiveBiasCfg(
+      noise_cfg=Unoise(n_min=-0.05, n_max=0.05),
+      bias_noise_cfg=Unoise(n_min=-IMU_GRAVITY_BIAS, n_max=IMU_GRAVITY_BIAS),
+    ),
   )
 
 

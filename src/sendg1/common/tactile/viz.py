@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-
 from sendg1.common.tactile.layout import Side, TaxelLayout
 
 # Reference palette (dataviz skill, light mode).

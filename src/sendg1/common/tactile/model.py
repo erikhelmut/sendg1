@@ -4,10 +4,10 @@ Pure torch, no simulator, so it can be unit-tested on hand-built inputs.
 
 Why not just bin the raw contact points onto the taxels
 -------------------------------------------------------
-The simulated sole is 7 rigid capsules. On flat ground MuJoCo puts contacts
-only at the two rounded ends of each capsule: one line under the heel
-(x ~ -0.05) and one under the toe (x ~ +0.13). Binning those would leave every
-mid-foot taxel at zero while the foot is flat, which no real sensor does. Where a
+The simulated sole is one rigid box (``sendg1.common.robots.slipper``). On flat
+ground MuJoCo puts contacts only at its 4 corners, under the heel and the toe.
+Binning those would leave every mid-foot taxel at zero while the foot is flat,
+which no real sensor does. Where a
 rigid contact solver *does* give meaningful answers is the net wrench: total
 force and centre of pressure (CoP).
 

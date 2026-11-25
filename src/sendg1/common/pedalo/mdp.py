@@ -37,13 +37,11 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.utils.lab_api.math import quat_apply, quat_from_euler_xyz, quat_mul
 
-from sendg1.common.beam import tactile as tac
-from sendg1.common.beam.mdp import TACTILE, whole_body_com_xy
+from sendg1.common.beam.mdp import whole_body_com_xy
 from sendg1.common.pedalo import model as pm
 from sendg1.common.pedalo.variants import CLASSIC, VARIANTS, PedaloVariant
 from sendg1.common.robots.g1 import G1_FOOT_SITES
 from sendg1.common.robots.g1 import STANDING_BASE_Z as G1_STANDING_BASE_Z
-from sendg1.common.tactile.layout import LAYOUTS
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -56,9 +54,6 @@ FOOT_GROUND_SENSOR = "feet_ground_contact"
 
 SETTLE_S = 0.3
 """The robot is spawned a few cm above the higher board; contact terms wait."""
-TACTILE_NOISE_STRENGTH = tac.FIXED_STRENGTH
-"""Sensor faults (``beam.tactile.TactileNoiseCfg``) at half the beam task's
-top-level strength: no curriculum yet to grow them."""
 
 
 def _robot(env: ManagerBasedRlEnv):
@@ -560,13 +555,6 @@ def reset_on_pedalo(
 
 def _joint_index(robot) -> dict[str, int]:
   return {n: i for i, n in enumerate(robot.joint_names)}
-
-
-def reset_tactile_noise(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) -> None:
-  if env_ids is None:
-    env_ids = torch.arange(env.num_envs, device=env.device)
-  st = tac.TactileNoiseState.get(env, LAYOUTS[TACTILE.layout])
-  st.resample(env_ids, torch.full((len(env_ids),), TACTILE_NOISE_STRENGTH, device=env.device))
 
 
 PEDALO_GEOMS = SceneEntityCfg(PEDALO, geom_names=(r".*_wheel$",))

@@ -58,7 +58,7 @@ def test_actor_sees_only_deployable_signals(task: str) -> None:
   assert terms <= DEPLOYABLE
   critic = {t for g in rl_cfg.obs_groups["critic"] for t in env_cfg.observations[g].terms}
   assert {"base_beam_pose", "feet_beam_pose", "base_lin_vel", "beam_ahead"} <= critic
-  assert {"tactile_touch_clean", "taxel_forces_clean", "foot_slip_vel", "beam_params"} <= critic
+  assert {"tactile_touch_clean", "taxel_normal_clean", "foot_slip_vel", "beam_params"} <= critic
 
 
 def test_every_actor_is_an_rsl_rl_model() -> None:

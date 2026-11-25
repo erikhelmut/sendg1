@@ -30,6 +30,7 @@ from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 from sendg1.common.beam import mdp
+from sendg1.common.beam import tactile as tac
 from sendg1.common.beam.terms import (
   BLIND_ACTOR_TERMS,
   TERMS,
@@ -37,6 +38,7 @@ from sendg1.common.beam.terms import (
   TOUCH_PRIVILEGED_TERMS,
 )
 from sendg1.common.beam.terrain import EVAL_TERRAIN_SEED, make_beam_terrain_cfg
+from sendg1.common.events import FOOT_FRICTION
 from sendg1.common.ppo import NUM_ENVS
 from sendg1.common.rewards import POSE_STD_RUNNING, POSE_STD_STANDING, POSE_STD_WALKING
 from sendg1.common.robots.g1 import (
@@ -273,7 +275,7 @@ def build_events() -> dict[str, EventTermCfg]:
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
       },
     ),
-    "tactile_faults": EventTermCfg(func=mdp.reset_tactile_noise, mode="reset"),
+    "tactile_faults": tac.tactile_faults_event(),
     # Reference-state initialisation: a share of episodes restarts mid-beam in
     # a heel-to-toe stance that fits a narrow beam. Training only.
     "spawn_from_bank": EventTermCfg(
@@ -292,7 +294,7 @@ def build_events() -> dict[str, EventTermCfg]:
     "foot_friction": EventTermCfg(
       mode="startup",
       func=dr.geom_friction,
-      params={"asset_cfg": foot_geoms, "operation": "abs", "ranges": (0.4, 1.2), "shared_random": True},
+      params={"asset_cfg": foot_geoms, "operation": "abs", "ranges": FOOT_FRICTION, "shared_random": True},
     ),
     "foot_softness": EventTermCfg(
       mode="startup",
@@ -343,7 +345,7 @@ def build_events() -> dict[str, EventTermCfg]:
 Tactile = Literal["touch", "none"]
 """Actor tactile input. ``touch``: the shared touch features (``tactile_touch``:
 26 taxel bits, load, CoP; 29 per foot). ``none``: blind, no tactile actor term.
-Both share one critic (clean touch features, per-taxel normal/shear forces,
+Both share one critic (clean touch features, per-taxel normal forces,
 foot slip velocity)."""
 
 

@@ -29,12 +29,10 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.utils.lab_api.math import quat_apply, quat_from_euler_xyz, quat_mul
 
-from sendg1.common.beam import tactile as tac
-from sendg1.common.beam.mdp import TACTILE, whole_body_com_xy
+from sendg1.common.beam.mdp import whole_body_com_xy
 from sendg1.common.robots.g1 import G1_FOOT_SITES
 from sendg1.common.robots.g1 import STANDING_BASE_Z as G1_STANDING_BASE_Z
 from sendg1.common.rolling_cylinder import model as cm
-from sendg1.common.tactile.layout import LAYOUTS
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -47,9 +45,6 @@ FOOT_GROUND_SENSOR = "feet_ground_contact"
 
 SETTLE_S = 0.3
 """The robot is spawned a few mm above the top line; contact terms wait."""
-TACTILE_NOISE_STRENGTH = tac.FIXED_STRENGTH
-"""Sensor faults (``beam.tactile.TactileNoiseCfg``) at half the beam task's
-top-level strength, as on the pedalo: no curriculum yet to grow them."""
 SOLE_HALF_WIDTH = 0.035
 """Half a G1 sole across (~7 cm): how far a sole centre may go towards an end
 before the sole hangs over it."""
@@ -489,13 +484,6 @@ def reset_on_cylinder(
   q = robot.data.default_joint_pos[env_ids].clone()
   q += joint_noise * (2 * torch.rand_like(q) - 1)
   robot.write_joint_state_to_sim(q, torch.zeros_like(q), env_ids=env_ids)
-
-
-def reset_tactile_noise(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) -> None:
-  if env_ids is None:
-    env_ids = torch.arange(env.num_envs, device=env.device)
-  st = tac.TactileNoiseState.get(env, LAYOUTS[TACTILE.layout])
-  st.resample(env_ids, torch.full((len(env_ids),), TACTILE_NOISE_STRENGTH, device=env.device))
 
 
 CYLINDER_GEOMS = SceneEntityCfg(CYLINDER, geom_names=(cm.GEOM,))

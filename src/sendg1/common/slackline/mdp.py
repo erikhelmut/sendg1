@@ -54,11 +54,9 @@ from mjlab.tasks.velocity.mdp.velocity_command import (
 )
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
 
-from sendg1.common.beam import tactile as tac
-from sendg1.common.beam.mdp import TACTILE, whole_body_com_xy
+from sendg1.common.beam.mdp import whole_body_com_xy
 from sendg1.common.robots.g1 import G1_FOOT_SITES
 from sendg1.common.slackline import model as sm
-from sendg1.common.tactile.layout import LAYOUTS
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -85,9 +83,6 @@ SPAWN_ALONG = (-1.2, 0.3)
 """Spawn point along the line (m from mid-span, in the robot's direction):
 from 0.8 m after the first anchor to just past mid-span, so a walking episode
 has 1-2.5 m of line ahead before ``END_MARGIN``."""
-TACTILE_NOISE_STRENGTH = tac.FIXED_STRENGTH
-"""Sensor faults at half the beam task's top level, as on the cylinder and
-the pedalo: no curriculum yet to grow them."""
 BODY_WEIGHT_N = 343.0
 
 
@@ -1114,13 +1109,6 @@ def set_levels(env: ManagerBasedRlEnv, levels: torch.Tensor) -> None:
   st.home[:] = levels
   st.level[:] = levels
   st.replay[:] = False
-
-
-def reset_tactile_noise(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) -> None:
-  if env_ids is None:
-    env_ids = torch.arange(env.num_envs, device=env.device)
-  st = tac.TactileNoiseState.get(env, LAYOUTS[TACTILE.layout])
-  st.resample(env_ids, torch.full((len(env_ids),), TACTILE_NOISE_STRENGTH, device=env.device))
 
 
 LINE_GEOMS = SceneEntityCfg(LINE, geom_names=(r"webbing_\d+",))

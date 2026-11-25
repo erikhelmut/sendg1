@@ -22,50 +22,22 @@ from typing import Callable, Literal
 from mjlab.envs import mdp as envs_mdp
 from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.tasks.velocity import mdp as vel_mdp
-from mjlab.utils.noise import UniformNoiseCfg as Unoise
-from mjlab.utils.noise.noise_cfg import NoiseModelWithAdditiveBiasCfg
 
 from sendg1.common.beam import mdp
-from sendg1.common.obs.terms import TermSpec
+from sendg1.common.obs.terms import TermSpec, _base_ang_vel, _projected_gravity
+from sendg1.common.obs.terms import _joint_pos as _obs_joint_pos
+from sendg1.common.obs.terms import _joint_vel as _obs_joint_vel
 
 Availability = Literal["onboard", "sensor", "privileged"]
 
-IMU_GYRO_BIAS = 0.05
-"""rad/s, uniform +/-, per episode."""
-IMU_GRAVITY_BIAS = 0.03
-"""Per component of the unit gravity vector, per episode (~1.7 deg of tilt)."""
-
-
-def _ang_vel() -> ObservationTermCfg:
-  return ObservationTermCfg(
-    func=envs_mdp.builtin_sensor,
-    params={"sensor_name": "robot/imu_ang_vel"},
-    noise=NoiseModelWithAdditiveBiasCfg(
-      noise_cfg=Unoise(n_min=-0.2, n_max=0.2),
-      bias_noise_cfg=Unoise(n_min=-IMU_GYRO_BIAS, n_max=IMU_GYRO_BIAS),
-    ),
-  )
-
-
-def _gravity() -> ObservationTermCfg:
-  return ObservationTermCfg(
-    func=envs_mdp.projected_gravity_from_sensor,
-    params={"sensor_name": "robot/imu_upvector"},
-    noise=NoiseModelWithAdditiveBiasCfg(
-      noise_cfg=Unoise(n_min=-0.05, n_max=0.05),
-      bias_noise_cfg=Unoise(n_min=-IMU_GRAVITY_BIAS, n_max=IMU_GRAVITY_BIAS),
-    ),
-  )
-
-
-def _joint_pos() -> ObservationTermCfg:
-  return ObservationTermCfg(
-    func=envs_mdp.joint_pos_rel, params={"biased": True}, noise=Unoise(n_min=-0.01, n_max=0.01)
-  )
-
-
-def _joint_vel() -> ObservationTermCfg:
-  return ObservationTermCfg(func=envs_mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5))
+# The proprioceptive terms are the walking tasks' (``sendg1.common.obs.terms``),
+# so every task's actor reads its joints and IMU through the same noise model.
+_ang_vel, _gravity, _joint_pos, _joint_vel = (
+  _base_ang_vel,
+  _projected_gravity,
+  _obs_joint_pos,
+  _obs_joint_vel,
+)
 
 
 def _plain(func, noise=None) -> Callable[[], ObservationTermCfg]:
@@ -107,10 +79,10 @@ TERMS: dict[str, TermSpec] = {
   "tactile_touch_clean": TermSpec(
     _plain(mdp.tactile_touch_clean), "privileged", "Noise-free tactile_touch."
   ),
-  "taxel_forces_clean": TermSpec(
-    _plain(mdp.taxel_forces_clean),
+  "taxel_normal_clean": TermSpec(
+    _plain(mdp.taxel_normal_clean),
     "privileged",
-    "Clean per-taxel normal and shear forces of both feet.",
+    "Clean per-taxel normal forces of both feet (no per-taxel shear).",
   ),
   "foot_slip_vel": TermSpec(
     _plain(mdp.foot_slip_vel), "privileged", "Planar foot velocity while in contact."
@@ -175,12 +147,13 @@ TOUCH_PRIVILEGED_TERMS: tuple[str, ...] = (
   "tactile_touch_clean",
   "foot_contact_forces",
   "action_lag",
-  "taxel_forces_clean",
+  "taxel_normal_clean",
   "foot_slip_vel",
 )
 """The critic, on top of the actor's terms (the clean touch features replacing
-the faulted ones): full ground truth, the clean per-taxel normal and shear
-forces and the foot slip velocity. Friction is in ``beam_params``. The curved
+the faulted ones): full ground truth, the clean per-taxel normal forces,
+each foot's net contact force (its total shear included) and the foot slip
+velocity. Friction is in ``beam_params``. The curved
 tasks add ``beam_ahead``."""
 BLIND_ACTOR_TERMS: tuple[str, ...] = tuple(n for n in TOUCH_ACTOR_TERMS if n != "tactile_touch")
 """The blind baseline: the touch actor without its tactile sole, so

@@ -15,6 +15,13 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from sendg1.common.beam import tactile as tac
 from sendg1.common.robots.g1 import G1_FOOT_GEOMS, G1_TORSO_BODY
 
+FOOT_FRICTION = (0.3, 1.2)
+"""Sole-ground sliding friction, drawn once per env at startup, the same range in
+every task. The sole outranks the ground in contact priority, so this is the
+friction every foot contact uses: the rubber sole's own coefficient is not
+modelled, and this range brackets it. Box pushing replaces it with its sampled
+floor friction."""
+
 
 def build_events() -> dict[str, EventTermCfg]:
   return {
@@ -61,7 +68,7 @@ def build_events() -> dict[str, EventTermCfg]:
       params={
         "asset_cfg": SceneEntityCfg("robot", geom_names=G1_FOOT_GEOMS),
         "operation": "abs",
-        "ranges": (0.3, 1.2),
+        "ranges": FOOT_FRICTION,
         "shared_random": True,
       },
     ),
@@ -84,9 +91,5 @@ def build_events() -> dict[str, EventTermCfg]:
     ),
     # The tactile sensor's per-episode faults (gain, dead taxels). Present in
     # every obs set so events stay identical; only the tactile actor reads them.
-    "tactile_faults": EventTermCfg(
-      func=tac.reset_tactile_noise,
-      mode="reset",
-      params={"strength": tac.FIXED_STRENGTH},
-    ),
+    "tactile_faults": tac.tactile_faults_event(),
   }

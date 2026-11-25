@@ -1,7 +1,7 @@
 from sendg1.common.obs.groups import build_groups
 from sendg1.common.obs.obs_sets import (
-  OBS_SETS,
   DEFAULT_OBS_SET,
+  OBS_SETS,
   ObsSet,
   research_obs_sets,
 )

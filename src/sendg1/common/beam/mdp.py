@@ -30,7 +30,7 @@ history. One episode moved the level before, so it random-walked around the
 width where a single success and a single fall were equally likely. Levels from ``PLATFORM_FROM_LEVEL`` on
 spawn on the start platform; below it, directly on the beam. Difficulty is
 coupled to the level: pushes switch on from ``PUSH_FROM_LEVEL`` and grow,
-tactile faults grow (``tactile.noise_strength``), and the share of walking
+and the share of walking
 commands rises with the population's mean level.
 
 Replay: each env keeps its own curriculum ("home") level, but a share
@@ -355,11 +355,12 @@ def tactile_touch_clean(env: ManagerBasedRlEnv) -> torch.Tensor:
   return tac.touch_features(tac.canonical_normals(env, TACTILE), layout)
 
 
-def taxel_forces_clean(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """Per foot, per taxel: clean normal, shear x, shear y, each
-  ``sign(f) * log1p(|f|)`` of newtons (canonical frame). [B, 2 * T * 3]."""
-  f = tac.canonical_forces(env, TACTILE).flatten(start_dim=1)
-  return torch.sign(f) * torch.log1p(f.abs())
+def taxel_normal_clean(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Per foot, per taxel: clean normal force, ``log1p`` of newtons (canonical
+  frame). [B, 2 * T]. No per-taxel shear: the model's shear is the net
+  tangential force spread by load, so the per-foot net force (``foot_contact_forces``)
+  already carries all of it."""
+  return torch.log1p(tac.canonical_forces(env, TACTILE)[..., 0].flatten(start_dim=1))
 
 
 def foot_slip_vel(env: ManagerBasedRlEnv) -> torch.Tensor:
@@ -802,14 +803,6 @@ def spawn_from_bank(
   robot.write_joint_state_to_sim(bank["joint_pos"][pick], bank["joint_vel"][pick], env_ids=ids)
   BeamEpisode.get(env).on_spawn(ids, arc, torch.zeros(n, dtype=torch.bool, device=env.device))
   env._beam_bank[ids] = True
-
-
-def reset_tactile_noise(env: ManagerBasedRlEnv, env_ids: torch.Tensor | None) -> None:
-  if env_ids is None:
-    env_ids = torch.arange(env.num_envs, device=env.device)
-  geo = BeamGeometry.get(env)
-  st = tac.TactileNoiseState.get(env, LAYOUTS[TACTILE.layout])
-  st.resample(env_ids, tac.noise_strength(geo.levels[env_ids], geo.num_levels))
 
 
 def push_by_level(

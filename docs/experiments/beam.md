@@ -37,8 +37,8 @@ a record; the runs are in the archive (`~/sendg1-archive`).
 - **Critic** (the same for touch and blind): MLP on the actor's
   proprioception plus ground truth: base velocity, feet and base pose relative
   to the beam, beam progress, width, height and friction, the clean touch
-  features, clean per-taxel normal and shear forces, the feet's slip velocity,
-  contact forces, actuation lag, and how far the beam turns 0.25-1.5 m ahead.
+  features, clean per-taxel normal forces (no per-taxel shear), the feet's net
+  contact forces and slip velocity, actuation lag, and how far the beam turns 0.25-1.5 m ahead.
 - **Curriculum** (per env): each env keeps its last 3 results on its level, a
   success (a walking episode that reaches the end or covers 2 m of beam
   without falling) or a fall; 2 successes move it one width narrower, 2 falls

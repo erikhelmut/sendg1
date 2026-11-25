@@ -30,6 +30,8 @@ from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 from sendg1.common.beam import mdp as beam_mdp
+from sendg1.common.beam import tactile as tac
+from sendg1.common.events import FOOT_FRICTION
 from sendg1.common.ppo import NUM_ENVS
 from sendg1.common.rewards import POSE_STD_WALKING
 from sendg1.common.robots.g1 import (
@@ -274,7 +276,7 @@ def build_events() -> dict[str, EventTermCfg]:
     "foot_friction": EventTermCfg(
       mode="startup",
       func=dr.geom_friction,
-      params={"asset_cfg": foot_geoms, "operation": "abs", "ranges": (0.6, 1.2), "shared_random": True},
+      params={"asset_cfg": foot_geoms, "operation": "abs", "ranges": FOOT_FRICTION, "shared_random": True},
     ),
     "line_friction": EventTermCfg(
       mode="startup",
@@ -324,7 +326,7 @@ def build_events() -> dict[str, EventTermCfg]:
     # under the robot with the level's helper springs.
     "line_level": EventTermCfg(func=mdp.apply_line_level, mode="reset"),
     "reset_on_line": EventTermCfg(func=mdp.reset_on_line, mode="reset"),
-    "tactile_faults": EventTermCfg(func=mdp.reset_tactile_noise, mode="reset"),
+    "tactile_faults": tac.tactile_faults_event(),
   }
 
 

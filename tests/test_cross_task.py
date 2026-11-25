@@ -95,3 +95,37 @@ def test_eval_protocols_use_the_eval_seed() -> None:
 def test_default_num_envs(task: str) -> None:
   """4096 everywhere; a GPU that cannot fit it gets a smaller count at launch."""
   assert load_env_cfg(task).scene.num_envs == ppo.NUM_ENVS == 4096, task
+
+
+TRAIN_TASKS = [t for t in TASKS if not t.endswith("-Eval")]
+
+
+@pytest.mark.parametrize("task", TRAIN_TASKS)
+def test_sensor_noise_and_friction_are_the_same_everywhere(task: str) -> None:
+  """One tactile fault setting, one joint/IMU noise model, one sole friction."""
+  from sendg1.common.beam import tactile as tac
+  from sendg1.common.events import FOOT_FRICTION
+  from sendg1.common.obs import terms as obs_terms
+
+  env = load_env_cfg(task)
+  faults = env.events["tactile_faults"]
+  assert faults.func is tac.reset_tactile_noise, task
+  assert faults.params == {"enabled": tac.FAULTS_ENABLED, "strength": tac.FAULT_STRENGTH}
+  assert tac.FAULTS_ENABLED is False and tac.FAULT_STRENGTH == 0.5
+  if "foot_friction" in env.events:  # box pushing samples the floor instead
+    assert tuple(env.events["foot_friction"].params["ranges"]) == FOOT_FRICTION, task
+  else:
+    assert task.startswith("Sendg1-BoxPush"), task
+  ref = {
+    "base_ang_vel": obs_terms._base_ang_vel(),
+    "projected_gravity": obs_terms._projected_gravity(),
+    "joint_pos": obs_terms._joint_pos(),
+    "joint_vel": obs_terms._joint_vel(),
+  }
+  rl = load_rl_cfg(task)
+  actor = {n: t for g in rl.obs_groups["actor"] for n, t in env.observations[g].terms.items()}
+  for name, want in ref.items():
+    got = actor[name]
+    assert (got.func, got.params, got.noise) == (want.func, want.params, want.noise), (
+      task, name
+    )

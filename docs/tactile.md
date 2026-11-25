@@ -57,23 +57,41 @@ The right foot is re-indexed into the left foot's mirror image, so +y is
 lateral on both feet.
 
 **Normal load only.** The real slipper reports per-taxel pressure, not force
-vectors, so the actor gets no shear. The model's shear is the net tangential
-force shared in proportion to load, and only the critic sees it, where a task's
-critic carries it at all. Most features are unaffected by a global gain error
+vectors, so the actor gets no shear. The model's per-taxel shear is the net
+tangential force shared in proportion to load, so it carries nothing the
+per-foot total does not: the critics get clean per-taxel *normal* forces
+(`taxel_normal_clean`) and each foot's net contact force, shear included. Most features are unaffected by a global gain error
 (the bits and CoP); `load` is the one a calibration error
 moves.
 
 **Sensor faults** (`TactileNoiseState`, actor only; the critic's copies are
-clean): per episode a per-foot gain (±20%), a per-taxel gain (±25%) and dead
-taxels (8%); per step 3 N Gaussian noise per taxel and a 5% frame drop that
-holds a foot's previous reading; on top, 0-1 steps of latency. All scale with a
-strength: from 0.3 to 1.0 over the beam's curriculum levels, a fixed 0.5
-(`FIXED_STRENGTH`) in every other task. The reset event `tactile_faults` is in
-every obs set's events, blind included.
+clean): per episode a per-foot gain, a per-taxel gain and dead taxels; per step
+Gaussian noise per taxel and a frame drop that holds a foot's previous reading.
+At strength 1: ±20 %, ±25 %, 8 %, 3 N, 5 %. One setting for every task, on
+every curriculum level (`common/beam/tactile.py`):
+
+- **Off by default** (`FAULTS_ENABLED = False`, since 2026-11-25): the actor
+  reads clean taxels, with 0-1 steps of latency.
+- **Strength 0.5 when on** (`FAULT_STRENGTH`). Per run:
+  `train <task> --env.events.tactile-faults.params.enabled True
+  [--env.events.tactile-faults.params.strength 0.5]`. Use the same setting for
+  the blind run of a pair (it only draws numbers there, but keeps the configs
+  identical).
+
+The reset event `tactile_faults` is in every obs set's events, blind included.
+
+**Joint and IMU noise** (`common/obs/terms.py`, one definition for every task,
+actor only): per step uniform noise (gyro ±0.2 rad/s, gravity ±0.05, joint
+position ±0.01 rad, joint velocity ±1.5 rad/s); per episode an IMU bias (gyro
+±0.05 rad/s, gravity ±0.03) and a ±0.015 rad encoder offset.
+
+**Sole friction**: the sole outranks the ground in contact priority, so every
+foot contact uses the sole's friction, drawn per env from 0.3-1.2 in every task
+(`common/events.py: FOOT_FRICTION`; box pushing samples the floor instead).
 
 **Not modelled yet**: the real sensor's pressure response (nonlinearity,
-saturation, hysteresis, drift), crosstalk, quantisation; the rubber sole's own
-friction (the feet use the randomised 0.3-1.2 of every task).
+saturation, hysteresis, drift), crosstalk, quantisation; a measured friction
+coefficient of the rubber (the range above brackets it).
 
 A diagnostic `contact_oracle` obs set, whose actor got noiseless foot contact
 and net contact force as an upper bound, was removed on 2026-11-15.
