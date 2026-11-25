@@ -42,7 +42,7 @@ _VELOCITY_ACTOR = frozenset(
 _BOX_PUSH_ACTOR = (_VELOCITY_ACTOR - {"command"}) | {"pilot_command"}
 EXPECTED_DEPLOYABLE = {
   "Sendg1-Velocity-Flat-G1": _VELOCITY_ACTOR,
-  "Sendg1-Velocity-Flat-G1-LSTM": _VELOCITY_ACTOR,
+  "Sendg1-Velocity-Flat-G1-MLP": _VELOCITY_ACTOR,
   "Sendg1-Velocity-Rough-G1": _VELOCITY_ACTOR,
   # Flat velocity plus the end-effector force curriculum: same actor.
   "Sendg1-VelocityPush-G1": _VELOCITY_ACTOR,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Evaluate a box-pushing checkpoint on the floor-mu x box-mass grid.
 
-    python scripts/evaluate_box_push.py --task Sendg1-BoxPush-G1-Blind --seed 0
+    python scripts/evaluate_box_push.py --task Sendg1-BoxPush-G1-Blind --seed 1
     python scripts/evaluate_box_push.py --task ... --checkpoint runs/.../model_2000.pt
 
 Protocol: sendg1/eval/box_push.py (5 floor mu x 4 masses, 32 episodes per cell,
@@ -25,6 +25,8 @@ import math
 import os
 from dataclasses import asdict
 from pathlib import Path
+
+from sendg1.seeds import FIRST_SEED
 
 import numpy as np
 
@@ -114,7 +116,7 @@ def heatmaps(cells: list[dict], protocol, title: str, dest: Path) -> None:
 def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--task", required=True)
-  ap.add_argument("--seed", type=int, default=0, help="training seed of the checkpoint")
+  ap.add_argument("--seed", type=int, default=FIRST_SEED, help="training seed of the checkpoint")
   ap.add_argument("--checkpoint", default=None, help="explicit .pt path")
   ap.add_argument("--log-root", default=str(REPO / "runs"))
   ap.add_argument("--results-root", default=str(REPO / "results"))

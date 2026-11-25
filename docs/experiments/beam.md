@@ -8,12 +8,18 @@ observations and episode length, so its checkpoints load).
 
 | Task id | Beams | Actor sees | Actor dim |
 |---|---|---|---|
-| `G1-Beam-Touch-Curved-Plain` | straight, `bend` (joints up to 25°), `turn` (up to 60°) | IMU, joints, previous action, forward command, tactile touch features; GRU | 152 |
-| `G1-Beam-Curved-Blind` | same | as `Touch-Curved-Plain` without tactile input (blind baseline) | 94 |
-| `G1-Beam-Touch-Curved-MLP-Plain` | same | touch features; plain MLP, no memory | 152 |
-| `G1-Beam-Curved-Blind-MLP-Plain` | same | no tactile; plain MLP, no memory | 94 |
-| `G1-Beam-Touch-Curved-LSTM` | same | touch features; LSTM(256), 64-step rollouts, LR 4e-4 at start (adaptive) | 152 |
-| `G1-Beam-Curved-Blind-LSTM` | same | no tactile; as `Touch-Curved-LSTM` | 94 |
+| `G1-Beam-Touch-Curved-LSTM` | straight, `bend` (joints up to 25°), `turn` (up to 60°) | IMU, joints, previous action, forward command, tactile touch features; the standard LSTM actor | 152 |
+| `G1-Beam-Curved-Blind-LSTM` | same | as `Touch-Curved-LSTM` without tactile input (blind baseline) | 94 |
+| `G1-Beam-Touch-Curved-Plain` | same | touch features; GRU actor (ablation) | 152 |
+| `G1-Beam-Curved-Blind` | same | no tactile; GRU actor (ablation) | 94 |
+| `G1-Beam-Touch-Curved-MLP-Plain` | same | touch features; plain MLP, no memory (ablation) | 152 |
+| `G1-Beam-Curved-Blind-MLP-Plain` | same | no tactile; plain MLP, no memory (ablation) | 94 |
+
+All six train the shared PPO settings (`sendg1/common/ppo.py`: 24-step
+rollouts in 8 minibatches, LR 4e-4 adaptive, entropy 0.005) and differ only in
+the actor's model. Until 2026-11-25 the LSTM pair defaulted to 64-step rollouts
+(the v3/v4 runs overrode them to 24) and the GRU and MLP tasks used 32-step
+rollouts at LR 1e-3.
 
 Removed on 2026-11-15: `G1-Beam-E2E{,-Curved}` (the old soft contact-map
 tactile input) and the round-three experiments `-Plain-R64`, `-Plain-R2-35s`,
@@ -64,10 +70,53 @@ stay as a record; their checkpoints no longer load.
   touches (`load_off_support`, `early_contact_overload`), heel-to-toe steps
   paid per metre gained (`feet_in_line`), posture with shoulder roll left free
   for balancing with the arms out, and the walking regularisers.
+- **Reward v2 (2026-11-18)**: every v1 policy (GRU and LSTM, touch and blind)
+  walked a step-to shuffle: a deep crouch on one leg, the other swept forward
+  nearly straight just above the beam, the back foot closed up, a pause (the
+  tactile LSTM at 17k earned 7 % of `passing_step` and 39 % of `posture`). v2
+  borrows what gives the flat walking reward its normal gait: `foot_clearance`
+  (-2) and `foot_swing_height` (-0.25) with an 8 cm target measured from the
+  beam top (a ray-cast scan would read the floor beside the beam), `posture` and
+  `upright` at 1.0 (v1: 0.5), `action_rate_l2` -0.1 (v1: -0.05). It pays
+  alternation more (`passing_step` 3, v1: 1), pays less for standing
+  flat-footed (`foot_flat` 0.5, v1: 1) and softens the light-touch penalties
+  whose cheapest answer was that straight-leg reach (`touchdown_force_rate` -1,
+  v1: -5; `early_contact_overload` -1, v1: -3). Every beam baseline from before
+  is a v1 result.
+- **Reward v3 (2026-11-19)**: `feet_in_line` 1 (v1/v2: 3). The term pays only
+  at alternating touchdowns, so the v1 shuffle never collected it. Once v2's
+  `passing_step` made the tactile LSTM alternate, it chased a narrow tandem gait
+  on 30-40 cm beams, its foot-off-beam ends rose about 6x and its mean level fell
+  from 1.7 to 0.2 between iterations 3k and 5k. The blind v2 run never
+  alternated enough to collect it and did not regress.
+- **Reward v4 (2026-11-22)**: v3 still looked unnatural at 20k (legs swung
+  across onto the centreline, a crouch), so v4 starts from the walking task's
+  reward and adds only what the beam needs: 15 terms instead of 31. Kept from
+  walking with the same weights: speed tracking (smooth kernel, here along the
+  beam, std 0.15 m/s), `upright`, `pose` with the walking tolerances (v3 had hip
+  roll and yaw 1.5x looser; shoulder roll stays free), `foot_clearance` and
+  `foot_swing_height` at 10 cm over the beam top, and the regularisers. Beam
+  additions: heading along the beam (2), CoM over the beam with a width of a
+  quarter of the beam, at least 3.5 cm (1), `load_off_support` (-1), and a
+  termination cost of -10 (v1-v3: -100). Nothing places individual footsteps:
+  `foot_centreline`, `feet_in_line`, `passing_step`, `feet_air_time`,
+  `foot_flat`, `cop_centred` and the light-touch terms are gone. v3 stays in
+  the code as `build_beam_reward_v3`.
+- **Reward v4b (2026-11-22)**: the v4 runs (224700/1, seed 1) stood still: by
+  6k iterations they covered ~12 % of the commanded distance, nothing left the
+  widest level. The smooth speed kernel (std 0.15 m/s) pays almost nothing
+  below ~2/3 of the command, while heading, CoM, upright and posture pay fully
+  when standing. v4b pays speed with v1-v3's `track_forward_progress` (linear
+  up to the command, weight 2); the other 14 terms are v4's.
+- **Reward v4c (2026-11-22)**: v4b's tactile policy walked the bent 20-40 cm
+  beams by 7k iterations but slid its feet. `foot_slip` (squared slip speed of
+  feet in contact) cost only ~0.005/s at -0.1; v4c uses -2.
+- **Default reward (2026-11-25): v4b.** Every beam task trains v4b
+  (`build_beam_reward`); v4c stays in the code as `build_beam_reward_v4c`.
 
 ```bash
-train G1-Beam-Touch-Curved-Plain --env.scene.num-envs 3072 --agent.run-name touch_plain_s0
-train G1-Beam-Curved-Blind --env.scene.num-envs 3072 --agent.run-name blind_s0
+train G1-Beam-Touch-Curved-LSTM --agent.run-name touch_lstm_s1   # 4096 envs, seed 1
+train G1-Beam-Curved-Blind-LSTM --agent.run-name blind_lstm_s1
 python scripts/beam_eval.py --task G1-Beam-Touch-Curved-Plain-Eval --checkpoint <pt> --out results/beam/<name>_eval.json
 python scripts/beam_video.py --task G1-Beam-Touch-Curved-Plain --path bend --checkpoint <pt> --width 0.20
 python scripts/render_terrain.py --terrain-set beam --prefix beam --row 2

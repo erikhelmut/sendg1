@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Render a headless video of a trained policy.
 
-    python scripts/record_video.py --task Sendg1-Velocity-Flat-G1-Blind --seed 0
+    python scripts/record_video.py --task Sendg1-Velocity-Flat-G1-Blind --seed 1
 
 mjlab's `play --video` also records, but it always constructs an interactive
 viewer, which needs a display and hangs on a headless box. This drives the env
@@ -21,6 +21,8 @@ import argparse
 import os
 from dataclasses import asdict
 from pathlib import Path
+
+from sendg1.seeds import FIRST_SEED
 
 REPO = Path(__file__).resolve().parent.parent
 os.environ.setdefault("MUJOCO_GL", "egl")
@@ -46,7 +48,7 @@ SCHEDULE_SHORT = [
 def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--task", required=True)
-  ap.add_argument("--seed", type=int, default=0)
+  ap.add_argument("--seed", type=int, default=FIRST_SEED, help="training seed of the checkpoint")
   ap.add_argument("--checkpoint", default=None)
   ap.add_argument("--log-root", default=str(REPO / "runs"))
   ap.add_argument("--out", default=None)

@@ -721,6 +721,92 @@ def swing_foot_speed(env: ManagerBasedRlEnv, max_speed: float = 1.2) -> torch.Te
   return (torch.relu(speed - max_speed).square() * air.float()).sum(-1)
 
 
+def _feet_above_top(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Foot-site height above the beam's top surface [B, 2]. The walking reward's
+  ray-cast height scan would read the floor whenever a foot is beside the beam,
+  so the beam's own top height stands in for the terrain under the foot."""
+  ep = BeamEpisode.get(env)
+  feet_z = _robot(env).data.site_pos_w[:, ep._foot_sites, 2]
+  return feet_z - ep.geo.top_z()[:, None]
+
+
+def feet_clearance(
+  env: ManagerBasedRlEnv, target_height: float = 0.08, command_threshold: float = 0.05
+) -> torch.Tensor:
+  """The walking reward's ``feet_clearance`` over the beam top: sum over feet of
+  |height - target| x horizontal foot speed. A foot that moves must move lifted;
+  without it every beam policy swept a nearly straight leg forward just above
+  the surface (the "kick") and shuffled. Only when walking is commanded."""
+  ep = BeamEpisode.get(env)
+  vel = _robot(env).data.site_lin_vel_w[:, ep._foot_sites, :2].norm(dim=-1)
+  cost = ((_feet_above_top(env) - target_height).abs() * vel).sum(-1)
+  return cost * (_forward_cmd(env) > command_threshold).float()
+
+
+class feet_swing_height:
+  """The walking reward's ``feet_swing_height`` over the beam top: at each
+  touchdown, (peak swing height / target - 1)^2. Paired with ``feet_clearance``
+  it asks for a stepping foot that lifts to ``target_height`` and comes down,
+  instead of a low reach."""
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv):
+    self.peak = torch.zeros(env.num_envs, 2, device=env.device)
+    self.step_dt = env.step_dt
+
+  def __call__(
+    self, env: ManagerBasedRlEnv, target_height: float = 0.08, command_threshold: float = 0.05
+  ) -> torch.Tensor:
+    sensor = env.scene[FOOT_CONTACT_SENSOR]
+    found = sensor.data.found
+    assert found is not None
+    air = found == 0
+    self.peak = torch.where(air, torch.maximum(self.peak, _feet_above_top(env)), self.peak)
+    first = sensor.compute_first_contact(dt=self.step_dt)
+    cost = (torch.square(self.peak / target_height - 1.0) * first.float()).sum(-1)
+    self.peak = torch.where(first, torch.zeros_like(self.peak), self.peak)
+    return cost * (_forward_cmd(env) > command_threshold).float()
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    self.peak[slice(None) if env_ids is None else env_ids] = 0.0
+
+
+def track_beam_velocity(env: ManagerBasedRlEnv, std: float = 0.15) -> torch.Tensor:
+  """The walking reward's ``track_linear_velocity`` in the beam's frame:
+  exp(-((v_along - cmd)^2 + v_across^2) / std^2). A smooth kernel pays most
+  for walking steadily at the commanded pace, so pausing costs as much as
+  rushing (``track_forward_progress``'s slack paid for stop-and-go). std 0.15
+  m/s for a 0.3 m/s command, where the walking task's 0.5 suits up to ~1 m/s."""
+  ep = BeamEpisode.get(env)
+  ep.update()
+  v_along, v_across = ep.along_velocity()
+  err = torch.square(v_along - _forward_cmd(env)) + torch.square(v_across)
+  return torch.exp(-err / std**2)
+
+
+def track_beam_heading(env: ManagerBasedRlEnv, std: float = 0.35) -> torch.Tensor:
+  """exp(-e^2 / std^2), e the base heading's error to the beam's local
+  direction. Stands in for the walking reward's yaw-rate tracking: on a bent
+  beam the command is the beam itself."""
+  ep = BeamEpisode.get(env)
+  err = _wrap(_robot(env).data.heading_w - ep.base_proj().tangent_yaw[:, 0])
+  return torch.exp(-torch.square(err / std))
+
+
+def com_over_support(
+  env: ManagerBasedRlEnv, frac: float = 0.5, min_sigma: float = CENTRELINE_SIGMA[0]
+) -> torch.Tensor:
+  """exp(-d^2 / sigma^2), d the whole-body CoM's lateral offset from the
+  centreline and sigma half the support's half-width (a quarter of the beam
+  width), never under ``min_sigma``. The fixed 3.5 cm of ``com_over_beam`` and
+  ``stance_foot_centreline`` asked for a tandem walk on every width, and the
+  policies swung each foot across onto the line; scaled, a hip-width gait fits
+  a wide beam and only narrow beams demand a narrow one."""
+  geo = BeamGeometry.get(env)
+  proj = geo.project(whole_body_com_xy(env)[:, None])
+  sigma = (frac * geo.support_half_width(proj.arc)[:, 0]).clamp(min=min_sigma)
+  return torch.exp(-torch.square(proj.lateral[:, 0] / sigma))
+
+
 def touchdown_force_rate(env: ManagerBasedRlEnv, body_weight_n: float = 343.0) -> torch.Tensor:
   """Sum over feet of (relu(rise of the vertical contact force in one step) /
   body weight)^2. Penalises slamming a foot down, i.e. favours a light first

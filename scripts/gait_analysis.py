@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Record a walking policy and measure its gait (``sendg1.eval.gait``).
 
-    python scripts/gait_analysis.py --task Sendg1-Velocity-Flat-G1-LSTM-Tactile \\
+    python scripts/gait_analysis.py --task Sendg1-Velocity-Flat-G1-Tactile \\
       --checkpoint <model.pt> --out results/gait/<name>.json
 
 Straight walking at fixed forward speeds (``--speeds``), ``--envs-per-speed``

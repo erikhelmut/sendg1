@@ -31,8 +31,14 @@ from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from sendg1.common.beam import mdp as beam_mdp
 from sendg1.common.pedalo import mdp
 from sendg1.common.pedalo import model as pm
-from sendg1.common.pedalo.terms import ACTOR_TERMS, BLIND_ACTOR_TERMS, PRIVILEGED_TERMS, TERMS
+from sendg1.common.pedalo.terms import (
+  ACTOR_TERMS,
+  BLIND_ACTOR_TERMS,
+  PRIVILEGED_TERMS,
+  TERMS,
+)
 from sendg1.common.pedalo.variants import CLASSIC, SPORT, PedaloVariant
+from sendg1.common.ppo import NUM_ENVS
 from sendg1.common.rewards import POSE_STD_WALKING
 from sendg1.common.robots.g1 import (
   G1_FOOT_GEOMS,
@@ -49,7 +55,8 @@ from sendg1.tasks.beam.env_cfg import (
   nonfoot_contact_sensor,
 )
 
-DEFAULT_NUM_ENVS = 4096
+DEFAULT_NUM_ENVS = NUM_ENVS
+"""The shared default (``sendg1.common.ppo.NUM_ENVS``)."""
 EPISODE_S = 20.0
 MAX_FORWARD_SPEED = 0.6
 """m/s. A child rides a pedalo at roughly walking pace; one crank turn is

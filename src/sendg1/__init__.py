@@ -35,4 +35,8 @@ check_mjlab_version()
 # the package resolves identically.
 import mjlab as _mjlab  # noqa: E402,F401
 
+from sendg1._quiet import silence_solver_iteration_warnings
+
+silence_solver_iteration_warnings()
+
 __all__ = ["MJLAB_COMMIT", "MJLAB_VERSION", "check_mjlab_version"]

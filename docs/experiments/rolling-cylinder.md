@@ -24,8 +24,8 @@ by fingerprint.
 - **Spawn**: the cylinder at rest at a random yaw, the robot in its default
   stance facing the rolling direction, sole centres on the top line within
   ±2 cm, dropped from 1 cm. With zero actions it falls off in ~0.65 s.
-- **Actor and PPO**: rsl_rl's plain GRU `RNNModel` (GRU 256 -> MLP 256, 128),
-  the beam task's PPO settings (`tasks/beam/rl_cfg.py`),
+- **Actor and PPO**: the standard settings every task shares
+  (`sendg1/common/ppo.py`: LSTM 256 -> MLP 256, 128; a GRU until 2026-11-25),
   10k iterations. No command: the task is balance only.
 - **Critic**: the blind actor's terms plus ground truth: base velocity,
   cylinder motion (rolling/sliding speed, yaw and spin rate, drift from

@@ -41,6 +41,8 @@ from collections import defaultdict
 from dataclasses import asdict
 from pathlib import Path
 
+from sendg1.seeds import EVAL_SEED
+
 REPO = Path(__file__).resolve().parent.parent
 
 
@@ -269,7 +271,7 @@ def main() -> None:
   ap.add_argument("--task", default="G1-Beam-Touch-Curved-Plain")
   ap.add_argument("--start-lateral", type=float, default=0.08, help="platform start offset (+/- m)")
   ap.add_argument("--start-yaw", type=float, default=0.08, help="start yaw offset (+/- rad)")
-  ap.add_argument("--seed", type=int, default=12345)
+  ap.add_argument("--seed", type=int, default=EVAL_SEED, help="env seed (sendg1.seeds.EVAL_SEED)")
   ap.add_argument("--tag", default="")
   ap.add_argument("--out", default=None)
   args = ap.parse_args()

@@ -1,15 +1,16 @@
 """Beam walking, plain PPO, on straight and bent beams.
 
-``G1-Beam-Touch-Curved-Plain``: a GRU actor on the robot's own signals and
-the tactile slipper's touch features (``tactile_touch``). Its blind baseline,
-``G1-Beam-Curved-Blind``, is the same task without the tactile actor input.
+The main pair, ``G1-Beam-Touch-Curved-LSTM`` and ``G1-Beam-Curved-Blind-LSTM``:
+the standard actor and PPO every task shares (``sendg1.common.ppo``: LSTM(256),
+24-step rollouts, LR 4e-4 adaptive) on the robot's own signals, plus for touch
+the tactile slipper's touch features (``tactile_touch``). The LSTM tasks used
+64-step rollouts by default until 2026-11-25; the v3/v4 runs overrode them to 24.
 
-Memoryless actors, an MLP on the current observation only (``rl_cfg.ActorKind``),
-touch or blind: ``G1-Beam-Touch-Curved-MLP-Plain``, ``G1-Beam-Curved-Blind-MLP-Plain``.
-
-LSTM(256) actors with 64-step rollouts (gradients over 1.28 s, about one gait
-cycle) and a 4e-4 starting learning rate (adaptive schedule), touch or blind:
-``G1-Beam-Touch-Curved-LSTM``, ``G1-Beam-Curved-Blind-LSTM``.
+Actor ablations, identical but for the actor's model (``rl_cfg.ActorKind``):
+a GRU(256), ``G1-Beam-Touch-Curved-Plain`` / ``G1-Beam-Curved-Blind``, and a
+memoryless MLP, ``G1-Beam-Touch-Curved-MLP-Plain`` /
+``G1-Beam-Curved-Blind-MLP-Plain``. Until 2026-11-25 these trained 32-step
+rollouts at LR 1e-3.
 
 One reward for every task, ``beam_reward`` (``env_cfg.build_beam_reward``),
 first trained in the ``touch_plain_s0`` runs (2026-10-17/20). The reward study
@@ -47,8 +48,6 @@ TOUCH_MLP_PLAIN_TASK = "G1-Beam-Touch-Curved-MLP-Plain"
 BLIND_MLP_PLAIN_TASK = "G1-Beam-Curved-Blind-MLP-Plain"
 TOUCH_LSTM_TASK = "G1-Beam-Touch-Curved-LSTM"
 BLIND_LSTM_TASK = "G1-Beam-Curved-Blind-LSTM"
-LSTM_ROLLOUT_STEPS = 64
-LSTM_LEARNING_RATE = 4.0e-4
 
 
 def assert_actor_is_deployable(observations: dict, groups: tuple[str, ...] = ("actor",)) -> None:
@@ -64,17 +63,16 @@ def assert_actor_is_deployable(observations: dict, groups: tuple[str, ...] = ("a
         )
 
 
-_LSTM = {"num_steps_per_env": LSTM_ROLLOUT_STEPS, "learning_rate": LSTM_LEARNING_RATE}
 _TASKS = (
-  # task, tactile, actor, experiment, extra PPO settings
-  (TOUCH_PLAIN_TASK, "touch", "gru", "beam_touch_curved_plain", {}),
-  (BLIND_TASK, "none", "gru", "beam_curved_blind", {}),
-  (TOUCH_MLP_PLAIN_TASK, "touch", "mlp", "beam_touch_curved_mlp_plain", {}),
-  (BLIND_MLP_PLAIN_TASK, "none", "mlp", "beam_curved_blind_mlp_plain", {}),
-  (TOUCH_LSTM_TASK, "touch", "lstm", "beam_touch_curved_lstm", _LSTM),
-  (BLIND_LSTM_TASK, "none", "lstm", "beam_curved_blind_lstm", _LSTM),
+  # task, tactile, actor, experiment
+  (TOUCH_LSTM_TASK, "touch", "lstm", "beam_touch_curved_lstm"),
+  (BLIND_LSTM_TASK, "none", "lstm", "beam_curved_blind_lstm"),
+  (TOUCH_PLAIN_TASK, "touch", "gru", "beam_touch_curved_plain"),
+  (BLIND_TASK, "none", "gru", "beam_curved_blind"),
+  (TOUCH_MLP_PLAIN_TASK, "touch", "mlp", "beam_touch_curved_mlp_plain"),
+  (BLIND_MLP_PLAIN_TASK, "none", "mlp", "beam_curved_blind_mlp_plain"),
 )
-for _task, _tactile, _actor, _experiment, _ppo in _TASKS:
+for _task, _tactile, _actor, _experiment in _TASKS:
   _kw = {"curves": True, "tactile": _tactile}
   for _suffix, _evaluation in (("", False), ("-Eval", True)):
     _env = make_beam_env_cfg(evaluation=_evaluation, **_kw)
@@ -83,6 +81,6 @@ for _task, _tactile, _actor, _experiment, _ppo in _TASKS:
       task_id=_task + _suffix,
       env_cfg=_env,
       play_env_cfg=make_beam_env_cfg(play=True, evaluation=_evaluation, **_kw),
-      rl_cfg=beam_ppo_cfg(experiment_name=_experiment, actor=_actor, **_ppo),
+      rl_cfg=beam_ppo_cfg(experiment_name=_experiment, actor=_actor),
       runner_cls=BeamRunner,
     )

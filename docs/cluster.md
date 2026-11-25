@@ -23,7 +23,7 @@ as on the workstation. The mirrors are never edited on the cluster;
 ```bash
 scripts/cluster/sync.sh ~/sendg1               # code, uncommitted edits included
 scripts/cluster/submit.sh ~/sendg1 G1-Beam-Touch-Curved-Plain \
-  --agent.run-name touch_s0 --agent.seed 0       # sync + sbatch one `train` run
+  --agent.run-name touch_s1 --agent.seed 1       # sync + sbatch one `train` run (seeds 1-5 only)
 ssh mn.ias.informatik.tu-darmstadt.de squeue --me
 scripts/cluster/fetch.sh ~/sendg1              # logs/, runs/, results/, slurm/
 ```
@@ -41,4 +41,8 @@ Then evaluate and render videos here, from the fetched checkpoints.
   cu130 torch build does not support it (sm_70). cu130 needs driver >= 580. Override with
   `--sbatch "--time=3-00:00:00"`. A `--video` argument is refused.
 - `fetch.sh` copies only files newer than the local copy and skips `*.mp4`.
+- MuJoCo Warp's "solver/linesearch iterations limit reached" lines are switched
+  off at `import sendg1` (`src/sendg1/_quiet.py`); they fired every step and made
+  each job's `slurm/*.out` 2-5 GB. Buffer-overflow warnings still print. Set
+  `SENDG1_SOLVER_WARNINGS=1` to get them back.
 - wandb is logged in on the cluster; runs land in the same project.

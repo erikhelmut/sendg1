@@ -25,6 +25,7 @@ from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
@@ -40,12 +41,11 @@ from sendg1.common.box_push.scene import (
 from sendg1.common.events import build_events
 from sendg1.common.obs.groups import build_groups
 from sendg1.common.obs.obs_sets import uses_tactile
-from mjlab.managers.scene_entity_config import SceneEntityCfg
-
+from sendg1.common.ppo import NUM_ENVS
 from sendg1.common.rewards import POSE_STD_WALKING, build_rewards
 from sendg1.common.robots.g1 import (
-  DofSet,
   G1_TORSO_BODY,
+  DofSet,
   actuator_patterns,
   get_g1_ball_hands_cfg,
   get_g1_cfg,
@@ -58,8 +58,8 @@ from sendg1.common.sensors import (
 )
 from sendg1.common.tactile.sensing import tactile_scene_sensors
 
-DEFAULT_NUM_ENVS = 4096
-"""Measured on the RTX 5070; see the README's box-pushing section."""
+DEFAULT_NUM_ENVS = NUM_ENVS
+"""The shared default (``sendg1.common.ppo.NUM_ENVS``)."""
 
 EPISODE_LENGTH_S = 20.0
 

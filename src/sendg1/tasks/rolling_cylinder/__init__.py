@@ -4,9 +4,9 @@
 The G1 stands across a cylinder lying free on the floor and keeps it still
 under its feet. A paired comparison: the two tasks are the same env, critic,
 reward and PPO settings, and differ only in whether the actor gets the
-tactile slipper's touch features. Actor: rsl_rl's plain GRU ``RNNModel``
-with the beam task's sizes and PPO settings (``tasks/beam/rl_cfg.py``); no
-mirror symmetry.
+tactile slipper's touch features. Actor: the standard LSTM
+and PPO settings every task shares (``sendg1.common.ppo``); a GRU until
+2026-11-25, whose checkpoints no longer load.
 """
 
 from __future__ import annotations
@@ -47,6 +47,6 @@ for _task, _tactile, _experiment in (
     env_cfg=_env,
     play_env_cfg=make_rolling_cylinder_env_cfg(play=True, tactile=_tactile),
     rl_cfg=beam_ppo_cfg(
-      experiment_name=_experiment, actor="gru", max_iterations=MAX_ITERATIONS
+      experiment_name=_experiment, max_iterations=MAX_ITERATIONS
     ),
   )

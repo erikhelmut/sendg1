@@ -5,7 +5,10 @@
     python scripts/sweep.py --dry-run
 
     # the real thing
-    python scripts/sweep.py --tasks flat --seeds 0 --max-iterations 3000
+    python scripts/sweep.py --tasks flat                 # seed 1 (the default)
+    python scripts/sweep.py --tasks flat --more-seeds    # seeds 2-5
+
+Training seeds are 1-5 only (``sendg1.seeds``); anything else is refused.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ TASK_BASES = {
 
 def main() -> None:
   from sendg1.common.obs.obs_sets import OBS_SETS, research_obs_sets
+  from sendg1.seeds import FIRST_SEED, MORE_SEEDS, TRAIN_SEEDS, check_train_seed
   from sendg1.tasks._register import _slug
 
   ap = argparse.ArgumentParser()
@@ -38,7 +42,15 @@ def main() -> None:
     default=None,
     help=f"default: {list(research_obs_sets())}",
   )
-  ap.add_argument("--seeds", nargs="+", type=int, default=[0])
+  seeds = ap.add_mutually_exclusive_group()
+  seeds.add_argument(
+    "--seeds", nargs="+", type=int, default=None,
+    help=f"training seeds, a subset of {list(TRAIN_SEEDS)} (default: {FIRST_SEED})",
+  )
+  seeds.add_argument(
+    "--more-seeds", action="store_true",
+    help=f"seeds {list(MORE_SEEDS)}, once seed {FIRST_SEED} looks worth a claim",
+  )
   ap.add_argument("--max-iterations", type=int, default=None)
   ap.add_argument("--num-envs", type=int, default=None)
   ap.add_argument("--log-root", default=str(REPO / "runs"))
@@ -51,6 +63,15 @@ def main() -> None:
   for name in obs_sets:
     if name not in OBS_SETS:
       sys.exit(f"unknown obs set {name!r}; known: {sorted(OBS_SETS)}")
+
+  args.seeds = (
+    list(MORE_SEEDS) if args.more_seeds else (args.seeds or [FIRST_SEED])
+  )
+  try:
+    for s in args.seeds:
+      check_train_seed(s)
+  except ValueError as e:
+    sys.exit(f"[sweep] {e}")
 
   if len(args.seeds) == 1:
     print(

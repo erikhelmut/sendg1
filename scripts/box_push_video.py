@@ -5,7 +5,7 @@
     python scripts/box_push_video.py --random --episodes 4
 
     # a trained policy, on a pinned floor mu and box mass
-    python scripts/box_push_video.py --task Sendg1-BoxPush-G1-Blind --seed 0 \
+    python scripts/box_push_video.py --task Sendg1-BoxPush-G1-Blind --seed 1 \
         --floor-mu 0.3 --box-mass 30
 
 Random actions are N(0, 1) per action dimension -- what PPO's freshly
@@ -19,6 +19,8 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
+from sendg1.seeds import EVAL_SEED, FIRST_SEED
+
 REPO = Path(__file__).resolve().parent.parent
 os.environ.setdefault("MUJOCO_GL", "egl")
 
@@ -27,11 +29,11 @@ def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--task", default="Sendg1-BoxPush-G1-Blind")
   ap.add_argument("--random", action="store_true", help="random actions, no checkpoint")
-  ap.add_argument("--seed", type=int, default=0, help="training seed of the checkpoint")
+  ap.add_argument("--seed", type=int, default=FIRST_SEED, help="training seed of the checkpoint")
   ap.add_argument("--checkpoint", default=None)
   ap.add_argument("--log-root", default=str(REPO / "runs"))
   ap.add_argument("--episodes", type=int, default=3)
-  ap.add_argument("--env-seed", type=int, default=1)
+  ap.add_argument("--env-seed", type=int, default=EVAL_SEED)
   ap.add_argument("--floor-mu", type=float, default=None)
   ap.add_argument("--box-mass", type=float, default=None)
   ap.add_argument("--box-depth", type=float, default=None, help="m, along the push")

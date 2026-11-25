@@ -318,14 +318,29 @@ def test_every_beam_task_uses_beam_reward() -> None:
   assert "foot_side_contact" not in build_beam_reward()
 
 
-def test_lstm_tasks_use_64_steps_and_a_4e4_start_lr() -> None:
-  """The LSTM pair: LSTM(256), 64-step rollouts in 8 minibatches (the GRU's
-  minibatch size), adaptive schedule starting at 4e-4; env as the GRU's."""
+def test_actor_ablations_differ_only_in_the_actor() -> None:
+  """The GRU and MLP beam tasks are the LSTM pair with another actor model:
+  same env, critic and PPO settings."""
   from sendg1.fingerprint import fingerprint
 
-  for task, gru in ((TOUCH_LSTM_TASK, TOUCH_PLAIN_TASK), (BLIND_LSTM_TASK, BLIND_TASK)):
-    rl, ref = load_rl_cfg(task), load_rl_cfg(gru)
-    assert rl.actor.rnn_type == "lstm" and rl.num_steps_per_env == 64
-    assert rl.algorithm.learning_rate == 4.0e-4 and rl.algorithm.schedule == "adaptive"
-    assert rl.algorithm.num_mini_batches == 2 * ref.algorithm.num_mini_batches
-    assert fingerprint(load_env_cfg(task)) == fingerprint(load_env_cfg(gru))
+  for lstm, others in (
+    (TOUCH_LSTM_TASK, (TOUCH_PLAIN_TASK, TOUCH_MLP_PLAIN_TASK)),
+    (BLIND_LSTM_TASK, (BLIND_TASK, BLIND_MLP_PLAIN_TASK)),
+  ):
+    ref = load_rl_cfg(lstm)
+    assert ref.actor.rnn_type == "lstm"
+    for task in others:
+      rl = load_rl_cfg(task)
+      assert rl.algorithm == ref.algorithm and rl.critic == ref.critic, task
+      assert rl.num_steps_per_env == ref.num_steps_per_env, task
+      assert fingerprint(load_env_cfg(task)) == fingerprint(load_env_cfg(lstm)), task
+
+
+def test_beam_reward_is_v4b() -> None:
+  """v4b: progress paid linearly, foot_slip at the walking task's -0.1; v4c
+  (foot_slip -2) is a record only."""
+  from sendg1.tasks.beam.env_cfg import build_beam_reward, build_beam_reward_v4c
+
+  r, c = build_beam_reward(), build_beam_reward_v4c()
+  assert "track_forward_progress" in r and r["foot_slip"].weight == -0.1
+  assert c["foot_slip"].weight == -2.0 and r.keys() == c.keys()

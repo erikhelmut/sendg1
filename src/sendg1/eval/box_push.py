@@ -20,6 +20,7 @@ import numpy as np
 
 from sendg1.common.box_push.mdp import PINNABLE, BoxPushState
 from sendg1.common.box_push.params import BoxPushRanges
+from sendg1.seeds import EVAL_SEED
 
 if TYPE_CHECKING:
   import torch
@@ -28,12 +29,13 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class BoxPushProtocol:
-  version: str = "box_push_v1"
+  version: str = "box_push_v2"
+  """v2 (2026-11-25): seed 12345 -> ``EVAL_SEED`` (0)."""
   floor_mu: tuple[float, ...] = (0.25, 0.35, 0.45, 0.55, 0.70)
   """Spans the training range. 0.2 and below would be mostly infeasible."""
   box_mass: tuple[float, ...] = (10.0, 20.0, 30.0, 40.0)
   episodes_per_cell: int = 32
-  seed: int = 12345
+  seed: int = EVAL_SEED
   """Seeds both the world draws and the env."""
   keep_corruption: bool = True
   """Observation noise stays on, as in training."""

@@ -10,8 +10,9 @@ joystick asks, walks along it. Plain PPO (`tasks/slackline`,
 | `G1-Slackline-Touch` | same, plus the tactile touch features (31 per foot) | 156 |
 
 Same env, critic (358), reward, events and PPO settings; only the actor's
-inputs differ (`tests/test_slackline.py` checks the fingerprints). Actor: rsl_rl's
-plain GRU `RNNModel` with the beam's sizes and PPO settings, 20k iterations.
+inputs differ (`tests/test_slackline.py` checks the fingerprints). Actor and PPO: the
+standard LSTM settings every task shares (`sendg1/common/ppo.py`), 20k
+iterations; a GRU until 2026-11-25.
 Untrained so far.
 
 ![spawn stance](../../results/slackline/g1_on_slackline_wide.png)

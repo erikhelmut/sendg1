@@ -28,6 +28,7 @@ from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 from sendg1.common.beam import mdp as beam_mdp
+from sendg1.common.ppo import NUM_ENVS
 from sendg1.common.rewards import POSE_STD_WALKING
 from sendg1.common.robots.g1 import (
   G1_FOOT_GEOMS,
@@ -52,7 +53,8 @@ from sendg1.tasks.beam.env_cfg import (
   nonfoot_contact_sensor,
 )
 
-DEFAULT_NUM_ENVS = 4096
+DEFAULT_NUM_ENVS = NUM_ENVS
+"""The shared default (``sendg1.common.ppo.NUM_ENVS``)."""
 EPISODE_S = 20.0
 
 BALANCE_ARM_STD: dict[str, float] = {

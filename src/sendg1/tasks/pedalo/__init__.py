@@ -3,9 +3,10 @@
 
 The G1 rides a Pedalo Classic (``G1-Pedalo``) or a Pedalo Sport
 (``G1-Pedalo-Sport``) forward at a joystick speed, or holds it still. Same
-actor inputs and PPO settings as the beam task's ``G1-Beam-Touch-Curved-Plain``
-(plain GRU on the robot's own signals and the tactile touch features), a
-privileged critic. ``G1-Pedalo-Sport-Blind`` is the Sport task with the touch
+actor inputs as the beam task (the robot's own signals and the tactile touch
+features), the standard LSTM actor and PPO settings (``sendg1.common.ppo``), a
+privileged critic. The tasks trained a GRU actor until 2026-11-25; those
+checkpoints no longer load. ``G1-Pedalo-Sport-Blind`` is the Sport task with the touch
 features taken out of the actor and everything else identical, as the
 tactile-vs-blind baseline.
 
@@ -54,5 +55,5 @@ for _task, _variant, _blind, _experiment in _TASKS:
     task_id=_task,
     env_cfg=_env,
     play_env_cfg=make_pedalo_env_cfg(play=True, variant=_variant, blind=_blind),
-    rl_cfg=beam_ppo_cfg(experiment_name=_experiment, actor="gru"),
+    rl_cfg=beam_ppo_cfg(experiment_name=_experiment),
   )

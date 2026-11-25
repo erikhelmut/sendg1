@@ -40,15 +40,15 @@ from sendg1.common.hand_forces import (
 )
 from sendg1.common.obs.groups import build_groups
 from sendg1.common.obs.obs_sets import uses_tactile
+from sendg1.common.ppo import NUM_ENVS
 from sendg1.common.rewards import build_rewards
 from sendg1.common.robots.g1 import (
-  DofSet,
   G1_TORSO_BODY,
+  DofSet,
   actuator_patterns,
   get_g1_cfg,
   resolve_action_scale,
 )
-from sendg1.common.terrains import make_rough_terrain_cfg
 from sendg1.common.sensors import (
   feet_ground_contact_sensor,
   foot_height_sensor,
@@ -56,30 +56,17 @@ from sendg1.common.sensors import (
   terrain_scan_sensor,
 )
 from sendg1.common.tactile.sensing import tactile_scene_sensors
+from sendg1.common.terrains import make_rough_terrain_cfg
 
 Terrain = Literal["flat", "rough"]
 
-DEFAULT_NUM_ENVS: dict[Terrain, int] = {
-  # Measured on an RTX 5070 (12 GB) with scripts/tune_num_envs.py. Throughput
-  # saturates at ~220k steps/s from 8192 upward -- 32768 fits but is no faster,
-  # costs 8.1 of 12 GiB, and quadruples the PPO minibatch. 8192 gives the same
-  # speed at 2.4 GiB, which also makes a long unattended run robust.
-  #
-  # Safe to differ per task: the command curriculum advances on
-  # common_step_counter, which increments once per env.step() regardless of how
-  # many envs are batched, so stages land at fixed ITERATION counts. num_envs
-  # changes how much data the policy has seen by each stage, not when stages
-  # fire -- and comparisons are baseline-vs-tactile within a single task anyway.
-  "flat": 8192,
-  # Rough is memory-bound, not throughput-bound. The curriculum terrain compiles
-  # to ~3,100 static geoms and MuJoCo-Warp's broadphase cost scales with
-  # geoms x envs, so 2,048 envs needs ~11 of the 12 GiB on this card and 4,096
-  # cannot be built at all. 1,024 sits at 6.5 GiB with real headroom, which
-  # matters for an unattended multi-hour run sharing the GPU with a desktop.
-  # Measured: 31.9k steps/s, 0.77 s/iter. Retune with scripts/tune_num_envs.py
-  # on different hardware.
-  "rough": 1024,
-}
+DEFAULT_NUM_ENVS: dict[Terrain, int] = {"flat": NUM_ENVS, "rough": NUM_ENVS}
+"""The shared default (``sendg1.common.ppo.NUM_ENVS``), flat and rough alike.
+Until 2026-11-25: flat 8192, rough 1024. Rough is memory-bound: its curriculum
+terrain compiles to ~3,100 static geoms and MuJoCo-Warp's broadphase scales
+with geoms x envs, so 4096 does not build on a 12 GB card (2048 needs ~11 GiB);
+the 24 GB cluster cards ran 3072. Where 4096 does not fit, train both
+conditions with the same smaller ``--env.scene.num-envs``."""
 
 
 def make_g1_velocity_env_cfg(

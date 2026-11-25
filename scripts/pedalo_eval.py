@@ -18,6 +18,8 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
+from sendg1.seeds import EVAL_SEED
+
 
 def main() -> None:
   ap = argparse.ArgumentParser()
@@ -27,7 +29,7 @@ def main() -> None:
   ap.add_argument("--reps", type=int, default=4)
   ap.add_argument("--film-command", type=float, default=0.45)
   ap.add_argument("--film-seconds", type=float, default=12.0)
-  ap.add_argument("--seed", type=int, default=0)
+  ap.add_argument("--seed", type=int, default=EVAL_SEED, help="env seed (sendg1.seeds.EVAL_SEED)")
   ap.add_argument("--label", default="")
   ap.add_argument("--out", required=True, help="output path without extension")
   args = ap.parse_args()

@@ -18,17 +18,20 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.tasks.registry import load_env_cfg
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 
+from sendg1.seeds import EVAL_SEED
+
 
 @dataclass(frozen=True)
 class EvalProtocol:
   """A fixed measurement setup. Change it and you must re-evaluate everything."""
 
-  version: str = "v1"
+  version: str = "v2"
+  """v2 (2026-11-25): env seed 12345 -> ``EVAL_SEED`` (0)."""
   num_envs: int = 512
   episode_length_s: float = 20.0
   num_episodes: int = 4
   """Episodes per environment. Total episodes = num_envs * num_episodes."""
-  seed: int = 12345
+  seed: int = EVAL_SEED
   """Environment seed. Fixed across conditions so DR draws and terrain match."""
 
   command_grid: tuple[tuple[float, float, float], ...] = field(

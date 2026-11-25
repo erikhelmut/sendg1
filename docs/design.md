@@ -18,7 +18,11 @@ actually fires.
 **2. Only the actor changes between conditions.**
 The critic, rewards, events, terminations, terrain and network architecture are
 identical across observation sets — verified by
-`tests/test_config_fingerprint.py`. If two things differed at once, a measured
+`tests/test_config_fingerprint.py`. Across tasks, too, the robot (the G1 in the
+tactile slipper), the tactile sensor model and the actor, critic and PPO
+settings are the same (`sendg1/common/ppo.py`: LSTM(256) -> MLP (256, 128),
+24-step rollouts, LR 4e-4 adaptive), so one task's result compares with
+another's; `tests/test_cross_task.py` lists what may differ per task. If two things differed at once, a measured
 difference could not be attributed to the actor's observation space.
 
 **3. Configs are fingerprinted.**
@@ -51,9 +55,12 @@ Re-record in the same commit as the change, and re-run every baseline that moved
 ## Open
 
 - The sensor's rate, latency, noise and units. The layout is in (`slipper_v1`).
-- Seeds: 1 for now (directional only). 5 before any reported claim.
-- `num_envs`: per-task, tune with `scripts/tune_num_envs.py`. On a 12 GB 5070,
-  throughput saturates around 8192 (~220k steps/s); larger fits but buys nothing.
-  Safe to vary across tasks: the command curriculum advances on a counter that
-  ticks once per `env.step()` regardless of batch size, so its stages land at
-  fixed iteration counts either way.
+- Seeds (`src/sendg1/seeds.py`): training seeds 1-5, seed 1 first
+  (directional only), 2-5 before any reported claim; seed 0 is the evaluation
+  env seed.
+- `num_envs`: 4096 for every task (`NUM_ENVS` in `src/sendg1/common/ppo.py`),
+  since with the 24-step rollout it sets PPO's batch. Where a task or GPU cannot
+  fit it (rough terrain on a 12 GB card), train both conditions with the same
+  smaller `--env.scene.num-envs` and put it in the run name (`_n2048`);
+  `scripts/tune_num_envs.py` finds what fits. The command curriculum advances
+  per `env.step()`, so its stages land at the same iterations either way.

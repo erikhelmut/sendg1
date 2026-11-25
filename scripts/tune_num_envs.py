@@ -73,7 +73,7 @@ def main() -> None:
           f"({fastest[1]:.2f} GiB)")
     print("More envs is not automatically better: throughput saturates once the "
           "GPU is busy, while larger batches change PPO's effective batch size.")
-    print("Set DEFAULT_NUM_ENVS in src/sendg1/tasks/velocity/env_cfg.py, or pass "
+    print("Default is NUM_ENVS in src/sendg1/common/ppo.py (4096); if it does not fit, pass "
           "--env.scene.num-envs at train time.")
 
 

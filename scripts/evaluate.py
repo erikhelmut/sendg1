@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Evaluate a trained checkpoint under the fixed protocol.
 
-    python scripts/evaluate.py --task Sendg1-Velocity-Flat-G1-Blind --seed 0
+    python scripts/evaluate.py --task Sendg1-Velocity-Flat-G1-Blind --seed 1
 
 Writes results/<experiment>/<seed>.json. Both conditions run through this same
 code path with the same protocol, which is what makes the numbers comparable.
@@ -13,6 +13,8 @@ import argparse
 import json
 from dataclasses import asdict
 from pathlib import Path
+
+from sendg1.seeds import FIRST_SEED
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -27,7 +29,7 @@ def _write(out: dict, dest: Path, seed: int) -> None:
 def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--task", required=True)
-  ap.add_argument("--seed", type=int, default=0)
+  ap.add_argument("--seed", type=int, default=FIRST_SEED, help="training seed of the checkpoint")
   ap.add_argument("--checkpoint", default=None, help="explicit .pt path")
   ap.add_argument("--log-root", default=str(REPO / "runs"))
   ap.add_argument("--results-root", default=str(REPO / "results"))

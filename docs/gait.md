@@ -6,7 +6,7 @@ gait the way a human gait lab would; `scripts/gait_report.py` compares tactile
 against blind across seeds and writes an HTML report.
 
 ```bash
-python scripts/gait_analysis.py --task Sendg1-Velocity-Flat-G1-LSTM-Tactile \
+python scripts/gait_analysis.py --task Sendg1-Velocity-Flat-G1-Tactile \
   --checkpoint <model.pt> --out results/gait/velocity_flat_lstm/tactile_s1_it20000_clean.json
 python scripts/gait_analysis.py ... --condition perturbed
 python scripts/gait_report.py results/gait/velocity_flat_lstm
