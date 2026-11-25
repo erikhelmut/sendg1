@@ -95,9 +95,13 @@ def ppo_cfg(
     save_interval=SAVE_EVERY,
     num_steps_per_env=ROLLOUT_STEPS,
     max_iterations=max_iterations,
-    logger="wandb",
+    # TensorBoard event files in the run directory (2026-11-25: wandb off).
+    # ``--agent.logger wandb`` turns wandb back on for a run; it then also
+    # writes the event files, and its run carries the task's identity
+    # (``sendg1.common.runner``).
+    logger="tensorboard",
     wandb_project="sendg1",
-    # Log metrics to W&B, but keep .pt/.onnx files local: checkpoints are
-    # reproducible from a seed plus a pinned config.
+    # Checkpoints stay local even with wandb: they are reproducible from a seed
+    # plus a pinned config.
     upload_model=False,
   )

@@ -22,22 +22,25 @@ trains both conditions with the same smaller `--env.scene.num-envs`. Per task
 only the entropy coefficient (0.01 walking, 0.005 elsewhere) and the iteration
 budget differ (`tests/test_cross_task.py`).
 
-### Checkpoints and wandb
+### Checkpoints and logging
 
 Every task trains with `sendg1.common.runner.Sendg1Runner`:
 
 - **Checkpoints** every 5,000 iterations (`SAVE_EVERY`), named by iterations
   done: `model_5000.pt`, ..., `model_20000.pt`, plus the last iteration when a
   run stops off that grid. Resuming from `model_N.pt` continues at iteration N.
-- **wandb** (project `sendg1`): each run is grouped by task family (`group`:
-  `beam`, `velocity_flat`, `pedalo_sport`, ...), with the condition as
-  `job_type` (`blind` / `tactile`), and tagged with family, condition,
-  `seed<N>` and the task id. Its config holds task, family, condition, seed,
-  env count, iteration budget and git commit (plus rsl_rl's full env and agent
-  config). Logged per iteration: every reward term (`Episode_Reward/*`),
-  terminations (`Episode_Termination/*`), curriculum and metric terms, losses,
-  learning rate, action std, episode reward and length, throughput. In the UI,
-  group runs by `group` and colour by `job_type` to compare blind and tactile.
+- **Logging**: TensorBoard event files in each run's directory
+  (`logs/rsl_rl/<experiment>/<date>_<run>/events.out.tfevents.*`), fetched back
+  from the cluster with `scripts/cluster/fetch.sh`. Logged per iteration: every
+  reward term (`Episode_Reward/*`), terminations (`Episode_Termination/*`),
+  curriculum and metric terms, losses, learning rate, action std, episode
+  reward and length, throughput. View with
+  `uv run tensorboard --logdir logs/rsl_rl`.
+- **wandb** is off (since 2026-11-25). `--agent.logger wandb` turns it on for a
+  run (project `sendg1`, event files still written): the run is grouped by
+  task family, with the condition (`blind` / `tactile`) as `job_type`, tagged
+  with family, condition, `seed<N>` and task id, and its config holds those
+  plus env count, iteration budget and git commit.
 
 Beam walking, box pushing, rolling-cylinder balance and the slackline have
 their own pages:

@@ -45,4 +45,6 @@ Then evaluate and render videos here, from the fetched checkpoints.
   off at `import sendg1` (`src/sendg1/_quiet.py`); they fired every step and made
   each job's `slurm/*.out` 2-5 GB. Buffer-overflow warnings still print. Set
   `SENDG1_SOLVER_WARNINGS=1` to get them back.
-- wandb is logged in on the cluster; runs land in the same project.
+- Training logs to TensorBoard files in each run directory; `fetch.sh` brings
+  them back. wandb is off by default (`--agent.logger wandb` for a run; it is
+  logged in on the cluster).
