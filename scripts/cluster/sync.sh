@@ -8,8 +8,9 @@
 # refused once the mirror holds uncommitted edits); the cluster worktree is
 # created from it on first use and its HEAD moved to it on every sync, so
 # `git status` there shows exactly the local uncommitted diff. Files are
-# rsynced from `git ls-files`, minus training output, so checkpoints, logs and
-# videos never travel. Files deleted locally stay on the cluster.
+# rsynced from `git ls-files`: every tracked file, and untracked ones except
+# training output, so checkpoints, logs and videos never travel. Files deleted
+# locally stay on the cluster.
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
 resolve_worktree "${1:-}"
@@ -23,7 +24,11 @@ else
   git -C ~/"$1" reset -q "hamming/$2"
 fi
 REMOTE
-git -C "$LOCAL_WT" ls-files -co --exclude-standard -z \
-  | grep -zvE '^(logs|runs|slurm|wandb|media|videos)/|\.(pt|mp4|log)$|MUJOCO_LOG' \
-  | rsync -a --from0 --files-from=- "$LOCAL_WT/" "$CLUSTER_HOST:$WT_NAME/"
+# Tracked files always travel (results/beam/v4_beam_states.pt is a training
+# input); untracked ones only if they are not training output.
+{
+  git -C "$LOCAL_WT" ls-files -c -z
+  git -C "$LOCAL_WT" ls-files -o --exclude-standard -z \
+    | grep -zvE '^(logs|runs|slurm|wandb|media|videos)/|\.(pt|mp4|log)$|MUJOCO_LOG'
+} | rsync -a --from0 --files-from=- "$LOCAL_WT/" "$CLUSTER_HOST:$WT_NAME/"
 echo "[sync] $LOCAL_WT ($BRANCH) -> $CLUSTER_HOST:~/$WT_NAME"
