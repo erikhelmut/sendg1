@@ -1,18 +1,13 @@
-"""Pedalo riding, plain PPO: ``G1-Pedalo``, ``G1-Pedalo-Sport`` and
+"""Pedalo riding: ``G1-Pedalo``, ``G1-Pedalo-Sport`` and
 ``G1-Pedalo-Sport-Blind``.
 
 The G1 rides a Pedalo Classic (``G1-Pedalo``) or a Pedalo Sport
 (``G1-Pedalo-Sport``) forward at a joystick speed, or holds it still. Same
 actor inputs as the beam task (the robot's own signals and the tactile touch
 features), the standard LSTM actor and PPO settings (``sendg1.common.ppo``), a
-privileged critic. The tasks trained a GRU actor until 2026-11-25; those
-checkpoints no longer load. ``G1-Pedalo-Sport-Blind`` is the Sport task with the touch
-features taken out of the actor and everything else identical, as the
+privileged critic. ``G1-Pedalo-Sport-Blind`` is the Sport task with the
+touch features taken out of the actor and everything else identical, as the
 tactile-vs-blind baseline.
-
-The first pedalo runs used a symmetric GRU actor (``G1-Pedalo-Sym``,
-``G1-Pedalo-Sport-Sym``); those tasks were removed on 2026-11-14 with the
-symmetric actor, so their checkpoints no longer load.
 """
 
 from __future__ import annotations

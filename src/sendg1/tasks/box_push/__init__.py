@@ -1,15 +1,7 @@
 """Heavy-box pushing under unknown floor friction, Unitree G1.
 
-Three task families, each fanned across every observation set:
-
-  Sendg1-BoxPush-G1-*             the task as specified: full ranges from the
-                                  first episode, plain floor
-  Sendg1-BoxPushCurriculum-G1-*   light boxes / high friction first, widened
-                                  toward the full ranges by success rate
-  Sendg1-BoxPushPatches-G1-*      plus 1-3 low-friction floor patches on the path
-
-The flags are factory arguments rather than CLI overrides, so each combination
-is its own registered (and fingerprinted) task.
+``Sendg1-BoxPush-G1-{Blind,Tactile}``: full ranges from the first episode, on
+a plain floor.
 """
 
 from functools import partial
@@ -32,18 +24,4 @@ register_variants(
   make_g1_box_push_env_cfg,
   _ppo,
   experiment_prefix="box_push",
-)
-
-register_variants(
-  "Sendg1-BoxPushCurriculum-G1",
-  partial(make_g1_box_push_env_cfg, curriculum=True),
-  _ppo,
-  experiment_prefix="box_push_curriculum",
-)
-
-register_variants(
-  "Sendg1-BoxPushPatches-G1",
-  partial(make_g1_box_push_env_cfg, low_friction_patches=True),
-  _ppo,
-  experiment_prefix="box_push_patches",
 )

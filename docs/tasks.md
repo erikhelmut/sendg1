@@ -7,10 +7,8 @@
 | `Sendg1-Velocity-Flat-G1-Blind` | proprioception only | 96 |
 | `Sendg1-Velocity-Rough-G1-Blind` | proprioception only | 96 |
 | `Sendg1-Velocity-{Flat,Rough}-G1-Tactile` | + tactile slipper (`tactile_touch`) | 154 |
-| `Sendg1-Velocity-Flat-G1-MLP-{Blind,Tactile}` | as flat velocity, memoryless MLP actor (512, 256, 128) | 96 / 154 |
-| `Sendg1-VelocityPush-G1-{Blind,Tactile}` | as flat velocity, plus a hand-force curriculum | 96 / 154 |
-| `Sendg1-BoxPush{,Curriculum,Patches}-G1-Blind` | proprioception, pilot command | 96 |
-| `Sendg1-BoxPush{,Curriculum,Patches}-G1-Tactile` | + tactile slipper (`tactile_touch`) | 154 |
+| `Sendg1-BoxPush-G1-Blind` | proprioception, pilot command | 96 |
+| `Sendg1-BoxPush-G1-Tactile` | + tactile slipper (`tactile_touch`) | 154 |
 
 Because the height scan is gone, flat and rough share a 96-dim actor input
 space: one architecture serves both, and flat->rough transfer stays a
@@ -23,11 +21,6 @@ at 4e-4. Every task defaults to 4096 envs (`NUM_ENVS`); a GPU that cannot fit a 
 trains both conditions with the same smaller `--env.scene.num-envs`. Per task
 only the entropy coefficient (0.01 walking, 0.005 elsewhere) and the iteration
 budget differ (`tests/test_cross_task.py`).
-Until 2026-11-25 the walking and box-push tasks used an MLP actor at LR 1e-3,
-the beam-style tasks a GRU with 32-step rollouts at LR 1e-3, and
-`Sendg1-Velocity-Flat-G1-LSTM` (removed; its checkpoints load in
-`Sendg1-Velocity-Flat-G1`) 64-step rollouts. The flat task's MLP actor lives
-on as the `-MLP` ablation.
 
 Beam walking, box pushing, rolling-cylinder balance and the slackline have
 their own pages:

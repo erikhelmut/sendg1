@@ -13,7 +13,7 @@ Each env runs exactly one episode. Its record is read from
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -23,7 +23,6 @@ from sendg1.common.box_push.params import BoxPushRanges
 from sendg1.seeds import EVAL_SEED
 
 if TYPE_CHECKING:
-  import torch
   from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 
 
@@ -126,7 +125,6 @@ def pin_worlds(env: ManagerBasedRlEnv, worlds: EpisodeWorlds, index: np.ndarray)
   import torch
 
   st = BoxPushState.get(env)
-  st.alpha = 1.0
   for name in PINNABLE:
     if name not in worlds.values:
       # Not drawn by the protocol: the grid pins mass and floor mu, so the
@@ -153,10 +151,6 @@ def status_lines(env: ManagerBasedRlEnv, t: float, label: str = "") -> list[str]
     f"   push {st.horizontal_push_force()[0]:.0f} N",
   ]
   return lines
-
-
-def to_dict(protocol: BoxPushProtocol) -> dict:
-  return asdict(protocol)
 
 
 def configure_video_view(

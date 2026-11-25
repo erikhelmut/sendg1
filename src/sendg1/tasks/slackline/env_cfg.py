@@ -2,7 +2,7 @@
 
 The G1 starts in a tandem stance on a tensioned slackline
 (``common/slackline/model.py``) and either balances there or walks along
-it, as the forward-speed command asks. Plain PPO with a GRU actor (IMU,
+it, as the forward-speed command asks. PPO with an LSTM actor (IMU,
 joints, previous action, command, and, for ``Touch``, the tactile touch
 features) and an MLP critic on that plus ground truth about the line. The
 two tasks differ only in the actor's inputs.

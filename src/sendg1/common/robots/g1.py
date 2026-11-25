@@ -183,8 +183,6 @@ BALL_HAND_PRIORITY = 4
 """Above the box-push box (3) and floor (2): every hand contact uses the ball's
 friction and contact dimension."""
 
-BALL_HAND_GEOMS: tuple[str, ...] = ("left_hand_collision", "right_hand_collision")
-
 
 def get_g1_ball_hands_spec() -> mujoco.MjSpec:
   """The G1 MJCF with each rubber hand replaced by a ball.

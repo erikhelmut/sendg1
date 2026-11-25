@@ -2,8 +2,8 @@
 """Evaluate a beam policy per beam width.
 
     python scripts/beam_eval.py --checkpoint runs/beam_touch_curved_plain/<run>/model_14999.pt --out results/beam/<name>.json
-    python scripts/beam_eval.py --task G1-Beam-Touch-Curved-Plain --checkpoint <pt> --out results/beam/<name>_curved.json
-    python scripts/beam_eval.py --task G1-Beam-Touch-Curved-Plain-Eval --checkpoint <pt> --out results/beam/<name>_eval.json
+    python scripts/beam_eval.py --task G1-Beam-Touch-Curved-LSTM --checkpoint <pt> --out results/beam/<name>_curved.json
+    python scripts/beam_eval.py --task G1-Beam-Touch-Curved-LSTM-Eval --checkpoint <pt> --out results/beam/<name>_eval.json
 
 Protocol (fixed)
 ---------------------------------------------------
@@ -268,7 +268,7 @@ def main() -> None:
   ap.add_argument("--episodes", type=int, default=2)
   ap.add_argument("--speed", type=float, default=0.3)
   ap.add_argument("--pushes", action="store_true")
-  ap.add_argument("--task", default="G1-Beam-Touch-Curved-Plain")
+  ap.add_argument("--task", default="G1-Beam-Touch-Curved-LSTM")
   ap.add_argument("--start-lateral", type=float, default=0.08, help="platform start offset (+/- m)")
   ap.add_argument("--start-yaw", type=float, default=0.08, help="start yaw offset (+/- rad)")
   ap.add_argument("--seed", type=int, default=EVAL_SEED, help="env seed (sendg1.seeds.EVAL_SEED)")

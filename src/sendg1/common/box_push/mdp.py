@@ -1,7 +1,7 @@
 """MDP terms for the box-pushing task.
 
 One :class:`BoxPushState` per env instance holds everything an episode needs to
-remember: the sampled world (floor mu, box mass/size/mu, target, patches), the
+remember: the sampled world (floor mu, box mass/size/mu, target), the
 box-to-target distance of the previous step, and the per-episode statistics the
 paper reports. It is advanced at most once per env step (``update``) by
 whichever term asks first, and archived then re-sampled by the
@@ -30,12 +30,7 @@ from mjlab.utils.lab_api.math import (
 
 from sendg1.common.box_push.params import (
   G1_MASS_KG,
-  MAX_PATCHES,
-  PATCH_LIFT,
   BoxPushRanges,
-  CurriculumCfg,
-  PatchCfg,
-  curriculum_ranges,
 )
 from sendg1.common.box_push.pilot import PilotCfg, pilot_command
 from sendg1.common.box_push.scene import (
@@ -45,7 +40,6 @@ from sendg1.common.box_push.scene import (
   PUSH_FORCE_SENSOR,
   TARGET_ENTITY,
   TERRAIN_GEOM,
-  patch_geom_name,
 )
 from sendg1.common.robots.g1 import G1_FOOT_SITES
 from sendg1.common.tactile.layout import SOLE_Z
@@ -128,8 +122,6 @@ class BoxPushState:
   def __init__(self, env: ManagerBasedRlEnv) -> None:
     params = env.cfg.events[RESET_EVENT].params
     self.ranges: BoxPushRanges = params["ranges"]
-    self.patches: PatchCfg | None = params["patches"]
-    self.curriculum: CurriculumCfg | None = params["curriculum"]
 
     self._env = env
     self.robot = env.scene["robot"]
@@ -143,14 +135,6 @@ class BoxPushState:
     self.box_geom = int(self.box.indexing.geom_ids[0])
     self.box_dofs = self.box.indexing.free_joint_v_adr.to(env.device, dtype=torch.long)
     self.floor_geom = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_GEOM, TERRAIN_GEOM)
-    self.patch_geoms: list[int] = []
-    if self.patches is not None:
-      self.patch_geoms = [
-        mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_GEOM, patch_geom_name(i))
-        for i in range(MAX_PATCHES)
-      ]
-      if min(self.patch_geoms) < 0:
-        raise RuntimeError("low_friction_patches is on but the patch geoms are missing")
     self.foot_body_ids, _ = self.robot.find_bodies(FOOT_BODIES, preserve_order=True)
     self.foot_site_ids, _ = self.robot.find_sites(G1_FOOT_SITES, preserve_order=True)
 
@@ -164,9 +148,6 @@ class BoxPushState:
     self.box_mu = z()
     self.box_half = torch.zeros(n, 3, device=dev)
     self.target_xy = torch.zeros(n, 2, device=dev)
-    self.patch_rect = torch.zeros(n, MAX_PATCHES, 4, device=dev)
-    """(cx, cy, half_x, half_y) in world; half 0 for an unused patch."""
-    self.patch_mu = z()[:, None].repeat(1, MAX_PATCHES)
 
     self.pins: dict[str, torch.Tensor] = {
       name: torch.full((n,), float("nan"), device=dev) for name in PINNABLE
@@ -174,10 +155,6 @@ class BoxPushState:
     """Per-env values the next reset uses instead of sampling; NaN = sample.
     Evaluation pins every episode's world so all conditions see the same ones."""
 
-    self.alpha = 0.0 if self.curriculum is not None else 1.0
-    self._window_success = 0
-    self._window_count = 0
-    self.window_success_rate = float("nan")
 
     # -- per-episode progress and statistics ---------------------------------
     self.prev_dist = z()
@@ -266,19 +243,8 @@ class BoxPushState:
     return torch.norm(f.view(f.shape[0], -1, 3).sum(dim=1)[:, :2], dim=-1)
 
   def mu_under_feet(self) -> torch.Tensor:
-    """[B, 2] friction of the floor surface under each foot site."""
-    mu = self.floor_mu[:, None].repeat(1, 2)
-    if self.patches is None:
-      return mu
-    feet = self.robot.data.site_pos_w[:, self.foot_site_ids, :2]  # [B, 2, 2]
-    r = self.patch_rect[:, None]  # [B, 1, P, 4]
-    inside = (
-      ((feet[:, :, None, 0] - r[..., 0]).abs() <= r[..., 2])
-      & ((feet[:, :, None, 1] - r[..., 1]).abs() <= r[..., 3])
-    )  # [B, 2, P]
-    patch_mu = self.patch_mu[:, None, :].expand_as(inside)
-    lowest = torch.where(inside, patch_mu, torch.full_like(patch_mu, float("inf")))
-    return torch.minimum(mu, lowest.amin(dim=-1))
+    """[B, 2] friction of the floor under each foot."""
+    return self.floor_mu[:, None].repeat(1, 2)
 
   # -- per-step update -------------------------------------------------------
 
@@ -417,16 +383,13 @@ def box_push_reset(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,
   ranges: BoxPushRanges,
-  patches: PatchCfg | None = None,
-  curriculum: CurriculumCfg | None = None,
 ) -> None:
   """Event (mode="reset"): archive the finished episode, sample a new world.
 
   The robot is placed by ``reset_base`` at the env origin facing +x; the box is
-  placed ahead of it, and the target ahead of the box. ``ranges``, ``patches``
-  and ``curriculum`` are read back by :class:`BoxPushState`.
+  placed ahead of it, and the target ahead of the box. ``ranges`` is read back
+  by :class:`BoxPushState`.
   """
-  del patches, curriculum  # read through the state, from these same params
   st = BoxPushState.get(env)
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device)
@@ -436,15 +399,14 @@ def box_push_reset(
 
   n, dev = len(env_ids), env.device
   r = ranges
-  cur = curriculum_ranges(r, st.alpha)
 
   def draw(name: str, lo_hi: tuple[float, float]) -> torch.Tensor:
     pin = st.pins[name][env_ids]
     return torch.where(pin.isnan(), _uniform(lo_hi, n, dev), pin)
 
-  floor_mu = draw("floor_mu", cur["floor_mu"])
-  box_mu = draw("box_mu", cur["box_mu"])
-  margin = draw("traction_margin", cur["traction_margin"])
+  floor_mu = draw("floor_mu", r.floor_mu)
+  box_mu = draw("box_mu", r.box_mu)
+  margin = draw("traction_margin", r.traction_margin)
   # Mass follows from the margin (params.mass_from_margin), unless pinned --
   # an evaluation grid pins the mass and the margin is then whatever it implies.
   mass_pin = st.pins["box_mass"][env_ids]
@@ -515,57 +477,6 @@ def box_push_reset(
   mocap[:, 2] = origin[:, 2]
   mocap[:, 3] = 1.0
   st.target.write_mocap_pose_to_sim(mocap, env_ids=env_ids)
-
-  if st.patches is not None:
-    _place_patches(env, st, env_ids, origin, target_xy)
-
-
-def _place_patches(
-  env: ManagerBasedRlEnv,
-  st: BoxPushState,
-  env_ids: torch.Tensor,
-  origin: torch.Tensor,
-  target_xy: torch.Tensor,
-) -> None:
-  p = st.patches
-  assert p is not None
-  n, dev = len(env_ids), env.device
-  model = env.sim.model
-  count = torch.randint(p.count[0], p.count[1] + 1, (n,), device=dev)
-  start = origin[:, :2]
-  seg = target_xy - start
-  seg_len = torch.norm(seg, dim=-1, keepdim=True).clamp_min(1e-6)
-  along, across = seg / seg_len, torch.stack([-seg[:, 1], seg[:, 0]], -1) / seg_len
-  for i, gid in enumerate(st.patch_geoms):
-    used = i < count
-    t = _uniform(p.path_fraction, n, dev)[:, None]
-    lat = _uniform((-p.lateral, p.lateral), n, dev)[:, None]
-    centre = start + t * seg_len * along + lat * across
-    half_xy = 0.5 * torch.stack(
-      [_uniform(p.size, n, dev), _uniform(p.size, n, dev)], dim=-1
-    )
-    half_z = torch.full((n,), 0.5 * p.thickness, device=dev)
-    mu = _uniform(p.mu, n, dev)
-    pos = torch.zeros(n, 3, device=dev)
-    pos[:, :2] = centre
-    pos[:, 2] = torch.where(
-      used, origin[:, 2] + PATCH_LIFT - half_z, torch.full_like(half_z, -5.0)
-    )
-    half = torch.cat([half_xy, half_z[:, None]], dim=-1)
-    model.geom_pos[env_ids, gid] = pos
-    # Patches are static (world-body) geoms, whose world pose mujoco_warp
-    # computes once and never again: geom_pos alone would not move them. Their
-    # pose is written straight into the data, where nothing overwrites it
-    # (tests/test_box_push.py checks a foot on a moved patch gets its friction).
-    env.sim.data.geom_xpos[env_ids, gid] = pos
-    model.geom_size[env_ids, gid] = half
-    model.geom_rbound[env_ids, gid] = torch.norm(half, dim=-1)
-    model.geom_aabb[env_ids, gid, 1] = half
-    model.geom_friction[env_ids, gid, 0] = mu
-    st.patch_rect[env_ids, i] = torch.cat(
-      [centre, half_xy * used[:, None].float()], dim=-1
-    )
-    st.patch_mu[env_ids, i] = mu
 
 
 # ---------------------------------------------------------------------------
@@ -659,13 +570,6 @@ def hand_contact_on_push_face(
   return (found & side & facing).any(dim=1).float()
 
 
-def stay_near_box(env: ManagerBasedRlEnv, max_distance: float = 1.5) -> torch.Tensor:
-  """Metres the pelvis is beyond ``max_distance`` (xy) from the box centre."""
-  st = BoxPushState.get(env)
-  d = torch.norm(st.robot.data.root_link_pos_w[:, :2] - st.box_pos[:, :2], dim=-1)
-  return (d - max_distance).clamp_min(0.0)
-
-
 def feet_slip(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Sum over feet in contact of the squared tangential sole-site speed.
 
@@ -725,36 +629,6 @@ def box_tipped_over(env: ManagerBasedRlEnv, limit_angle: float) -> torch.Tensor:
 
 
 # ---------------------------------------------------------------------------
-# Curriculum
-# ---------------------------------------------------------------------------
-
-
-def box_push_levels(
-  env: ManagerBasedRlEnv, env_ids: torch.Tensor | None
-) -> dict[str, torch.Tensor | float]:
-  """Move the global difficulty ``alpha`` by the success rate of finished
-  episodes, pooled over ``CurriculumCfg.window`` episodes at a time.
-
-  Runs before the reset events, so ``succeeded`` still describes the episode
-  that is ending.
-  """
-  st = BoxPushState.get(env)
-  cfg = st.curriculum
-  if cfg is not None and env_ids is not None and env.common_step_counter > 0:
-    st._window_success += int(st.succeeded[env_ids].sum().item())
-    st._window_count += len(env_ids)
-    if st._window_count >= cfg.window:
-      rate = st._window_success / st._window_count
-      st.window_success_rate = rate
-      if rate >= cfg.promote:
-        st.alpha = min(1.0, st.alpha + cfg.step)
-      elif rate < cfg.demote:
-        st.alpha = max(0.0, st.alpha - cfg.step)
-      st._window_success = st._window_count = 0
-  return {"alpha": st.alpha, "window_success_rate": st.window_success_rate}
-
-
-# ---------------------------------------------------------------------------
 # Observations
 # ---------------------------------------------------------------------------
 #
@@ -798,7 +672,7 @@ def target_rel_box(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 
 def floor_mu_under_feet(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """Floor friction under each foot [2]: the episode's floor mu, or a patch's."""
+  """Floor friction under each foot [2]."""
   return BoxPushState.get(env).mu_under_feet()
 
 

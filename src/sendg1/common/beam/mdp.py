@@ -29,8 +29,7 @@ width narrower, ``DEMOTE_AFTER`` falls one wider, and either move clears the
 history. One episode moved the level before, so it random-walked around the
 width where a single success and a single fall were equally likely. Levels from ``PLATFORM_FROM_LEVEL`` on
 spawn on the start platform; below it, directly on the beam. Difficulty is
-coupled to the level: the centreline reward's sigma tightens
-(``CENTRELINE_SIGMA``), pushes switch on from ``PUSH_FROM_LEVEL`` and grow,
+coupled to the level: pushes switch on from ``PUSH_FROM_LEVEL`` and grow,
 tactile faults grow (``tactile.noise_strength``), and the share of walking
 commands rises with the population's mean level.
 
@@ -78,11 +77,9 @@ PUSH_FROM_LEVEL = BEAM_WIDTHS.index(0.15)
 TRACK_FRAC = 0.7
 WALK_MIN_DIST = 0.5
 """Commanded distance (m) below which an episode counts as standing."""
+COM_MIN_SIGMA = 0.12
+"""Floor (m) of ``com_over_support``'s width, reached on beams under ~0.5 m."""
 
-CENTRELINE_SIGMA: tuple[float, ...] = (
-  0.12, 0.10, 0.085, 0.07, 0.06, 0.05, 0.045, 0.04, 0.035, 0.03, 0.025
-)
-"""Stance-foot centreline reward width per level (m), one per ``BEAM_WIDTHS``."""
 
 REPLAY_SHARE = 0.2
 """Share of resets placed on a random easier level (does not move the home level)."""
@@ -233,12 +230,6 @@ class BeamEpisode:
       t[env_ids] = 0.0
     self.reached_end[env_ids] = False
     self.new_reach[env_ids] = False
-
-
-def _sigma_for_level(env: ManagerBasedRlEnv, sigmas: tuple[float, ...]) -> torch.Tensor:
-  geo = BeamGeometry.get(env)
-  table = torch.tensor(sigmas, device=env.device)
-  return table[geo.levels.clamp(max=len(sigmas) - 1)]
 
 
 def _feet_in_contact(env: ManagerBasedRlEnv) -> torch.Tensor:
@@ -507,53 +498,6 @@ def alive(env: ManagerBasedRlEnv) -> torch.Tensor:
   return torch.ones(env.num_envs, device=env.device)
 
 
-def stance_foot_centreline(
-  env: ManagerBasedRlEnv, sigmas: tuple[float, ...] = CENTRELINE_SIGMA
-) -> torch.Tensor:
-  """Mean over feet in contact of exp(-d^2 / sigma^2), d the foot's lateral
-  offset from the centreline and sigma the level's. Zero in flight."""
-  ep = BeamEpisode.get(env)
-  d = ep.feet_proj().lateral
-  sigma = _sigma_for_level(env, sigmas)[:, None]
-  contact = _feet_in_contact(env).float()
-  r = torch.exp(-torch.square(d / sigma)) * contact
-  return r.sum(-1) / contact.sum(-1).clamp(min=1.0)
-
-
-def stance_foot_yaw(env: ManagerBasedRlEnv, std: float = 0.25) -> torch.Tensor:
-  """Mean over feet in contact of exp(-yaw_err^2 / std^2) against the beam."""
-  ep = BeamEpisode.get(env)
-  err = _wrap(_foot_yaw(env, ep._foot_sites) - ep.feet_proj().tangent_yaw)
-  contact = _feet_in_contact(env).float()
-  r = torch.exp(-torch.square(err / std)) * contact
-  return r.sum(-1) / contact.sum(-1).clamp(min=1.0)
-
-
-def cop_centred(env: ManagerBasedRlEnv, std: float = 0.015) -> torch.Tensor:
-  """Mean over loaded feet of exp(-off^2 / std^2), off the lateral distance of
-  the (true) centre of pressure from the centroid of the sole area that has
-  support beneath it. Rewards loading the part of the foot that is on the beam,
-  not its overhang."""
-  off = tac.cop_offset_from_support(env, TACTILE)
-  contact = _feet_in_contact(env).float()
-  r = torch.exp(-torch.square(off / std)) * contact
-  return r.sum(-1) / contact.sum(-1).clamp(min=1.0)
-
-
-def com_over_beam(env: ManagerBasedRlEnv, sigmas: tuple[float, ...] = CENTRELINE_SIGMA) -> torch.Tensor:
-  """exp(-d^2 / sigma^2), d the lateral offset of the whole-body CoM's ground
-  projection from the centreline."""
-  geo = BeamGeometry.get(env)
-  d = geo.project(whole_body_com_xy(env)[:, None]).lateral[:, 0]
-  sigma = _sigma_for_level(env, sigmas)
-  return torch.exp(-torch.square(d / sigma))
-
-
-def base_lateral_velocity(env: ManagerBasedRlEnv) -> torch.Tensor:
-  _, v_lat = BeamEpisode.get(env).along_velocity()
-  return torch.square(v_lat)
-
-
 def base_roll(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Squared sideways component of gravity in the base frame (~ roll^2) plus
   the squared roll rate scaled down."""
@@ -561,135 +505,6 @@ def base_roll(env: ManagerBasedRlEnv) -> torch.Tensor:
   g = robot.data.projected_gravity_b
   wx = robot.data.root_link_ang_vel_b[:, 0]
   return torch.square(g[:, 1]) + 0.05 * torch.square(wx)
-
-
-def passing_step(
-  env: ManagerBasedRlEnv,
-  scale: float = 0.5,
-  min_air_time: float = 0.1,
-  min_advance: float = 0.02,
-  speed_std: float = 0.15,
-  speed_ema: float = 0.04,
-  command_threshold: float = 0.05,
-) -> torch.Tensor:
-  """At each ALTERNATING touchdown (the other foot made the previous one):
-  clip(lead / scale, -1, 1), lead the landing foot's arc minus the other
-  foot's. A step-to shuffle (one foot always leading, the other closing up
-  behind it) scores +1 and -1 per cycle, i.e. nothing; an alternating gait
-  scores on every step. Re-planting the same foot scores nothing (without the
-  alternation gate the first fine-tune tapped the lead foot to farm +1). Only
-  when walking is commanded. Divided by step_dt so the weight is the reward per
-  touchdown.
-
-  ``scale`` must exceed the shuffle's foot gap (~0.3 m): at 0.25 m the trailing
-  foot's landing saturated at -1, so landing it further forward paid nothing
-  and the second run kept shuffling.
-
-  The positive part is capped by the new ground the step gains: min(lead,
-  arc - furthest touchdown of the episode so far). Without it the v3 run
-  learned to scissor its feet back and forth on the start platform and collect
-  the reward without moving. With it the positive total is bounded by the
-  distance walked / ``scale``; a shuffle's trailing-foot penalty cancels its
-  gains, an alternating gait keeps them. The positive part is also scaled by
-  how well the (smoothed) speed matches the command, else paying per metre
-  teaches rushing."""
-  data = env.scene[FOOT_CONTACT_SENSOR].data
-  assert data.current_contact_time is not None and data.last_air_time is not None
-  first = (data.current_contact_time > 0) & (data.current_contact_time <= env.step_dt + 1e-6)
-  first &= data.last_air_time > min_air_time
-  last = getattr(env, "_beam_last_touchdown", None)
-  if last is None:
-    last = torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device)
-    env._beam_last_touchdown = last
-  last[env.episode_length_buf <= 1] = -1
-  foot = torch.arange(2, device=env.device)[None, :]
-  alternating = first & (last[:, None] != foot)
-  arc = BeamEpisode.get(env).feet_proj().arc
-  frontier = getattr(env, "_beam_step_frontier", None)
-  if frontier is None:
-    frontier = arc.max(-1).values.clone()
-    env._beam_step_frontier = frontier
-  fresh = env.episode_length_buf <= 1
-  frontier[fresh] = arc[fresh].max(-1).values
-  lead = torch.stack([arc[:, 0] - arc[:, 1], arc[:, 1] - arc[:, 0]], dim=-1)
-  gained = (arc - frontier[:, None]).clamp(min=0.0)
-  gained = torch.where(gained > min_advance, gained, torch.zeros_like(gained))
-  r = torch.where(lead > 0, torch.minimum(lead, gained), lead)
-  r = torch.clamp(r / scale, -1.0, 1.0)
-  # Gate the positive part on the speed matching the command, smoothed over
-  # ~0.5 s: paying per metre otherwise teaches rushing (1.3 m/s at 0.3 m/s).
-  ema = getattr(env, "_beam_speed_ema", None)
-  if ema is None:
-    ema = torch.zeros(env.num_envs, device=env.device)
-    env._beam_speed_ema = ema
-  ema[fresh] = 0.0
-  v_along, _ = BeamEpisode.get(env).along_velocity()
-  ema.mul_(1.0 - speed_ema).add_(speed_ema * v_along)
-  match = torch.exp(-torch.square(_forward_cmd(env) - ema) / speed_std**2)
-  r = torch.where(r > 0, r * match[:, None], r)
-  r = (r * alternating.float()).sum(-1)
-  landed = torch.where(first, arc, torch.full_like(arc, -1e9)).max(-1).values
-  frontier[:] = torch.maximum(frontier, landed)
-  # Latest touchdown wins; if both feet land on the same step, keep it unset.
-  both = first.all(-1)
-  last[:] = torch.where(both, -1, torch.where(first[:, 0], 0, torch.where(first[:, 1], 1, last)))
-  cmd = env.command_manager.get_command("twist")[:, 0]
-  return r * (cmd > command_threshold).float() / env.step_dt
-
-
-def feet_in_line(
-  env: ManagerBasedRlEnv,
-  std: float = 0.08,
-  scale: float = 0.3,
-  min_air_time: float = 0.1,
-  command_threshold: float = 0.05,
-) -> torch.Tensor:
-  """Metres walked heel-to-toe. At each ALTERNATING touchdown:
-  exp(-gap^2 / std^2) * clip(gained / scale, 0, 1), gap the lateral distance
-  between the feet in the base's heading frame and gained the new ground the
-  landing foot takes beyond the furthest touchdown of the episode so far.
-  Divided by step_dt. Kinematic only: it asks for a heel-to-toe gait, not
-  for a place on the beam (an earlier privileged policy: gap ~1 cm, 31 cm steps).
-
-  Every cheaper form was farmed without narrowing the two-foot gap (9-10 cm):
-  per time with a foot down (swing foot sweeping past the stance foot), per
-  time in double support (walking slower), per step (7 cm steps). Paid per
-  metre gained, none of these pay more."""
-  data = env.scene[FOOT_CONTACT_SENSOR].data
-  assert data.current_contact_time is not None and data.last_air_time is not None
-  first = (data.current_contact_time > 0) & (data.current_contact_time <= env.step_dt + 1e-6)
-  first &= data.last_air_time > min_air_time
-  fresh = env.episode_length_buf <= 1
-  last = getattr(env, "_beam_line_last", None)
-  if last is None:
-    last = torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device)
-    env._beam_line_last = last
-  last[fresh] = -1
-  foot = torch.arange(2, device=env.device)[None, :]
-  alternating = first & (last[:, None] != foot)
-
-  ep = BeamEpisode.get(env)
-  arc = ep.feet_proj().arc
-  frontier = getattr(env, "_beam_line_frontier", None)
-  if frontier is None:
-    frontier = arc.max(-1).values.clone()
-    env._beam_line_frontier = frontier
-  frontier[fresh] = arc[fresh].max(-1).values
-  gained = (arc - frontier[:, None]).clamp(0.0, scale) / scale
-
-  robot = _robot(env)
-  feet = robot.data.site_pos_w[:, ep._foot_sites, :2]
-  heading = robot.data.heading_w
-  rel = feet[:, 0] - feet[:, 1]
-  gap = -torch.sin(heading) * rel[:, 0] + torch.cos(heading) * rel[:, 1]
-  r = (torch.exp(-torch.square(gap / std))[:, None] * gained * alternating.float()).sum(-1)
-
-  landed = torch.where(first, arc, torch.full_like(arc, -1e9)).max(-1).values
-  frontier[:] = torch.maximum(frontier, landed)
-  both = first.all(-1)
-  last[:] = torch.where(both, -1, torch.where(first[:, 0], 0, torch.where(first[:, 1], 1, last)))
-  walking = _forward_cmd(env) > command_threshold
-  return r * walking.float() / env.step_dt
 
 
 def stance_foot_flat(env: ManagerBasedRlEnv, std: float = 0.15) -> torch.Tensor:
@@ -705,20 +520,6 @@ def stance_foot_flat(env: ManagerBasedRlEnv, std: float = 0.15) -> torch.Tensor:
   contact = _feet_in_contact(env).float()
   r = torch.exp(-tilt2 / std**2) * contact
   return r.sum(-1) / contact.sum(-1).clamp(min=1.0)
-
-
-def swing_foot_speed(env: ManagerBasedRlEnv, max_speed: float = 1.2) -> torch.Tensor:
-  """Sum over feet in the air of relu(|v_foot| - max_speed)^2. At 0.3 m/s a
-  human swing foot peaks near 1 m/s; an early lopsided policy whipped its right
-  foot through at ~4 m/s right after each left touchdown."""
-  robot = _robot(env)
-  ids = getattr(env, "_beam_foot_body_ids", None)
-  if ids is None:
-    ids, _ = robot.find_bodies(("left_ankle_roll_link", "right_ankle_roll_link"), preserve_order=True)
-    env._beam_foot_body_ids = ids
-  speed = robot.data.body_link_lin_vel_w[:, ids].norm(dim=-1)
-  air = ~_feet_in_contact(env)
-  return (torch.relu(speed - max_speed).square() * air.float()).sum(-1)
 
 
 def _feet_above_top(env: ManagerBasedRlEnv) -> torch.Tensor:
@@ -770,19 +571,6 @@ class feet_swing_height:
     self.peak[slice(None) if env_ids is None else env_ids] = 0.0
 
 
-def track_beam_velocity(env: ManagerBasedRlEnv, std: float = 0.15) -> torch.Tensor:
-  """The walking reward's ``track_linear_velocity`` in the beam's frame:
-  exp(-((v_along - cmd)^2 + v_across^2) / std^2). A smooth kernel pays most
-  for walking steadily at the commanded pace, so pausing costs as much as
-  rushing (``track_forward_progress``'s slack paid for stop-and-go). std 0.15
-  m/s for a 0.3 m/s command, where the walking task's 0.5 suits up to ~1 m/s."""
-  ep = BeamEpisode.get(env)
-  ep.update()
-  v_along, v_across = ep.along_velocity()
-  err = torch.square(v_along - _forward_cmd(env)) + torch.square(v_across)
-  return torch.exp(-err / std**2)
-
-
 def track_beam_heading(env: ManagerBasedRlEnv, std: float = 0.35) -> torch.Tensor:
   """exp(-e^2 / std^2), e the base heading's error to the beam's local
   direction. Stands in for the walking reward's yaw-rate tracking: on a bent
@@ -793,14 +581,13 @@ def track_beam_heading(env: ManagerBasedRlEnv, std: float = 0.35) -> torch.Tenso
 
 
 def com_over_support(
-  env: ManagerBasedRlEnv, frac: float = 0.5, min_sigma: float = CENTRELINE_SIGMA[0]
+  env: ManagerBasedRlEnv, frac: float = 0.5, min_sigma: float = COM_MIN_SIGMA
 ) -> torch.Tensor:
   """exp(-d^2 / sigma^2), d the whole-body CoM's lateral offset from the
   centreline and sigma half the support's half-width (a quarter of the beam
-  width), never under ``min_sigma``. The fixed 3.5 cm of ``com_over_beam`` and
-  ``stance_foot_centreline`` asked for a tandem walk on every width, and the
-  policies swung each foot across onto the line; scaled, a hip-width gait fits
-  a wide beam and only narrow beams demand a narrow one."""
+  width), never under ``min_sigma``. Scaled with the beam, a hip-width gait
+  fits a wide beam and only narrow beams demand a narrow one (a fixed 3.5 cm
+  width made the policies swing each foot across onto the line)."""
   geo = BeamGeometry.get(env)
   proj = geo.project(whole_body_com_xy(env)[:, None])
   sigma = (frac * geo.support_half_width(proj.arc)[:, 0]).clamp(min=min_sigma)
@@ -854,31 +641,6 @@ def load_off_support(env: ManagerBasedRlEnv, body_weight_n: float = 343.0) -> to
   return (load * unsupported).sum(-1)
 
 
-def early_contact_overload(
-  env: ManagerBasedRlEnv,
-  window_s: float = 0.1,
-  max_load: float = 0.3,
-  body_weight_n: float = 343.0,
-  settle_s: float = 0.5,
-) -> torch.Tensor:
-  """Sum over feet of relu(load / body weight - max_load)^2 during the first
-  ``window_s`` of each contact: the first touch of a step should be light (it
-  is the probe), weight goes on afterwards. A penalty, so tapping cannot farm it.
-  Off for the first ``settle_s`` of an episode, while the robot lands from spawn."""
-  contact = _feet_in_contact(env)
-  t = getattr(env, "_beam_contact_time", None)
-  if t is None:
-    t = torch.zeros(env.num_envs, 2, device=env.device)
-    env._beam_contact_time = t
-  t.mul_(contact.float()).add_(contact.float() * env.step_dt)
-  t[env.episode_length_buf <= 1] = 0.0
-  force = env.scene[FOOT_CONTACT_SENSOR].data.force
-  assert force is not None
-  load = force.view(env.num_envs, 2, 3)[..., 2].abs() / body_weight_n
-  early = contact & (t <= window_s) & (env.episode_length_buf[:, None] * env.step_dt > settle_s)
-  return (torch.relu(load - max_load).square() * early.float()).sum(-1)
-
-
 class pose_l2:
   """Mean over the selected joints of ((q - q_default) / std)^2: a quadratic
   pull toward the default pose. Unlike mjlab's exp-kernel ``posture`` it does
@@ -898,14 +660,6 @@ class pose_l2:
     asset = env.scene[asset_cfg.name]
     err = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
     return torch.mean(torch.square(err / self.std), dim=1)
-
-
-def reach_end_bonus(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """One-off, on the step the end platform is reached. Divided by step_dt so
-  the weight is the bonus itself."""
-  ep = BeamEpisode.get(env)
-  ep.update()
-  return ep.new_reach.float() / env.step_dt
 
 
 # ---------------------------------------------------------------------------

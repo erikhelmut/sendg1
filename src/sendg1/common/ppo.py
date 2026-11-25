@@ -11,27 +11,20 @@ Standard (2026-11-25): an LSTM(256) -> MLP (256, 128) actor, MLP (512, 256,
 128) critic, both ELU with running obs normalisation; 24-step rollouts in 8
 minibatches; adaptive learning rate starting at 4e-4. These are the settings
 the beam v3/v4 and walking r24 runs used (there as CLI overrides of 64-step
-defaults). ``actor="gru"`` / ``"mlp"`` swap only the actor's model, for
-ablations; everything else stays.
+defaults).
 
 Changing anything here invalidates every run that came before it.
 """
 
 from __future__ import annotations
 
-from typing import Literal
-
 from mjlab.rl import RslRlModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
 
 from sendg1.seeds import FIRST_SEED
 
-ActorKind = Literal["lstm", "gru", "mlp"]
-STANDARD_ACTOR: ActorKind = "lstm"
 RNN_HIDDEN = 256
 RNN_HEAD = (256, 128)
 """MLP head after the recurrent layer."""
-MLP_ACTOR_HIDDEN = (512, 256, 128)
-"""The memoryless actor: the critic's size, in place of RNN + head."""
 CRITIC_HIDDEN = (512, 256, 128)
 ACTIVATION = "elu"
 
@@ -52,18 +45,10 @@ DESIRED_KL = 0.01
 _DISTRIBUTION = {"class_name": "GaussianDistribution", "init_std": 1.0, "std_type": "scalar"}
 
 
-def actor_cfg(actor: ActorKind = STANDARD_ACTOR) -> RslRlModelCfg:
-  if actor == "mlp":
-    return RslRlModelCfg(
-      class_name="MLPModel",
-      hidden_dims=MLP_ACTOR_HIDDEN,
-      activation=ACTIVATION,
-      obs_normalization=True,
-      distribution_cfg=dict(_DISTRIBUTION),
-    )
+def actor_cfg() -> RslRlModelCfg:
   return RslRlModelCfg(
     class_name="RNNModel",
-    rnn_type=actor,
+    rnn_type="lstm",
     rnn_hidden_dim=RNN_HIDDEN,
     rnn_num_layers=1,
     hidden_dims=RNN_HEAD,
@@ -81,12 +66,11 @@ def ppo_cfg(
   max_iterations: int,
   save_interval: int,
   seed: int = FIRST_SEED,
-  actor: ActorKind = STANDARD_ACTOR,
 ) -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(
     seed=seed,
     obs_groups=obs_groups,
-    actor=actor_cfg(actor),
+    actor=actor_cfg(),
     critic=RslRlModelCfg(
       hidden_dims=CRITIC_HIDDEN, activation=ACTIVATION, obs_normalization=True
     ),

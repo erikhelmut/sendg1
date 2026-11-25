@@ -60,8 +60,6 @@ OBS_SETS: dict[str, ObsSet] = {
     ),
   ),
 }
-"""A diagnostic ``contact_oracle`` set (noiseless foot contact and net contact
-force in the actor) existed until 2026-11-15."""
 
 DEFAULT_OBS_SET = "blind"
 

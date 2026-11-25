@@ -12,7 +12,7 @@ joystick asks, walks along it. Plain PPO (`tasks/slackline`,
 Same env, critic (358), reward, events and PPO settings; only the actor's
 inputs differ (`tests/test_slackline.py` checks the fingerprints). Actor and PPO: the
 standard LSTM settings every task shares (`sendg1/common/ppo.py`), 20k
-iterations; a GRU until 2026-11-25.
+iterations.
 Untrained so far.
 
 ![spawn stance](../../results/slackline/g1_on_slackline_wide.png)
@@ -47,7 +47,8 @@ Numerics, learnt the hard way at the 5 ms step:
   hide it from the taxel rays: mujoco_warp's raycast skips alpha-0 geoms.
 
 Video of the line alone and of the robot on it without a policy:
-`uv run python scripts/slackline_video.py` (`results/slackline/line_demo.mp4`).
+`results/slackline/line_demo.mp4` (made by `scripts/slackline_video.py`, since
+removed; it is in git history).
 
 ## Line models (`sm.SURFACES`, `sm.CONTACTS`)
 

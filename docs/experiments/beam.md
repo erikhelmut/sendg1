@@ -1,8 +1,8 @@
 # Beam walking
 
 A blind G1 with the tactile slipper walks along a narrow beam it cannot see,
-from a start platform to an end platform, at a joystick forward speed. Plain
-PPO (`tasks/beam`, `common/beam`): registered tasks, not obs-set variants,
+from a start platform to an end platform, at a joystick forward speed. PPO
+(`tasks/beam`, `common/beam`): registered tasks, not obs-set variants,
 each with an evaluation-only `<task>-Eval` twin (held-out beams; same
 observations and episode length, so its checkpoints load).
 
@@ -10,21 +10,13 @@ observations and episode length, so its checkpoints load).
 |---|---|---|---|
 | `G1-Beam-Touch-Curved-LSTM` | straight, `bend` (joints up to 25°), `turn` (up to 60°) | IMU, joints, previous action, forward command, tactile touch features; the standard LSTM actor | 152 |
 | `G1-Beam-Curved-Blind-LSTM` | same | as `Touch-Curved-LSTM` without tactile input (blind baseline) | 94 |
-| `G1-Beam-Touch-Curved-Plain` | same | touch features; GRU actor (ablation) | 152 |
-| `G1-Beam-Curved-Blind` | same | no tactile; GRU actor (ablation) | 94 |
-| `G1-Beam-Touch-Curved-MLP-Plain` | same | touch features; plain MLP, no memory (ablation) | 152 |
-| `G1-Beam-Curved-Blind-MLP-Plain` | same | no tactile; plain MLP, no memory (ablation) | 94 |
+Both train the shared PPO settings (`sendg1/common/ppo.py`: 24-step rollouts
+in 8 minibatches, LR 4e-4 adaptive) with entropy 0.005.
 
-All six train the shared PPO settings (`sendg1/common/ppo.py`: 24-step
-rollouts in 8 minibatches, LR 4e-4 adaptive, entropy 0.005) and differ only in
-the actor's model. Until 2026-11-25 the LSTM pair defaulted to 64-step rollouts
-(the v3/v4 runs overrode them to 24) and the GRU and MLP tasks used 32-step
-rollouts at LR 1e-3.
-
-Removed on 2026-11-15: `G1-Beam-E2E{,-Curved}` (the old soft contact-map
-tactile input) and the round-three experiments `-Plain-R64`, `-Plain-R2-35s`,
-`-Plain-R2-35s-R64`, `-LSTM-R2-35s`, `-LSTM-R2-35s-R64`. Their results below
-stay as a record; their checkpoints no longer load.
+History: the GRU (`-Plain`, `-Curved-Blind`) and MLP (`-MLP-Plain`) actor
+tasks, the E2E contact-map tasks and the round-three `-R64` / `-R2-35s`
+experiments were removed (the last on 2026-11-25). Their results below stay as
+a record; the runs are in the archive (`~/sendg1-archive`).
 
 - **Terrain** (`common/beam/terrain.py`): a 4 m beam between two 1 m platforms,
   0.15-0.30 m above the ground (one height per column). Rows are width levels:
@@ -32,18 +24,16 @@ stay as a record; their checkpoints no longer load.
   (seven levels, 0.40-0.05 m, before round three). Next to the straight beams
   every task has a `bend` and a `turn` column per height: straight pieces of 0.6-1.4 m joined at random
   heading changes, a disc filling each joint. Every bent tile has its own path.
-- **Actor**: rsl_rl's `RNNModel`, a GRU(256) -> MLP(256, 128). It sees only
+- **Actor**: rsl_rl's `RNNModel`, an LSTM(256) -> MLP(256, 128). It sees only
   `onboard` / `sensor` terms (`common/beam/terms.py`); registration fails
   otherwise. Tactile input (`Touch` tasks): per foot a 26-bit "taxel above
   3 N" map, load / body weight and CoP (+-1, 0 in the air), with gain errors,
   dead taxels, noise, frame drops and 0-1 step latency: the model every task
-  shares ([tactile.md](../tactile.md#what-the-actor-sees)). The `-MLP-Plain`
-  tasks drop the memory: rsl_rl's `MLPModel` (512, 256, 128) on the current
-  observation only. `rl_cfg.ActorKind` also offers an LSTM(256).
+  shares ([tactile.md](../tactile.md#what-the-actor-sees)).
 - **Removed actors** (2026-11-14): the mirror-equivariant GRU and MLP
   (`G1-Beam-Touch-Curved`, `-Curved-Blind-Sym`, `-MLP-Sym`) and the causal
   transformer (`-Transformer`: 64 frames, 4 frames per token, 2 layers). Their
-  results below stay as a record; their checkpoints no longer load.
+  results below stay as a record.
 - **Critic** (the same for touch and blind): MLP on the actor's
   proprioception plus ground truth: base velocity, feet and base pose relative
   to the beam, beam progress, width, height and friction, the clean touch
@@ -100,8 +90,8 @@ stay as a record; their checkpoints no longer load.
   quarter of the beam, at least 3.5 cm (1), `load_off_support` (-1), and a
   termination cost of -10 (v1-v3: -100). Nothing places individual footsteps:
   `foot_centreline`, `feet_in_line`, `passing_step`, `feet_air_time`,
-  `foot_flat`, `cop_centred` and the light-touch terms are gone. v3 stays in
-  the code as `build_beam_reward_v3`.
+  `foot_flat`, `cop_centred` and the light-touch terms are gone (removed from
+  the code on 2026-11-25).
 - **Reward v4b (2026-11-22)**: the v4 runs (224700/1, seed 1) stood still: by
   6k iterations they covered ~12 % of the commanded distance, nothing left the
   widest level. The smooth speed kernel (std 0.15 m/s) pays almost nothing
@@ -112,13 +102,13 @@ stay as a record; their checkpoints no longer load.
   beams by 7k iterations but slid its feet. `foot_slip` (squared slip speed of
   feet in contact) cost only ~0.005/s at -0.1; v4c uses -2.
 - **Default reward (2026-11-25): v4b.** Every beam task trains v4b
-  (`build_beam_reward`); v4c stays in the code as `build_beam_reward_v4c`.
+  (`build_beam_reward`); v4c was not kept.
 
 ```bash
 train G1-Beam-Touch-Curved-LSTM --agent.run-name touch_lstm_s1   # 4096 envs, seed 1
 train G1-Beam-Curved-Blind-LSTM --agent.run-name blind_lstm_s1
-python scripts/beam_eval.py --task G1-Beam-Touch-Curved-Plain-Eval --checkpoint <pt> --out results/beam/<name>_eval.json
-python scripts/beam_video.py --task G1-Beam-Touch-Curved-Plain --path bend --checkpoint <pt> --width 0.20
+python scripts/beam_eval.py --task G1-Beam-Touch-Curved-LSTM-Eval --checkpoint <pt> --out results/beam/<name>_eval.json
+python scripts/beam_video.py --task G1-Beam-Touch-Curved-LSTM --path bend --checkpoint <pt> --width 0.20
 python scripts/render_terrain.py --terrain-set beam --prefix beam --row 2
 ```
 

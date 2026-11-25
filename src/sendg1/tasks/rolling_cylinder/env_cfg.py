@@ -2,7 +2,7 @@
 
 The G1 stands across a cylinder lying free on the floor
 (``common/rolling_cylinder/model.py``) and has to stay on it for the whole
-episode without letting it roll away. Plain PPO with a GRU actor (IMU,
+episode without letting it roll away. PPO with an LSTM actor (IMU,
 joints, previous action, and, for ``Touch``, the tactile touch features) and
 an MLP critic on that plus ground truth about the cylinder. The two tasks
 differ only in the actor's inputs.

@@ -18,15 +18,10 @@ ALL_VARIANTS = sorted(variants())
 
 BASE_ACTOR_DIM = {
   "Sendg1-Velocity-Flat-G1": 96,
-  "Sendg1-Velocity-Flat-G1-MLP": 96,
   "Sendg1-Velocity-Rough-G1": 96,
-  # The FALCON-style low level: flat velocity plus a hand-force curriculum.
-  "Sendg1-VelocityPush-G1": 96,
   # The velocity actor exactly: proprioception + a 3-dim walking command,
   # here the scripted pilot's rather than the operator's.
   "Sendg1-BoxPush-G1": 96,
-  "Sendg1-BoxPushCurriculum-G1": 96,
-  "Sendg1-BoxPushPatches-G1": 96,
 }
 EXTRA_ACTOR_DIM = {
   "blind": 0,
@@ -39,16 +34,6 @@ EXTRA_ACTOR_DIM = {
 def _expected_actor_dim(task_id: str) -> int:
   base_id, obs_set = variants()[task_id]
   return BASE_ACTOR_DIM[base_id] + EXTRA_ACTOR_DIM[obs_set]
-
-
-def test_low_level_actor_matches_box_push_actor() -> None:
-  """The point of Sendg1-VelocityPush: a policy trained there drops straight
-  into box pushing, so the two actors must have identical dimensions."""
-  for obs_set in ("blind", "tactile"):
-    slug = {"blind": "Blind", "tactile": "Tactile"}[obs_set]
-    assert _expected_actor_dim(f"Sendg1-VelocityPush-G1-{slug}") == _expected_actor_dim(
-      f"Sendg1-BoxPush-G1-{slug}"
-    ), obs_set
 
 
 def test_expected_variants_registered() -> None:

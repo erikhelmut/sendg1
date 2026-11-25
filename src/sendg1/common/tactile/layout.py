@@ -7,14 +7,13 @@ rubber) below the bare G1 sole (see ``sendg1.common.robots.slipper``).
 
 The model uses ``slipper_v1``: the real sensor on the slipper, 26 square
 patches of 12 mm, read from ``layouts/slipper_v1.csv`` (millimetres, exported
-from the slipper CAD). ``placeholder_8x3`` is the earlier stand-in grid, kept
-because the model's unit tests are written against a regular grid. Everything
-downstream reads ``TaxelLayout`` and never assumes a grid.
+from the slipper CAD). Everything downstream reads ``TaxelLayout`` and never
+assumes a grid.
 
 Right foot: ``slipper_v1`` is the SAME part on both feet (1:1, not a mirrored
 version), so taxel ``i`` sits at the same (x, y) on both soles -- channel ``i`` is
-lateral on one foot and medial on the other. ``placeholder_8x3`` mirrors
-(y -> -y) instead. ``TaxelLayout.mirror_right`` selects which.
+lateral on one foot and medial on the other. ``TaxelLayout.mirror_right``
+would mirror it (y -> -y) for a left/right pair of parts.
 """
 
 from __future__ import annotations
@@ -92,30 +91,6 @@ class TaxelLayout:
     return tuple(out)
 
 
-def grid_layout(
-  name: str,
-  rows: int,
-  cols: int,
-  patch: float,
-  extent_x: tuple[float, float] = SOLE_EXTENT_X,
-  extent_y: tuple[float, float] = SOLE_EXTENT_Y,
-) -> TaxelLayout:
-  """``rows`` (along x, heel -> toe) x ``cols`` (along y) square patches,
-  evenly spread over the footprint. Row-major, heel row first, right-to-left
-  within a row (y ascending)."""
-  (x0, x1), (y0, y1) = extent_x, extent_y
-  px, py = (x1 - x0) / rows, (y1 - y0) / cols
-  if patch > min(px, py):
-    raise ValueError(f"patch {patch} m overlaps at pitch ({px:.4f}, {py:.4f}) m")
-  centers = tuple(
-    (round(x0 + (r + 0.5) * px, 6), round(y0 + (c + 0.5) * py, 6))
-    for r in range(rows)
-    for c in range(cols)
-  )
-  half = (patch / 2, patch / 2)
-  return TaxelLayout(name=name, centers=centers, half_sizes=(half,) * len(centers))
-
-
 LAYOUT_DIR = Path(__file__).parent / "layouts"
 
 
@@ -167,7 +142,6 @@ def csv_layout(
 
 
 LAYOUTS: dict[str, TaxelLayout] = {
-  "placeholder_8x3": grid_layout("placeholder_8x3", rows=8, cols=3, patch=0.020),
   # One sensor part, used 1:1 on both feet.
   "slipper_v1": csv_layout("slipper_v1", mirror_right=False),
 }

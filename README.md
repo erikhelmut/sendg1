@@ -40,21 +40,22 @@ Built on [mjlab](https://github.com/mujocolab/mjlab), pinned to commit
 
 ## Status
 
-- **Velocity tracking**, flat and rough: blind vs tactile. Every task's tactile
-  actor uses one sensor model of the slipper's 26 taxels: normal load only,
-  with gain error, dead taxels, noise, frame drops and latency.
+All tasks train one setup (LSTM actor, 24-step rollouts, LR 4e-4, 4096 envs,
+seeds 1-5) and pair a blind and a tactile actor that are otherwise identical.
+Results from before that standardisation (2026-11-25) are archived outside
+the repo; every baseline is being re-run.
+
+- **Velocity tracking**, flat and rough. Every task's tactile actor uses one
+  sensor model of the slipper's 26 taxels: normal load only, with gain error,
+  dead taxels, noise, frame drops and latency.
 - **Beam walking**: a blind G1 on a beam it cannot see, feeling it underfoot.
 - **Box pushing** under unknown floor friction.
-- **Pedalo**: the G1 rides a Pedalo Classic or Sport at a joystick
-  speed, or holds it still. Sport blind and touch are trained (one seed); both
-  ride, with no clear difference yet.
-- **Rolling cylinder**: stand across a free
-  30 cm cylinder for 20 s without letting it roll away.
+- **Pedalo**: the G1 rides a Pedalo Classic or Sport at a joystick speed, or
+  holds it still.
+- **Rolling cylinder**: stand across a free 30 cm cylinder for 20 s without
+  letting it roll away.
 - **Slackline**: tandem stance on a tensioned line, walking along it on
   command, with balance-only variants on a stiff-to-free curriculum.
-
-Pedalo, rolling cylinder and slackline pair a blind and a touch actor that are
-otherwise identical.
 
 ## Quick start
 

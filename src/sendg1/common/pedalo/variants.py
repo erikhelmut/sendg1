@@ -41,7 +41,7 @@ class PedaloVariant:
 
   def step_top_height(self, phi: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """(left, right) step top above the ground with the steps level. phi > 0
-    lowers the left step (``model.board_top_height``)."""
+    lowers the left step."""
     base = pm.WHEEL_RADIUS + self.step_top_above_axle
     dz = pm.ECCENTRIC * torch.sin(phi)
     return base - dz, base + dz

@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from sendg1.common.tactile.layout import LAYOUTS, SIDES, TaxelLayout
+from sendg1.common.tactile.layout import LAYOUTS, TaxelLayout
 from sendg1.common.tactile.sensing import TactileParams, read_tactile
 
 if TYPE_CHECKING:
@@ -144,8 +144,6 @@ def touch_features(normal: torch.Tensor, layout: TaxelLayout) -> torch.Tensor:
                half extents (+-1), 0 while the total normal force is at or
                below ``CONTACT_N`` (foot not in contact).
 
-Contact area and a contact flag were features too until 2026-11-15.
-
   Canonical frame (``canonical_normals``): +y is lateral on both feet."""
   centers, _, x_mid, x_half, y_half, *_ = _layout_consts(layout, str(normal.device))
   total = normal.sum(-1, keepdim=True)
@@ -168,22 +166,6 @@ def canonical_forces(env: ManagerBasedRlEnv, params: TactileParams) -> torch.Ten
   f = torch.cat([reading.normal[..., None], reading.shear[..., :2]], dim=-1)  # [B, 2, T, 3]
   right = f[:, 1, perm] * torch.tensor([1.0, 1.0, -1.0], device=f.device)
   return torch.stack([f[:, 0], right], dim=1)
-
-
-def cop_offset_from_support(env: ManagerBasedRlEnv, params: TactileParams) -> torch.Tensor:
-  """[B, 2] lateral distance (m) of the true CoP from the centroid of the
-  supported part of each sole -- where the foot actually rests on the beam.
-  Zero for a foot without support. For the CoP-centring reward."""
-  layout = LAYOUTS[params.layout]
-  reading = read_tactile(env, params)
-  device = str(reading.normal.device)
-  centers = torch.tensor([layout.for_side(s) for s in SIDES], device=device)  # [2, T, 2]
-  s = reading.support  # [B, 2, T]
-  s_tot = s.sum(-1)
-  centroid_y = (s * centers[None, :, :, 1]).sum(-1) / s_tot.clamp(min=1e-6)
-  off = reading.cop[..., 1] - centroid_y
-  loaded = (reading.net_force[..., 2] > CONTACT_N) & (s_tot > 1e-3)
-  return torch.where(loaded, off, torch.zeros_like(off))
 
 
 # ---------------------------------------------------------------------------

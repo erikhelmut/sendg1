@@ -111,11 +111,6 @@ TERRAIN_ROLES: dict[str, TerrainSpec] = {
   ),
 }
 
-CONTROL_TERRAINS = tuple(k for k, v in TERRAIN_ROLES.items() if v.role == "control")
-DISCRIMINATOR_TERRAINS = tuple(
-  k for k, v in TERRAIN_ROLES.items() if v.role == "discriminator"
-)
-
 
 TRAIN_TERRAIN_SEED = 0
 """Terrain layout seed used for training.
@@ -214,6 +209,3 @@ def make_rough_terrain_cfg(
   )
 
 
-def terrain_names() -> tuple[str, ...]:
-  """Sub-terrain names in column order (== terrain_type index order)."""
-  return tuple(TERRAIN_ROLES)

@@ -22,7 +22,7 @@ as on the workstation. The mirrors are never edited on the cluster;
 
 ```bash
 scripts/cluster/sync.sh ~/sendg1               # code, uncommitted edits included
-scripts/cluster/submit.sh ~/sendg1 G1-Beam-Touch-Curved-Plain \
+scripts/cluster/submit.sh ~/sendg1 G1-Beam-Touch-Curved-LSTM \
   --agent.run-name touch_s1 --agent.seed 1       # sync + sbatch one `train` run (seeds 1-5 only)
 ssh mn.ias.informatik.tu-darmstadt.de squeue --me
 scripts/cluster/fetch.sh ~/sendg1              # logs/, runs/, results/, slurm/

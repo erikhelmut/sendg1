@@ -3,7 +3,7 @@
 # results/ and the slurm/ job logs. Only files newer than the local copy are
 # taken; videos never exist there, and are rendered here afterwards.
 #
-#   scripts/cluster/fetch.sh [~/sendg1-beam]
+#   scripts/cluster/fetch.sh [~/sendg1]
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
 resolve_worktree "${1:-}"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copy a local checkout's code to the cluster, uncommitted edits included.
 #
-#   scripts/cluster/sync.sh [~/sendg1-beam]
+#   scripts/cluster/sync.sh [~/sendg1]
 #
 # The cluster copy is a mirror, never edited there. The branch goes to
 # refs/remotes/hamming/<branch> (a push into a checked-out branch would be

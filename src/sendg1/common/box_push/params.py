@@ -14,9 +14,7 @@ a floor of mu 0.2 would silently become >= 0.3 under the feet. The priorities
 below make every contact the study cares about take exactly one sampled value:
 
   foot  / floor   -> floor mu     (floor priority 2 > foot 1)
-  foot  / patch   -> patch mu     (patch priority 2 > foot 1)
   box   / floor   -> box mu       (box priority 3 > floor 2)
-  box   / patch   -> box mu       (box priority 3 > patch 2)
   ball  / box     -> ball mu 0.8  (ball-hand priority 4 > box 3)
 
 With the stock rubber hands (``ball_hands=False``) the last line becomes
@@ -36,7 +34,6 @@ G1_MASS_KG = 33.74
 sum of body_mass; checked in
 tests/test_box_push.py so it cannot drift from the model)."""
 
-GRAVITY = 9.81
 
 FLOOR_PRIORITY = 2
 BOX_PRIORITY = 3
@@ -55,8 +52,7 @@ class BoxPushRanges:
   Sampling the margin instead of the mass is what makes a chosen share of
   episodes sit near the limit. With mass and floor mu drawn independently the
   near-limit band is whatever falls out (11% for the first version's ranges,
-  against 23% infeasible); here it is a design parameter. Run
-  ``scripts/box_push_feasibility.py`` for the resulting distribution.
+  against 23% infeasible); here it is a design parameter.
   """
 
   traction_margin: tuple[float, float] = (-0.05, 0.40)
@@ -115,66 +111,8 @@ def mass_from_margin(
   return np.clip(m, *mass_limits)
 
 
-@dataclass(frozen=True)
-class PatchCfg:
-  """Optional low-friction floor patches (``low_friction_patches=True``)."""
-
-  count: tuple[int, int] = (1, 3)
-  """Inclusive. Unused patch geoms are parked below the floor."""
-  mu: tuple[float, float] = (0.1, 0.3)
-  size: tuple[float, float] = (0.4, 1.0)
-  """m, side length, sampled independently for x and y."""
-  path_fraction: tuple[float, float] = (0.1, 0.9)
-  """Where along the robot-start -> target segment a patch centre lands."""
-  lateral: float = 0.3
-  """m, +/- offset of a patch centre across that segment."""
-  thickness: float = 0.01
-  """m. The patch top sits PATCH_LIFT above the floor, so feet touch the patch
-  rather than the plane beneath it."""
-
-
-PATCH_LIFT = 0.001
-MAX_PATCHES = 3
-
-
-@dataclass(frozen=True)
-class CurriculumCfg:
-  """Global difficulty level alpha in [0, 1], moved by success rate.
-
-  At alpha = 0: box mass 10 kg, floor mu 1.0, box mu 0.2 (the easiest corner).
-  At alpha = 1: the full ranges. In between each range grows linearly from its
-  easy end. Box size, target and spawn geometry are always full-range.
-  """
-
-  window: int = 512
-  """Episodes pooled before alpha is reconsidered."""
-  promote: float = 0.5
-  """Success rate over the window at or above which alpha rises by ``step``."""
-  demote: float = 0.2
-  """Success rate below which alpha falls by ``step``."""
-  step: float = 0.1
-
-
-def curriculum_ranges(r: BoxPushRanges, alpha: float) -> dict[str, tuple[float, float]]:
-  """The sampling ranges at difficulty ``alpha``: easy end first.
-
-  Difficulty is the traction margin and the floor: at alpha = 0 every episode
-  has a comfortable margin on a grippy floor; at alpha = 1 the full ranges.
-  Box friction and geometry are always full-range.
-  """
-  a = float(np.clip(alpha, 0.0, 1.0))
-  g0, g1 = r.traction_margin
-  f0, f1 = r.floor_mu
-  return {
-    # Easy = a large margin. The band's lower end walks down to g0.
-    "traction_margin": (g1 - a * (g1 - g0), g1),
-    "floor_mu": (f0 + (1.0 - a) * (f1 - f0), f1),
-    "box_mu": r.box_mu,
-  }
-
-
 # ---------------------------------------------------------------------------
-# Feasibility (quasi-static, used by scripts/box_push_feasibility.py and tests)
+# Feasibility (quasi-static; tests check the ranges with these)
 # ---------------------------------------------------------------------------
 
 

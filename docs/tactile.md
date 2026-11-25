@@ -1,11 +1,10 @@
 # Tactile sole
 
 ```bash
-python scripts/show_sole.py          # taxels on the bare G1 foot (still draws the stock capsules)
 python scripts/make_slipper_asset.py <stl>  # slipper CAD -> robots/assets/g1_slipper.stl
 python scripts/tactile_viewer.py     # MP4 of the robot walking + live taxel readings
 python scripts/export_foot_cad.py    # foot as DXF + STL in the sole frame, mm (needs .[cad])
-python scripts/sweep.py --tasks flat --obs-sets blind tactile --seeds 0
+python scripts/sweep.py --tasks flat --obs-sets blind tactile
 ```
 
 - **Layout** (`common/tactile/layout.py`): taxel patches in the sole frame

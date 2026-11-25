@@ -23,12 +23,8 @@ from sendg1.common.beam.terrain import (
 )
 from sendg1.common.tactile.layout import LAYOUTS
 from sendg1.tasks.beam import (
-  BLIND_MLP_PLAIN_TASK,
   BLIND_LSTM_TASK,
-  BLIND_TASK,
   TOUCH_LSTM_TASK,
-  TOUCH_MLP_PLAIN_TASK,
-  TOUCH_PLAIN_TASK,
   assert_actor_is_deployable,
 )
 
@@ -42,8 +38,8 @@ BLIND_ACTOR_EXPECTED = {
 }
 BLIND_ACTOR_DIM = 3 + 3 + 29 + 29 + 29 + 1
 TOUCH_ACTOR_DIM = BLIND_ACTOR_DIM + 2 * tac.TOUCH_PER_FOOT
-BLIND_TASKS = (BLIND_TASK, BLIND_MLP_PLAIN_TASK, BLIND_LSTM_TASK)
-TOUCH_TASKS = (TOUCH_PLAIN_TASK, TOUCH_MLP_PLAIN_TASK, TOUCH_LSTM_TASK)
+BLIND_TASKS = (BLIND_LSTM_TASK,)
+TOUCH_TASKS = (TOUCH_LSTM_TASK,)
 ALL_TASKS = [*TOUCH_TASKS, *BLIND_TASKS]
 
 
@@ -95,7 +91,7 @@ def test_touch_features() -> None:
 
 
 def test_leak_guard_fires() -> None:
-  env_cfg = load_env_cfg(TOUCH_PLAIN_TASK)
+  env_cfg = load_env_cfg(TOUCH_LSTM_TASK)
   with pytest.raises(ValueError, match="privileged"):
     assert_actor_is_deployable(env_cfg.observations, ("critic",))
   env_cfg.observations["actor"].terms["feet_beam_pose"] = TERMS["feet_beam_pose"].build()
@@ -104,10 +100,10 @@ def test_leak_guard_fires() -> None:
 
 
 def test_play_cfg_has_no_curriculum_or_state_bank() -> None:
-  cfg = load_env_cfg(TOUCH_PLAIN_TASK, play=True)
+  cfg = load_env_cfg(TOUCH_LSTM_TASK, play=True)
   assert cfg.curriculum == {}
   assert "spawn_from_bank" not in cfg.events
-  assert "spawn_from_bank" in load_env_cfg(TOUCH_PLAIN_TASK).events
+  assert "spawn_from_bank" in load_env_cfg(TOUCH_LSTM_TASK).events
 
 
 # -- terrain -----------------------------------------------------------------
@@ -205,7 +201,7 @@ def test_beam_ahead_sees_bends() -> None:
   from sendg1.common.beam.geometry import BeamGeometry
   from sendg1.common.beam.mdp import _point_at_arc, beam_ahead_obs
 
-  cfg = load_env_cfg(TOUCH_PLAIN_TASK)
+  cfg = load_env_cfg(TOUCH_LSTM_TASK)
   cfg.scene.num_envs = 48
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
   try:
@@ -227,7 +223,7 @@ def test_beam_ahead_sees_bends() -> None:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_plain_actor_trains_one_iteration(tmp_path) -> None:
+def test_actor_trains_one_iteration(tmp_path) -> None:
   """The GRU experiment builds rsl_rl's RNNModel, runs a PPO update with
   ``BeamRunner``, and its checkpoint carries the curriculum."""
   from dataclasses import asdict
@@ -239,11 +235,11 @@ def test_plain_actor_trains_one_iteration(tmp_path) -> None:
   from sendg1.common.beam import mdp
   from sendg1.tasks.beam.runner import BeamRunner
 
-  cfg = load_env_cfg(TOUCH_PLAIN_TASK)
+  cfg = load_env_cfg(TOUCH_LSTM_TASK)
   cfg.scene.num_envs = 8
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
   try:
-    rl = asdict(load_rl_cfg(TOUCH_PLAIN_TASK))
+    rl = asdict(load_rl_cfg(TOUCH_LSTM_TASK))
     rl["logger"] = "tensorboard"
     runner = BeamRunner(RslRlVecEnvWrapper(env), rl, log_dir=str(tmp_path), device="cuda:0")
     actor = runner.alg.actor
@@ -262,15 +258,8 @@ def test_plain_actor_trains_one_iteration(tmp_path) -> None:
     env.close()
 
 
-@pytest.mark.parametrize(
-  ("touch", "blind"),
-  [
-    (TOUCH_PLAIN_TASK, BLIND_TASK),
-    (TOUCH_MLP_PLAIN_TASK, BLIND_MLP_PLAIN_TASK),
-    (TOUCH_LSTM_TASK, BLIND_LSTM_TASK),
-  ],
-)
-def test_blind_twin_differs_only_in_the_tactile_input(touch: str, blind: str) -> None:
+def test_blind_twin_differs_only_in_the_tactile_input() -> None:
+  touch, blind = TOUCH_LSTM_TASK, BLIND_LSTM_TASK
   t, b = load_env_cfg(touch), load_env_cfg(blind)
   assert set(t.observations["actor"].terms) - set(b.observations["actor"].terms) == {"tactile_touch"}
   assert t.observations["critic"].terms.keys() == b.observations["critic"].terms.keys()
@@ -279,34 +268,8 @@ def test_blind_twin_differs_only_in_the_tactile_input(touch: str, blind: str) ->
   assert t_rl.actor == b_rl.actor and t_rl.critic == b_rl.critic and t_rl.algorithm == b_rl.algorithm
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_mlp_actor_trains_one_iteration(tmp_path) -> None:
-  """The memoryless experiments build their MLP actor and run a PPO update."""
-  from dataclasses import asdict
-
-  from mjlab.envs import ManagerBasedRlEnv
-  from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
-
-  from rsl_rl.models.mlp_model import MLPModel
-
-  task = TOUCH_MLP_PLAIN_TASK
-  cfg = load_env_cfg(task)
-  cfg.scene.num_envs = 8
-  env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
-  try:
-    rl = asdict(load_rl_cfg(task))
-    rl["logger"] = "tensorboard"
-    runner = MjlabOnPolicyRunner(RslRlVecEnvWrapper(env), rl, log_dir=str(tmp_path), device="cuda:0")
-    actor = runner.alg.actor
-    assert type(actor) is MLPModel and not actor.is_recurrent
-    runner.learn(num_learning_iterations=1)
-    assert all(torch.isfinite(p).all() for p in actor.parameters())
-  finally:
-    env.close()
-
-
 def test_every_beam_task_uses_beam_reward() -> None:
-  """The reward study was removed: every beam task trains on beam_reward."""
+  """Every beam task trains on beam_reward."""
   from sendg1.fingerprint import fingerprint
   from sendg1.tasks.beam.env_cfg import build_beam_reward
 
@@ -318,29 +281,9 @@ def test_every_beam_task_uses_beam_reward() -> None:
   assert "foot_side_contact" not in build_beam_reward()
 
 
-def test_actor_ablations_differ_only_in_the_actor() -> None:
-  """The GRU and MLP beam tasks are the LSTM pair with another actor model:
-  same env, critic and PPO settings."""
-  from sendg1.fingerprint import fingerprint
-
-  for lstm, others in (
-    (TOUCH_LSTM_TASK, (TOUCH_PLAIN_TASK, TOUCH_MLP_PLAIN_TASK)),
-    (BLIND_LSTM_TASK, (BLIND_TASK, BLIND_MLP_PLAIN_TASK)),
-  ):
-    ref = load_rl_cfg(lstm)
-    assert ref.actor.rnn_type == "lstm"
-    for task in others:
-      rl = load_rl_cfg(task)
-      assert rl.algorithm == ref.algorithm and rl.critic == ref.critic, task
-      assert rl.num_steps_per_env == ref.num_steps_per_env, task
-      assert fingerprint(load_env_cfg(task)) == fingerprint(load_env_cfg(lstm)), task
-
-
 def test_beam_reward_is_v4b() -> None:
-  """v4b: progress paid linearly, foot_slip at the walking task's -0.1; v4c
-  (foot_slip -2) is a record only."""
-  from sendg1.tasks.beam.env_cfg import build_beam_reward, build_beam_reward_v4c
+  """v4b: progress paid linearly, foot_slip at the walking task's -0.1."""
+  from sendg1.tasks.beam.env_cfg import build_beam_reward
 
-  r, c = build_beam_reward(), build_beam_reward_v4c()
+  r = build_beam_reward()
   assert "track_forward_progress" in r and r["foot_slip"].weight == -0.1
-  assert c["foot_slip"].weight == -2.0 and r.keys() == c.keys()

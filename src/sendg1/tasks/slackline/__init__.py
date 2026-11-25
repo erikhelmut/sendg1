@@ -1,11 +1,10 @@
-"""Slackline, plain PPO: ``G1-Slackline-Touch`` and ``G1-Slackline-Blind``.
+"""Slackline: ``G1-Slackline-Touch`` and ``G1-Slackline-Blind``.
 
 The G1 stands in a tandem stance on a tensioned slackline and, when
 commanded, walks along it. A paired comparison: the two tasks are the same
 env, critic, reward and PPO settings, and differ only in whether the actor
-gets the tactile slipper's touch features. Actor: the standard
-LSTM and PPO settings every task shares (``sendg1.common.ppo``); a GRU until
-2026-11-25, whose checkpoints no longer load.
+gets the tactile slipper's touch features. Actor and PPO:
+the settings every task shares (``sendg1.common.ppo``).
 """
 
 from __future__ import annotations

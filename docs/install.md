@@ -18,8 +18,8 @@ uv run ./scripts/test.sh                # or: uv run pytest
 uv run list-envs --keyword sendg1       # mjlab's CLI sees our tasks
 uv run python scripts/sweep.py --dry-run   # what a default sweep would run
 
-uv run python scripts/sweep.py --tasks flat --seeds 0 --max-iterations 3000
-uv run python scripts/evaluate.py --task Sendg1-Velocity-Flat-G1-Blind --seed 0
+uv run python scripts/sweep.py --tasks flat --max-iterations 3000
+uv run python scripts/evaluate.py --task Sendg1-Velocity-Flat-G1-Blind --seed 1
 uv run python scripts/aggregate.py
 ```
 

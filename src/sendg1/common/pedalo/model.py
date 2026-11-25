@@ -83,7 +83,6 @@ WHEEL_MASS = 0.6
 AXLE_MASS = 0.3
 BOARD_MASS = 0.6
 """Board + two bearing blocks."""
-TOTAL_MASS = 6 * WHEEL_MASS + 4 * AXLE_MASS + 2 * BOARD_MASS
 
 # -- contact ------------------------------------------------------------------
 
@@ -106,11 +105,6 @@ CONAFFINITY = 1
 ROOT_BODY = "front_wheels"
 BOARD_BODIES = ("left_board", "right_board")
 WHEEL_BODIES = ("front_wheels", "rear_wheels")
-BOARD_GEOMS = ("left_board_top", "right_board_top")
-CRANK_JOINT = "left_board_hinge"
-"""The left board's hinge on the front wheelset turns by -phi when the
-wheelset turns by phi (the board stays level)."""
-HINGE_JOINTS = ("left_board_hinge", "right_board_hinge", "rear_wheels_hinge")
 
 TYRE_RGBA = (0.08, 0.08, 0.08, 1.0)
 WHEEL_RGBA = (0.98, 0.76, 0.05, 1.0)
@@ -259,11 +253,3 @@ def crank_qpos(phi: float) -> dict[str, float]:
   return {"left_board_hinge": -phi, "right_board_hinge": -phi, "rear_wheels_hinge": phi}
 
 
-def board_top_height(phi: float) -> tuple[float, float]:
-  """Ground-to-top height of the (left, right) board at crank angle ``phi``.
-  phi > 0 lowers the left board: a positive turn about +y takes +x towards
-  -z, and the left axle starts at +x. Forward rolling is phi increasing."""
-  # Rotation about +y by phi maps (e, 0) to (e cos phi, -e sin phi) in (x, z).
-  dz = ECCENTRIC * math.sin(phi)
-  base = WHEEL_RADIUS + BOARD_TOP_ABOVE_AXLE
-  return base - dz, base + dz

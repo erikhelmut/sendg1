@@ -14,8 +14,6 @@ import torch
 
 from sendg1.common.box_push.params import (
   G1_MASS_KG,
-  BoxPushRanges,
-  curriculum_ranges,
   tips_before_sliding,
   traction_margin,
 )
@@ -41,23 +39,6 @@ def test_feasibility_helpers() -> None:
   # d / (2 mu) = 0.5 / 1.0: a push above 0.5 m tips first.
   assert tips_before_sliding(np.array(0.6), np.array(0.5), np.array(0.5))
   assert not tips_before_sliding(np.array(0.4), np.array(0.5), np.array(0.5))
-
-
-def test_curriculum_ranges_span_easy_corner_to_full() -> None:
-  """alpha 0: a comfortable margin on the grippiest floor. alpha 1: everything."""
-  r = BoxPushRanges()
-  easy = curriculum_ranges(r, 0.0)
-  assert easy["traction_margin"] == (r.traction_margin[1], r.traction_margin[1])
-  assert easy["floor_mu"] == (r.floor_mu[1], r.floor_mu[1])
-  full = curriculum_ranges(r, 1.0)
-  expected = {
-    "traction_margin": r.traction_margin,
-    "floor_mu": r.floor_mu,
-    "box_mu": r.box_mu,
-  }
-  assert full.keys() == expected.keys()
-  for key, (lo, hi) in expected.items():  # the arithmetic leaves float dust
-    assert full[key] == (pytest.approx(lo), pytest.approx(hi))
 
 
 def test_mass_follows_the_traction_margin() -> None:
@@ -193,60 +174,6 @@ def test_pins_override_sampling() -> None:
     box_xy = env.scene["box"].data.root_link_pos_w[:, :2]
     torch.testing.assert_close(st.target_xy[:, 1], box_xy[:, 1], atol=1e-5, rtol=0)
     torch.testing.assert_close(st.target_xy[:, 0] - box_xy[:, 0], torch.full_like(box_xy[:, 0], 3.0))
-  finally:
-    env.close()
-
-
-@pytest.mark.slow
-def test_patch_friction_applies_to_feet_on_a_patch() -> None:
-  from sendg1.common.box_push.mdp import BoxPushState
-  from sendg1.common.box_push.scene import patch_geom_name
-
-  env = _make_env(low_friction_patches=True)
-  try:
-    st = BoxPushState.get(env)
-    m = env.sim.model
-    # Slide patch 0 under world 0's robot.
-    g0 = st.patch_geoms[0]
-    origin = env.scene.env_origins[0]
-    pos = torch.tensor([origin[0], origin[1], origin[2] + 0.001 - 0.005], device=env.device)
-    m.geom_pos[0, g0] = pos
-    env.sim.data.geom_xpos[0, g0] = pos  # as box_push_reset does
-    m.geom_size[0, g0] = torch.tensor([0.5, 0.5, 0.005], device=env.device)
-    m.geom_aabb[0, g0, 1] = m.geom_size[0, g0]
-    m.geom_rbound[0, g0] = m.geom_size[0, g0].norm()
-    m.geom_friction[0, g0, 0] = 0.123
-    for _ in range(5):
-      env.step(_zero(env))
-    on_patch = [
-      mu for (w, a, b), mu in _contact_friction(env).items()
-      if w == 0 and patch_geom_name(0) in (a, b) and ("sole" in a or "sole" in b)
-    ]
-    assert on_patch and all(mu == pytest.approx(0.123, abs=1e-5) for mu in on_patch)
-    # The foot contact sensor, which matches the terrain body, sees the patch.
-    assert bool(st.feet_in_contact()[0].any())
-    # And the pose survives steps and a reset of another world.
-    env.reset(env_ids=torch.tensor([1], device=env.device))
-    for _ in range(3):
-      env.step(_zero(env))
-    torch.testing.assert_close(env.sim.data.geom_xpos[0, g0], pos)
-  finally:
-    env.close()
-
-
-@pytest.mark.slow
-def test_reset_places_patches_on_the_path() -> None:
-  from sendg1.common.box_push.mdp import BoxPushState
-
-  env = _make_env(num_envs=8, low_friction_patches=True)
-  try:
-    st = BoxPushState.get(env)
-    xpos = env.sim.data.geom_xpos
-    for i, gid in enumerate(st.patch_geoms):
-      used = st.patch_rect[:, i, 2] > 0
-      torch.testing.assert_close(xpos[used, gid, :2], st.patch_rect[used, i, :2])
-      assert torch.all(xpos[~used, gid, 2] < -1.0)
-    assert torch.all((st.patch_rect[:, :, 2] > 0).sum(dim=1) >= 1)
   finally:
     env.close()
 
@@ -399,61 +326,3 @@ def test_success_needs_the_dwell() -> None:
     )
   finally:
     env.close()
-
-
-@pytest.mark.slow
-def test_hand_force_curriculum_loads_the_hands_backward() -> None:
-  """The FALCON-style low level's only addition: a sustained backward load."""
-  from mjlab.envs import ManagerBasedRlEnv
-  from mjlab.tasks.registry import load_env_cfg
-
-  import sendg1.tasks  # noqa: F401
-  from sendg1.common.hand_forces import HAND_BODIES, HandForceCfg, force_level
-
-  cfg = load_env_cfg("Sendg1-VelocityPush-G1-Blind")
-  cfg.scene.num_envs = 8
-  cfg.seed = 0
-  full = HandForceCfg(ramp_steps=0)  # skip the ramp for the test
-  for key in ("hand_forces", "hand_forces_reset"):
-    cfg.events[key].params["cfg"] = full
-  device = "cuda:0" if torch.cuda.is_available() else "cpu"
-  env = ManagerBasedRlEnv(cfg=cfg, device=device)
-  try:
-    env.reset()
-    robot = env.scene["robot"]
-    for _ in range(5):
-      env.step(torch.zeros(8, env.action_manager.total_action_dim, device=device))
-    ids, _ = robot.find_bodies(HAND_BODIES, preserve_order=True)
-    wrench = robot.data.body_external_wrench[:, ids]
-    total = wrench[..., :3].sum(dim=1)
-    assert torch.all(total.norm(dim=-1) <= full.max_force + 1e-3)
-    assert float(total.norm(dim=-1).max()) > 0.2 * full.max_force
-    # Both hands share the load equally.
-    torch.testing.assert_close(wrench[:, 0, :3], wrench[:, 1, :3])
-    # ... and it pushes against where the robot is facing.
-    heading = robot.data.heading_w
-    forward = torch.stack([heading.cos(), heading.sin()], dim=-1)
-    horiz = total[:, :2] / total[:, :2].norm(dim=-1, keepdim=True).clamp_min(1e-6)
-    assert torch.all((horiz * forward).sum(-1) <= -0.49), "load must oppose the heading"
-    # The ramp starts at zero, so the shipped config is gentle at iteration 0
-    # (after the 5 steps above: 5 / ramp_steps).
-    shipped = HandForceCfg()
-    assert force_level(env, shipped) == pytest.approx(5 / shipped.ramp_steps)
-  finally:
-    env.close()
-
-
-def test_velocity_push_reuses_the_flat_reward_set() -> None:
-  """The force curriculum must be the ONLY difference from flat velocity."""
-  from mjlab.tasks.registry import load_env_cfg
-
-  import sendg1.tasks  # noqa: F401
-  from sendg1.fingerprint import fingerprint
-
-  flat = load_env_cfg("Sendg1-Velocity-Flat-G1-Blind")
-  push = load_env_cfg("Sendg1-VelocityPush-G1-Blind")
-  assert fingerprint(push.rewards) == fingerprint(flat.rewards)
-  assert fingerprint(push.observations) == fingerprint(flat.observations)
-  assert fingerprint(push.terminations) == fingerprint(flat.terminations)
-  assert set(push.events) - set(flat.events) == {"hand_forces", "hand_forces_reset"}
-  assert set(push.curriculum) - set(flat.curriculum) == {"hand_forces"}

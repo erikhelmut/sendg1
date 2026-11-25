@@ -11,13 +11,19 @@ import pytest
 import torch
 
 from sendg1.common.tactile import model
-from sendg1.common.tactile.layout import LAYOUTS, grid_layout
+from sendg1.common.tactile.layout import LAYOUTS
 
-LAYOUT = LAYOUTS["placeholder_8x3"]
+LAYOUT = LAYOUTS["slipper_v1"]
 T = LAYOUT.num_taxels
 CENTERS = torch.tensor(LAYOUT.centers)
 AREAS = torch.tensor(LAYOUT.areas())
 SIGMA = 0.02
+HEEL = CENTERS[:, 0] < -0.02
+"""The 7 heel taxels (x < -20 mm)."""
+TOE = CENTERS[:, 0] > 0.10
+"""The 5 toe taxels (x > 100 mm)."""
+MIDLINE = CENTERS[:, 1].abs() < 1e-6
+"""The taxels on the sole's centre line (y = 0), one straight column."""
 
 
 def _split(net_force, cop, support):
@@ -35,10 +41,9 @@ def _cop_of(normal):
   return (normal.unsqueeze(-1) * CENTERS).sum(-2) / normal.sum(-1, keepdim=True)
 
 
-def test_layout_is_24_taxels_mirrored_between_feet() -> None:
-  assert T == 24
-  for (lx, ly), (rx, ry) in zip(LAYOUT.for_side("left"), LAYOUT.for_side("right")):
-    assert (lx, ly) == (rx, -ry)
+def test_layout_is_the_same_part_on_both_feet() -> None:
+  assert T == 26 and int(HEEL.sum()) == 7 and int(TOE.sum()) == 5
+  assert LAYOUT.for_side("left") == LAYOUT.for_side("right")
 
 
 def test_sample_points_stay_inside_their_patch() -> None:
@@ -47,11 +52,6 @@ def test_sample_points_stay_inside_their_patch() -> None:
   for i, ((cx, cy), (hx, hy)) in enumerate(zip(LAYOUT.centers, LAYOUT.half_sizes)):
     for x, y in pts[i * 9 : (i + 1) * 9]:
       assert abs(x - cx) < hx and abs(y - cy) < hy
-
-
-def test_overlapping_patches_are_rejected() -> None:
-  with pytest.raises(ValueError, match="overlaps"):
-    grid_layout("bad", rows=8, cols=3, patch=0.03)
 
 
 def test_slipper_layout_is_the_default_and_matches_the_csv() -> None:
@@ -115,38 +115,36 @@ def test_cop_is_reproduced_and_load_shifts_toward_it() -> None:
   normal, _ = _split([0.0, 0.0, 400.0], cop, torch.ones(T))
   assert normal.sum().item() == pytest.approx(400.0, rel=1e-4)
   assert torch.allclose(_cop_of(normal), cop, atol=1e-4)
-  heel, toe = normal[:3].sum(), normal[-3:].sum()
+  heel, toe = normal[HEEL].sum(), normal[TOE].sum()
   assert toe > heel
 
 
 def test_cop_near_the_edge_drops_taxels_in_tension() -> None:
-  """A CoP at the toe row cannot be made by a plane of pressure without going
+  """A CoP at the toe cannot be made by a plane of pressure without going
   negative at the heel; those taxels must read zero, never negative."""
-  cop = torch.tensor([CENTERS[-1, 0].item(), 0.0])
+  cop = torch.tensor([CENTERS[:, 0].max().item(), 0.0])
   normal, _ = _split([0.0, 0.0, 200.0], cop, torch.ones(T))
   assert (normal >= 0).all()
-  assert normal[:3].sum() == 0
+  assert normal[HEEL].sum() == 0
   assert normal.sum().item() == pytest.approx(200.0, rel=1e-4)
 
 
 def test_unsupported_taxels_read_zero() -> None:
-  support = torch.zeros(T)
-  support[:9] = 1.0  # heel three rows only, e.g. heel strike
-  cop = CENTERS[:9].mean(0)
+  support = HEEL.float()  # heel only, e.g. heel strike
+  cop = CENTERS[HEEL].mean(0)
   normal, shear = _split([5.0, 0.0, 150.0], cop, support)
-  assert normal[9:].abs().max() == 0
-  assert shear[9:].abs().max() == 0
+  assert normal[~HEEL].abs().max() == 0
+  assert shear[~HEEL].abs().max() == 0
   assert normal.sum().item() == pytest.approx(150.0, rel=1e-4)
 
 
 def test_collinear_support_is_finite() -> None:
   """One column of taxels on a narrow beam: the cross-slope is undetermined."""
-  support = torch.zeros(T)
-  support[1::3] = 1.0
+  support = MIDLINE.float()
   normal, shear = _split([0.0, 3.0, 250.0], [0.03, 0.0], support)
   assert torch.isfinite(normal).all() and torch.isfinite(shear).all()
   assert normal.sum().item() == pytest.approx(250.0, rel=1e-4)
-  assert normal[0::3].sum() == 0 and normal[2::3].sum() == 0
+  assert normal[~MIDLINE].sum() == 0
 
 
 def test_load_without_support_falls_back_around_the_cop() -> None:

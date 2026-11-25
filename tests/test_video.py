@@ -17,8 +17,8 @@ from sendg1.video import hud, policy_sees_tactile
     ("Sendg1-Velocity-Flat-G1-Blind", False),
     ("Sendg1-Velocity-Flat-G1-Tactile", True),
     ("Sendg1-BoxPush-G1-Tactile", True),
-    ("G1-Beam-Touch-Curved-Plain", True),
-    ("G1-Beam-Curved-Blind", False),
+    ("G1-Beam-Touch-Curved-LSTM", True),
+    ("G1-Beam-Curved-Blind-LSTM", False),
   ],
 )
 def test_policy_sees_tactile(task, tactile):

@@ -55,7 +55,6 @@ LENGTH = 2 * pm.WHEEL_RADIUS
 STEP_MASS = 0.1
 """Bare birch block; with the Classic's wheels (0.6) and axles (0.3) this
 makes the catalogue's 2.6 kg."""
-TOTAL_MASS = 3 * pm.WHEEL_MASS + 2 * pm.AXLE_MASS + 2 * STEP_MASS
 
 # -- contact ------------------------------------------------------------------
 
@@ -67,8 +66,6 @@ foot friction randomisation sets the contact (MuJoCo takes the larger)."""
 
 ROOT_BODY = "wheels"
 STEP_BODIES = ("left_step", "right_step")
-STEP_GEOMS = ("left_step_block", "right_step_block")
-HINGE_JOINTS = ("left_step_hinge", "right_step_hinge")
 
 
 def _step(body, name: str) -> None:
@@ -115,7 +112,7 @@ def crank_qpos(phi: float) -> dict[str, float]:
 
 def step_top_height(phi: float) -> tuple[float, float]:
   """Ground-to-top height of the (left, right) step at crank angle ``phi``,
-  steps level (``model.board_top_height``)."""
+  steps level."""
   dz = pm.ECCENTRIC * math.sin(phi)
   base = pm.WHEEL_RADIUS + STEP_TOP_ABOVE_AXLE
   return base - dz, base + dz

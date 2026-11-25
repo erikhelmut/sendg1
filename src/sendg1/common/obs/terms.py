@@ -38,8 +38,6 @@ from sendg1.common.beam import mdp as beam_mdp
 from sendg1.common.box_push import mdp as box_mdp
 
 Availability = Literal["onboard", "sensor", "perceived", "privileged"]
-"""An ``oracle`` class (idealised tactile stand-ins, legal only in diagnostic
-obs sets) existed until 2026-11-15."""
 
 TERRAIN_SCAN_SENSOR = "terrain_scan"
 TERRAIN_SCAN_MAX_DISTANCE = 5.0
@@ -174,11 +172,6 @@ def _foot_air_time() -> ObservationTermCfg:
 # Box pushing. Perceived terms (actor) carry small noise; privileged ones do not.
 # ---------------------------------------------------------------------------
 
-BOX_POS_NOISE = 0.02
-"""m, uniform +/-, on the perceived box position and target offset."""
-BOX_YAW_NOISE = 0.03
-"""On each of (sin, cos) of the perceived relative yaw (~ +/-1.7 deg)."""
-
 
 def _box_term(func, noise: float | None = None) -> Callable[[], ObservationTermCfg]:
   def build() -> ObservationTermCfg:
@@ -312,7 +305,7 @@ TERMS: dict[str, TermSpec] = {
     _box_term(box_mdp.floor_mu_under_feet),
     "privileged",
     "Friction coefficient of the floor under each foot (the episode's floor "
-    "mu, or a low-friction patch's). The quantity the policy must infer.",
+    "mu). The quantity the policy must infer.",
   ),
   "box_mass": TermSpec(
     _box_term(box_mdp.box_mass),

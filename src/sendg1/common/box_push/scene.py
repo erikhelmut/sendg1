@@ -1,9 +1,8 @@
 """Scene pieces for the box-pushing task: the box, the target marker, the floor
-friction priorities, the optional low-friction patches and the contact sensors.
+friction priority and the contact sensors.
 
 Geometry and mass here are placeholders: every episode overwrites the box's
-size, mass, inertia and friction, and the patches' size, position and friction,
-from :mod:`sendg1.common.box_push.params`.
+size, mass, inertia and friction from :mod:`sendg1.common.box_push.params`.
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from mjlab.sensor import ContactMatch, ContactSensorCfg
 from sendg1.common.box_push.params import (
   BOX_PRIORITY,
   FLOOR_PRIORITY,
-  MAX_PATCHES,
   BoxPushRanges,
 )
 
@@ -25,10 +23,6 @@ BOX_GEOM = "box_geom"
 TARGET_ENTITY = "target"
 TERRAIN_GEOM = "terrain"
 """mjlab's plane terrain: one body and one geom, both named ``terrain``."""
-
-
-def patch_geom_name(i: int) -> str:
-  return f"box_push_patch_{i}"
 
 
 # Hands and forearms: the bodies that carry the elbow, wrist and hand collision
@@ -98,39 +92,11 @@ def box_entities() -> dict[str, EntityCfg]:
 
 
 def edit_scene_spec(spec: mujoco.MjSpec) -> None:
-  """``SceneCfg.spec_fn`` without patches."""
-  _edit_scene_spec(spec, low_friction_patches=False)
-
-
-def edit_scene_spec_with_patches(spec: mujoco.MjSpec) -> None:
-  """``SceneCfg.spec_fn`` with the low-friction patch geoms."""
-  _edit_scene_spec(spec, low_friction_patches=True)
-
-
-def _edit_scene_spec(spec: mujoco.MjSpec, *, low_friction_patches: bool) -> None:
-  """``SceneCfg.spec_fn``: floor priority, and the patch geoms if enabled.
-
-  Patches are geoms of the terrain body itself, not an entity of their own, so
-  every sensor that matches ``terrain`` (foot contact, the tactile sole) sees a
-  foot on a patch exactly as it sees a foot on the floor.
-  """
+  """``SceneCfg.spec_fn``: the floor's friction priority."""
   floor = spec.geom(TERRAIN_GEOM)
   if floor is None:
     raise RuntimeError("box-push needs mjlab's plane terrain (geom 'terrain')")
   floor.priority = FLOOR_PRIORITY
-  if not low_friction_patches:
-    return
-  body = spec.body(TERRAIN_GEOM)
-  for i in range(MAX_PATCHES):
-    body.add_geom(
-      name=patch_geom_name(i),
-      type=mujoco.mjtGeom.mjGEOM_BOX,
-      size=(0.3, 0.3, 0.005),
-      pos=(0.0, 0.0, -1.0),  # parked below the floor until a reset places it
-      rgba=(0.35, 0.55, 0.95, 1.0),
-      priority=FLOOR_PRIORITY,
-      friction=(0.2, 0.005, 0.0001),
-    )
 
 
 # ---------------------------------------------------------------------------

@@ -22,20 +22,12 @@ from sendg1.tasks._register import variants
 # Regenerate with: python scripts/show_fingerprints.py
 EXPECTED: dict[str, tuple[str, str]] = {
   # task_id: (env_fingerprint, rl_fingerprint)
-  "Sendg1-BoxPush-G1-Blind": ("ce9384031658ef67", "40045f6cf5564329"),
-  "Sendg1-BoxPush-G1-Tactile": ("4b0d1b6c4555b884", "252f509b2bed9744"),
-  "Sendg1-BoxPushCurriculum-G1-Blind": ("09953bcccd9d544e", "fe47f288467ded2f"),
-  "Sendg1-BoxPushCurriculum-G1-Tactile": ("35ef61a46cd76e09", "1f622754203e4063"),
-  "Sendg1-BoxPushPatches-G1-Blind": ("bddd7fddae4db332", "0d6e23099e305aa2"),
-  "Sendg1-BoxPushPatches-G1-Tactile": ("c835ca55909ea0d3", "a9ab26e5ab33af08"),
+  "Sendg1-BoxPush-G1-Blind": ("3f2ba5f238a0cad2", "40045f6cf5564329"),
+  "Sendg1-BoxPush-G1-Tactile": ("94cdeada2e7dc261", "252f509b2bed9744"),
   "Sendg1-Velocity-Flat-G1-Blind": ("2d63d92cbb2b0f7e", "1bb169ab04923031"),
-  "Sendg1-Velocity-Flat-G1-MLP-Blind": ("2d63d92cbb2b0f7e", "999ce90d05a95c94"),
-  "Sendg1-Velocity-Flat-G1-MLP-Tactile": ("adfe463c9a4a8f94", "b7fd0061b321cdcf"),
   "Sendg1-Velocity-Flat-G1-Tactile": ("adfe463c9a4a8f94", "5b99b14e54d55878"),
   "Sendg1-Velocity-Rough-G1-Blind": ("d19e50e1bc201513", "c6209009b4653899"),
   "Sendg1-Velocity-Rough-G1-Tactile": ("e12a70c53fabd2d9", "ad471368e3cbfe65"),
-  "Sendg1-VelocityPush-G1-Blind": ("14f756b17ca7e288", "34712497eb5533f8"),
-  "Sendg1-VelocityPush-G1-Tactile": ("36e0e4fc5ae47b7d", "a212323baf9c3de7"),
 }
 
 

@@ -66,10 +66,6 @@ class EvalProtocol:
   """On generated terrain, give every sub-terrain the same number of
   environments regardless of its training spawn weight."""
 
-  @property
-  def total_episodes(self) -> int:
-    return self.num_envs * self.num_episodes
-
 
 def build_eval_env_cfg(
   task_id: str,

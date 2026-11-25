@@ -74,12 +74,6 @@ SPAWN = {
 15 cm off the centreline and 14 deg off heading. The actor never sees where the
 beam is, so it has to find and follow it by touch."""
 
-CENTRELINE_SIGMA = 0.035
-"""Fixed stance-foot / CoM centreline reward width (m), all levels. Run 2
-stalled at mean level ~2.2 and shuffled with its feet ~10-17 cm apart: the
-level-coupled widths (``mdp.CENTRELINE_SIGMA``, 12 cm at level 0) never asked
-for more. A foot (and the CoM) now pays only over the beam, which the actor can
-only find by touch."""
 SUCCESS_BEAM_M = 2.0
 """Metres of beam (of 4) that make a walking episode a curriculum success at
 any pace. 1 m promoted envs that could not yet cross the beam."""
@@ -93,17 +87,6 @@ SHOULDER_ROLL_STD = 1.2
 person balances. Shoulder pitch / yaw, elbows and wrists keep their pull, which
 rules out odd arm configurations; self-collisions are still penalised."""
 
-POSE_STD_BEAM: dict[str, float] = {
-  **{
-    k: (v if any(j in k for j in ("hip_pitch", "knee", "ankle_pitch")) else 1.5 * v)
-    for k, v in POSE_STD_WALKING.items()
-  },
-  r".*shoulder_roll.*": SHOULDER_ROLL_STD,
-}
-"""Walking tolerances x1.5 for the lateral/yaw joints a tandem stance needs,
-for standing and walking alike (mjlab's tight standing std, 0.05 rad, would
-punish exactly the posture the task requires). Sagittal leg joints keep the
-walking tolerance: at x1.5 an early policy settled into a deep crouch."""
 ARM_JOINTS = (".*shoulder.*", ".*elbow.*", ".*wrist.*")
 LEG_JOINTS = (".*hip.*", ".*knee.*", ".*ankle.*")
 ARM_POSE_STD: dict[str, float] = {
@@ -135,150 +118,6 @@ def nonfoot_contact_sensor() -> ContactSensorCfg:
 # ---------------------------------------------------------------------------
 # Reward table
 # ---------------------------------------------------------------------------
-
-
-def build_beam_reward_v3() -> dict[str, RewardTermCfg]:
-  """Reward v3, kept as a record (no task uses it): the 31-term beam reward.
-
-  v2 (2026-11-18), a walking gait. Every v1 policy (touch_plain_s0 GRU runs,
-  2026-10-17/20, and the LSTM runs of 2026-11-15) walked a step-to shuffle: a
-  deep crouch on one leg, the other swept forward nearly straight just above the
-  beam (the "kick"), the back foot closed up, a pause. In the tactile LSTM run
-  passing_step earned 7 % of its maximum and posture 39 %. v2 takes the parts of
-  the flat walking reward (``sendg1.common.rewards``) that produce its normal
-  gait: swing-foot clearance and swing height (absent in v1), posture and
-  upright at weight 1, action rate -0.1. It also pays alternation more
-  (passing_step x3), stops paying for standing flat-footed (foot_flat 1 -> 0.5)
-  and softens the light-touch penalties whose cheapest answer was the straight
-  leg reach (touchdown_force_rate -5 -> -1, early_contact_overload -3 -> -1).
-
-  v3 (2026-11-19): feet_in_line 3 -> 1. Under v2 the tactile run alternated,
-  which unlocked feet_in_line, and chasing it on wide beams cost it its
-  curriculum."""
-  feet = SceneEntityCfg("robot", site_names=G1_FOOT_SITES)
-  return {
-    # -- task ------------------------------------------------------------------
-    # Forward progress with slack: a pause to feel for the beam only forgoes
-    # reward (exact speed tracking punished it).
-    "track_forward_progress": RewardTermCfg(func=mdp.track_forward_progress, weight=2.0),
-    "alive": RewardTermCfg(func=mdp.alive, weight=0.5),
-    "reach_end": RewardTermCfg(func=mdp.reach_end_bonus, weight=10.0),
-    # -- beam shaping ------------------------------------------------------------
-    "foot_centreline": RewardTermCfg(
-      func=mdp.stance_foot_centreline,
-      weight=1.0,
-      params={"sigmas": (CENTRELINE_SIGMA,)},
-    ),
-    "foot_yaw": RewardTermCfg(func=mdp.stance_foot_yaw, weight=0.5, params={"std": 0.25}),
-    "cop_centred": RewardTermCfg(func=mdp.cop_centred, weight=0.5, params={"std": 0.015}),
-    "com_over_beam": RewardTermCfg(
-      func=mdp.com_over_beam, weight=1.0, params={"sigmas": (CENTRELINE_SIGMA,)}
-    ),
-    "base_lateral_vel": RewardTermCfg(func=mdp.base_lateral_velocity, weight=-1.0),
-    "base_roll": RewardTermCfg(func=mdp.base_roll, weight=-2.0),
-    # -- gait shape -------------------------------------------------------------
-    # x3 (v1: 1): a shuffle scores +1/-1 per cycle here, an alternating gait +1
-    # per step; at weight 1 the difference was too small to matter.
-    "passing_step": RewardTermCfg(func=mdp.passing_step, weight=3.0),
-    # 0.5 (v1: 1): it averages over feet in contact, so standing on two flat
-    # feet earned it in full and paid for the pauses.
-    "foot_flat": RewardTermCfg(func=mdp.stance_foot_flat, weight=0.5),
-    # From the walking reward (same weights): a moving foot is lifted to the
-    # target height and lands from it. 8 cm, not 10: the beam asks for a
-    # careful step, not a high one.
-    "foot_clearance": RewardTermCfg(
-      func=mdp.feet_clearance, weight=-2.0, params={"target_height": 0.08}
-    ),
-    "foot_swing_height": RewardTermCfg(
-      func=mdp.feet_swing_height, weight=-0.25, params={"target_height": 0.08}
-    ),
-    "swing_foot_speed": RewardTermCfg(func=mdp.swing_foot_speed, weight=-1.0),
-    "touchdown_force_rate": RewardTermCfg(func=mdp.touchdown_force_rate, weight=-1.0),
-    "arm_posture": RewardTermCfg(
-      func=mdp.pose_l2,
-      weight=-0.02,
-      params={"std": ARM_POSE_STD, "asset_cfg": SceneEntityCfg("robot", joint_names=ARM_JOINTS)},
-    ),
-    # -- posture (from the walking reward) -------------------------------------
-    "upright": RewardTermCfg(
-      func=vel_mdp.upright,
-      weight=1.0,
-      params={
-        "std": math.sqrt(0.2),
-        "asset_cfg": SceneEntityCfg("robot", body_names=(G1_TORSO_BODY,)),
-      },
-    ),
-    "posture": RewardTermCfg(
-      func=envs_mdp.posture,
-      weight=1.0,
-      params={"std": POSE_STD_BEAM, "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
-    ),
-    "feet_air_time": RewardTermCfg(
-      func=vel_mdp.feet_air_time,
-      weight=0.25,
-      params={
-        "sensor_name": mdp.FOOT_CONTACT_SENSOR,
-        "threshold_min": 0.05,
-        "threshold_max": 0.4,
-        "command_name": "twist",
-        "command_threshold": 0.05,
-      },
-    ),
-    # -- regularisers (from the walking reward) ----------------------------------
-    "action_rate_l2": RewardTermCfg(func=vel_mdp.action_rate_l2, weight=-0.1),
-    "leg_joint_acc": RewardTermCfg(
-      func=envs_mdp.joint_acc_l2,
-      weight=-1e-6,
-      params={"asset_cfg": SceneEntityCfg("robot", joint_names=LEG_JOINTS)},
-    ),
-    "arm_joint_vel": RewardTermCfg(
-      func=envs_mdp.joint_vel_l2,
-      weight=-0.02,
-      params={"asset_cfg": SceneEntityCfg("robot", joint_names=ARM_JOINTS)},
-    ),
-    "joint_torques_l2": RewardTermCfg(func=envs_mdp.joint_torques_l2, weight=-1e-5),
-    "dof_pos_limits": RewardTermCfg(func=vel_mdp.joint_pos_limits, weight=-1.0),
-    "body_ang_vel": RewardTermCfg(
-      func=vel_mdp.body_angular_velocity_penalty,
-      weight=-0.05,
-      params={"asset_cfg": SceneEntityCfg("robot", body_names=(G1_TORSO_BODY,))},
-    ),
-    "angular_momentum": RewardTermCfg(
-      func=vel_mdp.angular_momentum_penalty,
-      weight=-0.02,
-      params={"sensor_name": "robot/root_angmom"},
-    ),
-    "foot_slip": RewardTermCfg(
-      func=vel_mdp.feet_slip,
-      weight=-0.1,
-      params={
-        "sensor_name": mdp.FOOT_CONTACT_SENSOR,
-        "command_name": "twist",
-        "command_threshold": 0.05,
-        "asset_cfg": feet,
-      },
-    ),
-    "self_collisions": RewardTermCfg(
-      func=vel_mdp.self_collision_cost,
-      weight=-1.0,
-      params={"sensor_name": "self_collision", "force_threshold": 10.0},
-    ),
-    # -- touch: step onto an unseen beam lightly, feel, then commit weight -------
-    "load_off_support": RewardTermCfg(func=mdp.load_off_support, weight=-1.0),
-    "early_contact_overload": RewardTermCfg(func=mdp.early_contact_overload, weight=-1.0),
-    # One-off -2 on an early termination (weights are scaled by the 0.02 s
-    # step). Without it, the random initial policy's regulariser costs made
-    # falling over at once the best return and episodes collapsed to 7 steps.
-    "termination": RewardTermCfg(func=envs_mdp.is_terminated, weight=-100.0),
-    # Heel-to-toe, paid per metre gained; cheaper forms were farmed (see
-    # mdp.feet_in_line). 1 (v1/v2: 3): it pays only at alternating touchdowns,
-    # so v1, which shuffled, never collected it. Once v2's passing_step made
-    # the gait alternate, the tactile run chased a narrow tandem gait at 3 on
-    # beams 30-40 cm wide, fell off far more often and lost its curriculum
-    # (mean level 1.7 -> 0.2 between iterations 3k and 5k).
-    "feet_in_line": RewardTermCfg(func=mdp.feet_in_line, weight=1.0),
-  }
-
 
 
 POSE_STD_BEAM_STANDING: dict[str, float] = {
@@ -317,8 +156,8 @@ def build_beam_reward() -> dict[str, RewardTermCfg]:
   (linear in speed up to the command) instead of the smooth kernel: the v4
   runs learned to stand still, the kernel paying nothing below ~2/3 speed.
 
-  v4b is the reward of every beam task (default since 2026-11-25). v4c
-  (``build_beam_reward_v4c``, ``foot_slip`` -2) is kept as a record."""
+  v4b is the reward of every beam task. v4c (``foot_slip`` -2) was tried on
+  2026-11-22 and not kept."""
   feet = SceneEntityCfg("robot", site_names=G1_FOOT_SITES)
   return {
     # -- task (walking: track_linear_velocity / track_angular_velocity) --------
@@ -372,7 +211,7 @@ def build_beam_reward() -> dict[str, RewardTermCfg]:
     ),
     "dof_pos_limits": RewardTermCfg(func=vel_mdp.joint_pos_limits, weight=-1.0),
     "action_rate_l2": RewardTermCfg(func=vel_mdp.action_rate_l2, weight=-0.1),
-    # The walking task's weight. v4c raised it to -2 (``build_beam_reward_v4c``).
+    # The walking task's weight; v4c's -2 was not kept.
     "foot_slip": RewardTermCfg(
       func=vel_mdp.feet_slip,
       weight=-0.1,
@@ -389,16 +228,6 @@ def build_beam_reward() -> dict[str, RewardTermCfg]:
       params={"sensor_name": "self_collision", "force_threshold": 10.0},
     ),
   }
-
-
-def build_beam_reward_v4c() -> dict[str, RewardTermCfg]:
-  """Reward v4c (2026-11-22), kept as a record (no task uses it): v4b with
-  ``foot_slip`` -2. The v4b tactile policy slid its feet along the beam; the
-  cost is squared slip speed, and at ~0.08 m/s mean slip -0.1 paid ~0.005/s.
-  -2 makes it ~0.1/s, the size of load_off_support. Runs: 226876/7, seed 1."""
-  reward = build_beam_reward()
-  reward["foot_slip"].weight = -2.0
-  return reward
 
 
 # ---------------------------------------------------------------------------
@@ -515,8 +344,7 @@ Tactile = Literal["touch", "none"]
 """Actor tactile input. ``touch``: the shared touch features (``tactile_touch``:
 26 taxel bits, load, CoP; 29 per foot). ``none``: blind, no tactile actor term.
 Both share one critic (clean touch features, per-taxel normal/shear forces,
-foot slip velocity). The soft contact-map input (``map``) was removed on
-2026-11-15."""
+foot slip velocity)."""
 
 
 def build_observations(

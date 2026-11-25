@@ -18,15 +18,6 @@ from sendg1.common.sensors import SOLE_CONTACT_SENSOR, taxel_ray_sensor_name
 from sendg1.common.tactile.layout import SIDES
 
 TASKS = sorted(t for t in list_tasks() if t.startswith(("G1-", "Sendg1-")))
-ACTOR_ABLATIONS = {
-  # task: its actor model, in place of the standard LSTM
-  "G1-Beam-Touch-Curved-Plain": "gru",
-  "G1-Beam-Curved-Blind": "gru",
-  "G1-Beam-Touch-Curved-MLP-Plain": "mlp",
-  "G1-Beam-Curved-Blind-MLP-Plain": "mlp",
-  "Sendg1-Velocity-Flat-G1-MLP-Blind": "mlp",
-  "Sendg1-Velocity-Flat-G1-MLP-Tactile": "mlp",
-}
 ALLOWED_ENTROPY = {0.005, 0.01}
 """Per task: 0.01 (walking) or 0.005 (tasks whose action std drifted up and
 collapsed training at 0.01: beam, box push and the beam-style tasks)."""
@@ -41,7 +32,6 @@ def _is_tactile(env_cfg, rl_cfg) -> bool:
 
 def test_task_list_is_not_empty() -> None:
   assert len(TASKS) > 20
-  assert set(ACTOR_ABLATIONS) <= set(TASKS)
 
 
 @pytest.mark.parametrize("task", TASKS)
@@ -72,8 +62,7 @@ def test_tactile_actor_uses_the_shared_sensor(task: str) -> None:
 @pytest.mark.parametrize("task", TASKS)
 def test_standard_actor_and_ppo(task: str) -> None:
   rl = load_rl_cfg(task)
-  actor = ACTOR_ABLATIONS.get(task.removesuffix("-Eval"), ppo.STANDARD_ACTOR)
-  assert rl.actor == ppo.actor_cfg(actor), task
+  assert rl.actor == ppo.actor_cfg(), task
   ref = ppo.ppo_cfg("x", rl.obs_groups, entropy_coef=0.0, max_iterations=1, save_interval=1)
   assert rl.critic == ref.critic, task
   assert rl.num_steps_per_env == ppo.ROLLOUT_STEPS == 24, task

@@ -1,12 +1,11 @@
-"""Rolling-cylinder balance, plain PPO: ``G1-RollingCylinder-Touch`` and
+"""Rolling-cylinder balance: ``G1-RollingCylinder-Touch`` and
 ``G1-RollingCylinder-Blind``.
 
 The G1 stands across a cylinder lying free on the floor and keeps it still
 under its feet. A paired comparison: the two tasks are the same env, critic,
 reward and PPO settings, and differ only in whether the actor gets the
-tactile slipper's touch features. Actor: the standard LSTM
-and PPO settings every task shares (``sendg1.common.ppo``); a GRU until
-2026-11-25, whose checkpoints no longer load.
+tactile slipper's touch features. Actor and PPO: the
+settings every task shares (``sendg1.common.ppo``).
 """
 
 from __future__ import annotations

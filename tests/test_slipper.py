@@ -35,7 +35,7 @@ def test_every_taxel_sits_inside_the_rubber_outline() -> None:
   from matplotlib.path import Path
 
   outline = Path(sole_outline())
-  layout = LAYOUTS["slipper_v1"]  # the placeholder grid ignores the rounded toe
+  layout = LAYOUTS["slipper_v1"]
   for side in ("left", "right"):
     assert outline.contains_points(np.array(layout.for_side(side))).all()
 

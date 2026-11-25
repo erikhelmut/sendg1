@@ -25,7 +25,7 @@ by fingerprint.
   stance facing the rolling direction, sole centres on the top line within
   ±2 cm, dropped from 1 cm. With zero actions it falls off in ~0.65 s.
 - **Actor and PPO**: the standard settings every task shares
-  (`sendg1/common/ppo.py`: LSTM 256 -> MLP 256, 128; a GRU until 2026-11-25),
+  (`sendg1/common/ppo.py`: LSTM 256 -> MLP 256, 128),
   10k iterations. No command: the task is balance only.
 - **Critic**: the blind actor's terms plus ground truth: base velocity,
   cylinder motion (rolling/sliding speed, yaw and spin rate, drift from
@@ -60,10 +60,10 @@ One run per condition and seed, locally or on the cluster
 ([../cluster.md](../cluster.md)):
 
 ```bash
-scripts/cluster/submit.sh ~/sendg1-rolling-cylinder G1-RollingCylinder-Blind \
-  --agent.run-name blind_s0 --agent.seed 0
-scripts/cluster/submit.sh ~/sendg1-rolling-cylinder G1-RollingCylinder-Touch \
-  --agent.run-name touch_s0 --agent.seed 0
+scripts/cluster/submit.sh ~/sendg1 G1-RollingCylinder-Blind \
+  --agent.run-name blind_s1 --agent.seed 1
+scripts/cluster/submit.sh ~/sendg1 G1-RollingCylinder-Touch \
+  --agent.run-name touch_s1 --agent.seed 1
 ```
 
 Seeds 0-4 for anything reported. Picture of the spawn pose:

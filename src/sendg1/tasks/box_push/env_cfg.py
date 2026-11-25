@@ -21,7 +21,6 @@ import math
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
-from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
@@ -31,12 +30,11 @@ from mjlab.tasks.velocity import mdp as vel_mdp
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 from sendg1.common.box_push import mdp as box_mdp
-from sendg1.common.box_push.params import BoxPushRanges, CurriculumCfg, PatchCfg
+from sendg1.common.box_push.params import BoxPushRanges
 from sendg1.common.box_push.scene import (
   box_entities,
   box_push_sensors,
   edit_scene_spec,
-  edit_scene_spec_with_patches,
 )
 from sendg1.common.events import build_events
 from sendg1.common.obs.groups import build_groups
@@ -63,10 +61,6 @@ DEFAULT_NUM_ENVS = NUM_ENVS
 
 EPISODE_LENGTH_S = 20.0
 
-LOW_FRICTION_PATCHES = False
-"""Default for the optional 1-3 low-friction floor patches on the path."""
-CURRICULUM = False
-"""Default for the light-box / high-friction curriculum."""
 BALL_HANDS = True
 """Ball end-effectors instead of the stock rubber hands (see
 ``sendg1.common.robots.g1``): one contact per hand, with its own friction."""
@@ -227,9 +221,7 @@ def build_box_push_rewards() -> dict[str, RewardTermCfg]:
   }
 
 
-def build_box_push_events(
-  ranges: BoxPushRanges, patches: PatchCfg | None, curriculum: CurriculumCfg | None
-) -> dict[str, EventTermCfg]:
+def build_box_push_events(ranges: BoxPushRanges) -> dict[str, EventTermCfg]:
   events = build_events()
   # The robot stands at the env origin facing +x, the box ahead of it; only the
   # heading is noisy. The spawn gap to the box is sampled by box_push_reset.
@@ -242,14 +234,14 @@ def build_box_push_events(
   # 40 kg box is a different task.
   events.pop("push_robot")
   # The foot capsules' own friction never reaches a contact the task cares
-  # about: the floor and patches outrank them (see params.py). Randomising it
+  # about: the floor outranks them (see params.py). Randomising it
   # would be inert, so it is removed rather than left to mislead.
   events.pop("foot_friction")
   events[box_mdp.FIELDS_EVENT] = EventTermCfg(func=box_mdp.box_push_fields, mode="startup")
   events[box_mdp.RESET_EVENT] = EventTermCfg(
     func=box_mdp.box_push_reset,
     mode="reset",
-    params={"ranges": ranges, "patches": patches, "curriculum": curriculum},
+    params={"ranges": ranges},
   )
   return events
 
@@ -287,15 +279,11 @@ def make_g1_box_push_env_cfg(
   dof_set: DofSet = "full29",
   play: bool = False,
   num_envs: int | None = None,
-  low_friction_patches: bool = LOW_FRICTION_PATCHES,
-  curriculum: bool = CURRICULUM,
   ball_hands: bool = BALL_HANDS,
   ranges: BoxPushRanges = BoxPushRanges(),
 ) -> ManagerBasedRlEnvCfg:
   """Build a G1 box-pushing config for one observation set."""
   cfg = make_velocity_env_cfg()
-  patch_cfg = PatchCfg() if low_friction_patches else None
-  curriculum_cfg = CurriculumCfg() if curriculum else None
 
   # -- scene ---------------------------------------------------------------
   robot = get_g1_ball_hands_cfg() if ball_hands else get_g1_cfg()
@@ -306,9 +294,7 @@ def make_g1_box_push_env_cfg(
   assert cfg.scene.terrain is not None
   cfg.scene.terrain.terrain_type = "plane"
   cfg.scene.terrain.terrain_generator = None
-  cfg.scene.spec_fn = (
-    edit_scene_spec_with_patches if low_friction_patches else edit_scene_spec
-  )
+  cfg.scene.spec_fn = edit_scene_spec
 
   sensors = [
     foot_height_sensor(),
@@ -347,7 +333,7 @@ def make_g1_box_push_env_cfg(
 
   # -- rewards / events / metrics ------------------------------------------
   cfg.rewards = build_box_push_rewards()
-  cfg.events = build_box_push_events(ranges, patch_cfg, curriculum_cfg)
+  cfg.events = build_box_push_events(ranges)
   cfg.metrics = build_box_push_metrics()
 
   # -- terminations --------------------------------------------------------
@@ -367,10 +353,7 @@ def make_g1_box_push_env_cfg(
     "nan_detection": TerminationTermCfg(func=envs_mdp.nan_detection),
   }
 
-  # -- curriculum ----------------------------------------------------------
   cfg.curriculum = {}
-  if curriculum_cfg is not None:
-    cfg.curriculum["box_push_levels"] = CurriculumTermCfg(func=box_mdp.box_push_levels)
 
   cfg.viewer.body_name = G1_TORSO_BODY
   # From behind the robot's right shoulder, looking along the push: robot, box

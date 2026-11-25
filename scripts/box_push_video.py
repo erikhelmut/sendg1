@@ -39,7 +39,6 @@ def main() -> None:
   ap.add_argument("--box-depth", type=float, default=None, help="m, along the push")
   ap.add_argument("--box-width", type=float, default=None)
   ap.add_argument("--box-height", type=float, default=None)
-  ap.add_argument("--patches", action="store_true", help="enable low-friction patches")
   ap.add_argument("--out", default=None)
   ap.add_argument("--width", type=int, default=1280)
   ap.add_argument("--height", type=int, default=720)
@@ -64,9 +63,7 @@ def main() -> None:
   device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
   _, obs_set = variants()[args.task]
-  env_cfg = make_g1_box_push_env_cfg(
-    obs_set, num_envs=1, low_friction_patches=args.patches
-  )
+  env_cfg = make_g1_box_push_env_cfg(obs_set, num_envs=1)
   env_cfg.seed = args.env_seed
   env_cfg.observations["proprio"].enable_corruption = False
   configure_video_view(env_cfg, args.width, args.height, args.theme)

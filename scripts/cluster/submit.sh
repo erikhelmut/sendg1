@@ -2,7 +2,7 @@
 # Sync a checkout to the cluster and queue one training run there.
 #
 #   scripts/cluster/submit.sh [--sbatch "<sbatch flags>"] <checkout> <train args...>
-#   scripts/cluster/submit.sh ~/sendg1 G1-Beam-Touch-Curved-Plain \
+#   scripts/cluster/submit.sh ~/sendg1 G1-Beam-Touch-Curved-LSTM \
 #     --agent.run-name touch_s1 --agent.seed 1
 #
 # <train args> go to mjlab's `train` unchanged; the job runs in the cluster

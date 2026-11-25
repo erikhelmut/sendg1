@@ -55,22 +55,15 @@ told where the box is.
   into before/after first box contact (VOFA's pre/post-contact failures),
   command tracking error, traction margin, box tipped, mean push force, share
   of push impulse in double support, floor mu, box mass, box mu.
-- **Flags** are separate registered tasks: `Sendg1-BoxPushCurriculum-G1-*`
-  (difficulty alpha: margin and floor mu grow from the easy corner when >= 50%
-  of a 512-episode window succeeds) and `Sendg1-BoxPushPatches-G1-*` (1-3
-  patches of mu 0.1-0.3 on the path -- the sharpest tactile test, since the
-  friction changes underfoot without warning).
 - **Throughput:** 4,096 envs, ~125k steps/s blind and ~110k with the tactile
   array on the 5070. The box's derived inertia constants are written
   analytically per reset; mjlab's generic `set_const` recomputes every world on
   every step and was 2.4x slower.
 
 ```bash
-python scripts/box_push_feasibility.py                 # margins and tipping of the ranges
 python scripts/box_push_video.py --random --episodes 4 # scene check
-python scripts/sweep.py --tasks box_push --obs-sets blind tactile --seeds 0 1 2
-python scripts/evaluate_box_push.py --task Sendg1-BoxPush-G1-Tactile --seed 0
-python scripts/plot_box_push_curves.py runs/box_push__tactile/<run> --out curves.png
+python scripts/sweep.py --tasks box_push               # blind + tactile, seed 1
+python scripts/evaluate_box_push.py --task Sendg1-BoxPush-G1-Tactile --seed 1
 ```
 
 Evaluation (`eval/box_push.py`): floor mu {0.25..0.70} x mass {10..40} kg, 32
