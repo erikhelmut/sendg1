@@ -63,7 +63,7 @@ def test_tactile_actor_uses_the_shared_sensor(task: str) -> None:
 def test_standard_actor_and_ppo(task: str) -> None:
   rl = load_rl_cfg(task)
   assert rl.actor == ppo.actor_cfg(), task
-  ref = ppo.ppo_cfg("x", rl.obs_groups, entropy_coef=0.0, max_iterations=1, save_interval=1)
+  ref = ppo.ppo_cfg("x", rl.obs_groups, entropy_coef=0.0, max_iterations=1)
   assert rl.critic == ref.critic, task
   assert rl.num_steps_per_env == ppo.ROLLOUT_STEPS == 24, task
   assert rl.algorithm.learning_rate == ppo.LEARNING_RATE == 4.0e-4, task

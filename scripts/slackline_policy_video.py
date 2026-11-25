@@ -6,7 +6,7 @@ runs until it times out, falls (held for a moment with the reason), or the
 clip's per-episode limit.
 
   uv run python scripts/slackline_policy_video.py \\
-    --checkpoint logs/rsl_rl/slackline_touch/<run>/model_19999.pt --level 0
+    --checkpoint logs/rsl_rl/slackline_touch/<run>/model_20000.pt --level 0
 """
 
 from __future__ import annotations

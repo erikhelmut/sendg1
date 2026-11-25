@@ -15,9 +15,8 @@ with ``scripts/beam_eval.py``.
 
 from __future__ import annotations
 
-from mjlab.tasks.registry import register_mjlab_task
-
 from sendg1.common.beam.terms import DEPLOYABLE, TERMS
+from sendg1.tasks._register import register_task
 from sendg1.tasks.beam.env_cfg import make_beam_env_cfg
 from sendg1.tasks.beam.rl_cfg import beam_ppo_cfg
 from sendg1.tasks.beam.runner import BeamRunner
@@ -49,8 +48,10 @@ for _task, _tactile, _experiment in _TASKS:
   for _suffix, _evaluation in (("", False), ("-Eval", True)):
     _env = make_beam_env_cfg(evaluation=_evaluation, **_kw)
     assert_actor_is_deployable(_env.observations)
-    register_mjlab_task(
-      task_id=_task + _suffix,
+    register_task(
+      _task + _suffix,
+      family="beam",
+      condition="tactile" if _tactile == "touch" else "blind",
       env_cfg=_env,
       play_env_cfg=make_beam_env_cfg(play=True, evaluation=_evaluation, **_kw),
       rl_cfg=beam_ppo_cfg(experiment_name=_experiment),

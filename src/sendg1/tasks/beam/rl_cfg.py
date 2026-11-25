@@ -28,6 +28,5 @@ def beam_ppo_cfg(
     {"actor": ("actor",), "critic": ("critic",)},
     entropy_coef=ENTROPY_COEF,
     max_iterations=max_iterations,
-    save_interval=500,
     seed=seed,
   )

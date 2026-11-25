@@ -15,8 +15,6 @@ from sendg1.seeds import FIRST_SEED
 
 ENTROPY_COEF = 0.01
 """mjlab's velocity default; box pushing halves it (``tasks/box_push``)."""
-SAVE_INTERVAL = 2000
-"""Iterations between checkpoints."""
 
 
 def build_ppo_cfg(
@@ -32,6 +30,5 @@ def build_ppo_cfg(
     obs_groups,
     entropy_coef=entropy_coef,
     max_iterations=max_iterations,
-    save_interval=SAVE_INTERVAL,
     seed=seed,
   )

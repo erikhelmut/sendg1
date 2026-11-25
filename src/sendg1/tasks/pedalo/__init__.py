@@ -12,10 +12,9 @@ tactile-vs-blind baseline.
 
 from __future__ import annotations
 
-from mjlab.tasks.registry import register_mjlab_task
-
 from sendg1.common.pedalo.terms import DEPLOYABLE, TERMS
 from sendg1.common.pedalo.variants import CLASSIC, SPORT
+from sendg1.tasks._register import register_task
 from sendg1.tasks.beam.rl_cfg import beam_ppo_cfg
 from sendg1.tasks.pedalo.env_cfg import make_pedalo_env_cfg
 
@@ -38,16 +37,18 @@ def assert_actor_is_deployable(observations: dict, groups: tuple[str, ...] = ("a
 
 
 _TASKS = (
-  # task, variant, blind, experiment
-  (TASK, CLASSIC, False, "pedalo_plain"),
-  (SPORT_TASK, SPORT, False, "pedalo_sport_plain"),
-  (SPORT_BLIND_TASK, SPORT, True, "pedalo_sport_blind"),
+  # task, variant, blind, experiment, family
+  (TASK, CLASSIC, False, "pedalo_plain", "pedalo_classic"),
+  (SPORT_TASK, SPORT, False, "pedalo_sport_plain", "pedalo_sport"),
+  (SPORT_BLIND_TASK, SPORT, True, "pedalo_sport_blind", "pedalo_sport"),
 )
-for _task, _variant, _blind, _experiment in _TASKS:
+for _task, _variant, _blind, _experiment, _family in _TASKS:
   _env = make_pedalo_env_cfg(variant=_variant, blind=_blind)
   assert_actor_is_deployable(_env.observations)
-  register_mjlab_task(
-    task_id=_task,
+  register_task(
+    _task,
+    family=_family,
+    condition="blind" if _blind else "tactile",
     env_cfg=_env,
     play_env_cfg=make_pedalo_env_cfg(play=True, variant=_variant, blind=_blind),
     rl_cfg=beam_ppo_cfg(experiment_name=_experiment),

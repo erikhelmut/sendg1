@@ -7,7 +7,8 @@ task automatically.
 
 from __future__ import annotations
 
-from typing import Callable
+from dataclasses import dataclass
+from typing import Callable, Literal
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlBaseRunnerCfg
@@ -21,6 +22,57 @@ RlCfgFactory = Callable[[str, dict], RslRlBaseRunnerCfg]
 
 _VARIANTS: dict[str, tuple[str, str]] = {}
 """task_id -> (base_id, obs_set). Lets scripts and tests enumerate the sweep."""
+
+Condition = Literal["blind", "tactile"]
+
+
+@dataclass(frozen=True)
+class TaskInfo:
+  """What a training run is, for its wandb run (``sendg1.common.runner``)."""
+
+  task_id: str
+  family: str
+  """The task the blind and tactile runs share, e.g. ``beam``, ``velocity_flat``."""
+  condition: Condition
+
+
+_TASK_INFO: dict[str, TaskInfo] = {}
+"""experiment_name -> TaskInfo. The runner knows only its config, whose
+experiment name is unique per (task, condition)."""
+
+
+def register_task(
+  task_id: str,
+  *,
+  family: str,
+  condition: Condition,
+  env_cfg: ManagerBasedRlEnvCfg,
+  play_env_cfg: ManagerBasedRlEnvCfg,
+  rl_cfg: RslRlBaseRunnerCfg,
+  runner_cls: type | None = None,
+) -> None:
+  """``register_mjlab_task`` with sendg1's runner and the run's identity.
+  ``-Eval`` twins share their training task's experiment, and its info."""
+  from sendg1.common.runner import Sendg1Runner
+
+  runner_cls = runner_cls or Sendg1Runner
+  if not issubclass(runner_cls, Sendg1Runner):
+    raise TypeError(f"{task_id}: runner {runner_cls.__name__} is not a Sendg1Runner")
+  register_mjlab_task(
+    task_id=task_id,
+    env_cfg=env_cfg,
+    play_env_cfg=play_env_cfg,
+    rl_cfg=rl_cfg,
+    runner_cls=runner_cls,
+  )
+  name = rl_cfg.experiment_name
+  info = TaskInfo(task_id.removesuffix("-Eval"), family, condition)
+  if _TASK_INFO.setdefault(name, info) != info:
+    raise ValueError(f"{task_id}: experiment {name!r} already belongs to {_TASK_INFO[name]}")
+
+
+def task_info(experiment_name: str) -> TaskInfo | None:
+  return _TASK_INFO.get(experiment_name)
 
 
 def _slug(obs_set: str) -> str:
@@ -69,7 +121,8 @@ def register_variants(
   *,
   experiment_prefix: str,
 ) -> None:
-  """Register one task id per observation set."""
+  """Register one task id per observation set; the family is the experiment
+  prefix (``velocity_flat``, ``box_push``)."""
   for obs_set_name, obs_set in OBS_SETS.items():
     task_id = f"{base_id}-{_slug(obs_set_name)}"
     env_cfg = env_cfg_factory(obs_set=obs_set_name, play=False)
@@ -81,8 +134,10 @@ def register_variants(
       f"{experiment_prefix}__{obs_set_name}",
       obs_set.obs_groups(),
     )
-    register_mjlab_task(
-      task_id=task_id,
+    register_task(
+      task_id,
+      family=experiment_prefix,
+      condition=obs_set_name,  # type: ignore[arg-type]
       env_cfg=env_cfg,
       play_env_cfg=play_cfg,
       rl_cfg=rl_cfg,

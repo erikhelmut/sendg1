@@ -9,9 +9,8 @@ the settings every task shares (``sendg1.common.ppo``).
 
 from __future__ import annotations
 
-from mjlab.tasks.registry import register_mjlab_task
-
 from sendg1.common.slackline.terms import DEPLOYABLE, TERMS
+from sendg1.tasks._register import register_task
 from sendg1.tasks.beam.rl_cfg import beam_ppo_cfg
 from sendg1.tasks.slackline.env_cfg import make_slackline_env_cfg
 
@@ -54,8 +53,10 @@ for _surface, _tactile in ((s, t) for s in SURFACE_TASKS for t in (True, False))
   )
   _env = make_slackline_env_cfg(tactile=_tactile, surface=_surface)
   assert_actor_is_deployable(_env.observations)
-  register_mjlab_task(
-    task_id=_task,
+  register_task(
+    _task,
+    family="slackline" if _surface == "box" else f"slackline_{_surface}",
+    condition="tactile" if _tactile else "blind",
     env_cfg=_env,
     play_env_cfg=make_slackline_env_cfg(play=True, tactile=_tactile, surface=_surface),
     rl_cfg=beam_ppo_cfg(
@@ -67,8 +68,10 @@ for _tactile, _task in BALANCE_TASKS.items():
   _kw = {"tactile": _tactile, "contact": "stiff", "balance_only": True}
   _env = make_slackline_env_cfg(**_kw)
   assert_actor_is_deployable(_env.observations)
-  register_mjlab_task(
-    task_id=_task,
+  register_task(
+    _task,
+    family="slackline_balance",
+    condition="tactile" if _tactile else "blind",
     env_cfg=_env,
     play_env_cfg=make_slackline_env_cfg(play=True, **_kw),
     rl_cfg=beam_ppo_cfg(

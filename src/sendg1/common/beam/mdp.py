@@ -77,8 +77,10 @@ PUSH_FROM_LEVEL = BEAM_WIDTHS.index(0.15)
 TRACK_FRAC = 0.7
 WALK_MIN_DIST = 0.5
 """Commanded distance (m) below which an episode counts as standing."""
-COM_MIN_SIGMA = 0.12
-"""Floor (m) of ``com_over_support``'s width, reached on beams under ~0.5 m."""
+COM_MIN_SIGMA = 0.035
+"""Floor (m) of ``com_over_support``'s width, reached on beams under 0.14 m.
+It was 0.12 m until 2026-11-25, which made the width a constant 12 cm on every
+beam (a quarter of the widest, 0.40 m, is 10 cm), contrary to the docs."""
 
 
 REPLAY_SHARE = 0.2

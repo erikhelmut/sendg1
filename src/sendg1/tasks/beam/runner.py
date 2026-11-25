@@ -7,15 +7,14 @@ widest beam and spent its first thousands of iterations climbing again.
 
 from __future__ import annotations
 
-from mjlab.rl import MjlabOnPolicyRunner
-
 from sendg1.common.beam import mdp
+from sendg1.common.runner import Sendg1Runner
 
 
-class BeamRunner(MjlabOnPolicyRunner):
-  def save(self, path: str, infos=None) -> None:
+class BeamRunner(Sendg1Runner):
+  def checkpoint_infos(self) -> dict:
     state = mdp.curriculum_state(self.env.unwrapped)
-    super().save(path, {**(infos or {}), **({"beam_curriculum": state} if state else {})})
+    return {"beam_curriculum": state} if state else {}
 
   def load(self, path: str, load_cfg=None, strict: bool = True, map_location=None) -> dict:
     infos = super().load(path, load_cfg, strict, map_location)

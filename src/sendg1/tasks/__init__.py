@@ -8,13 +8,12 @@ mjlab's own ``train`` / ``play`` / ``list-envs`` CLIs see them.
 Adding task N+1: create the directory, add one import line here.
 """
 
-import sendg1.tasks.velocity  # noqa: F401
 import sendg1.tasks.beam  # noqa: F401
 import sendg1.tasks.box_push  # noqa: F401
 import sendg1.tasks.pedalo  # noqa: F401
 import sendg1.tasks.rolling_cylinder  # noqa: F401
 import sendg1.tasks.slackline  # noqa: F401
-
+import sendg1.tasks.velocity  # noqa: F401
 from sendg1.tasks._register import variants  # noqa: E402
 
 __all__ = ["variants"]

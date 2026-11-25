@@ -38,6 +38,9 @@ ROLLOUT_STEPS = 24
 """Steps per env per update, and the LSTM's truncated-BPTT window (0.48 s)."""
 LEARNING_RATE = 4.0e-4
 """Start of the adaptive (KL-targeted) schedule."""
+SAVE_EVERY = 5000
+"""Checkpoint every this many iterations, named by iterations done
+(``model_5000.pt`` ... ``model_20000.pt``); see ``sendg1.common.runner``."""
 NUM_MINI_BATCHES = 8
 NUM_LEARNING_EPOCHS = 5
 DESIRED_KL = 0.01
@@ -64,7 +67,6 @@ def ppo_cfg(
   *,
   entropy_coef: float,
   max_iterations: int,
-  save_interval: int,
   seed: int = FIRST_SEED,
 ) -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(
@@ -90,7 +92,7 @@ def ppo_cfg(
     ),
     experiment_name=experiment_name,
     run_name=f"seed{seed}",
-    save_interval=save_interval,
+    save_interval=SAVE_EVERY,
     num_steps_per_env=ROLLOUT_STEPS,
     max_iterations=max_iterations,
     logger="wandb",

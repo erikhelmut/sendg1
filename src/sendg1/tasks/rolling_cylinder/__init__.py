@@ -10,9 +10,8 @@ settings every task shares (``sendg1.common.ppo``).
 
 from __future__ import annotations
 
-from mjlab.tasks.registry import register_mjlab_task
-
 from sendg1.common.rolling_cylinder.terms import DEPLOYABLE, TERMS
+from sendg1.tasks._register import register_task
 from sendg1.tasks.beam.rl_cfg import beam_ppo_cfg
 from sendg1.tasks.rolling_cylinder.env_cfg import make_rolling_cylinder_env_cfg
 
@@ -41,8 +40,10 @@ for _task, _tactile, _experiment in (
 ):
   _env = make_rolling_cylinder_env_cfg(tactile=_tactile)
   assert_actor_is_deployable(_env.observations)
-  register_mjlab_task(
-    task_id=_task,
+  register_task(
+    _task,
+    family="rolling_cylinder",
+    condition="tactile" if _tactile else "blind",
     env_cfg=_env,
     play_env_cfg=make_rolling_cylinder_env_cfg(play=True, tactile=_tactile),
     rl_cfg=beam_ppo_cfg(
